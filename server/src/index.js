@@ -1,4 +1,5 @@
 import express from 'express';
+import { requestLogger } from "./requestLogger.js";
 import cors from 'cors';
 import session from 'express-session';
 import sqliteStoreFactory from 'better-sqlite3-session-store';
@@ -44,6 +45,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '5mb' }));
+app.use(requestLogger);
 
 // Trust proxy for correct IP in audit logs
 app.set('trust proxy', 1);
