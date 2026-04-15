@@ -1,0 +1,9 @@
+tunnel: YOUR_TUNNEL_ID
+credentials-file: ~/.cloudflared/YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: qms.kefirkultures.com
+    service: http://localhost:5174
+  - hostname: api.qms.kefirkultures.com  
+    service: http://localhost:3002
+  - service: http_status:404

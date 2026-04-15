@@ -1,0 +1,166 @@
+import express from 'express';
+import cors from 'cors';
+import session from 'express-session';
+import sqliteStoreFactory from 'better-sqlite3-session-store';
+import { createServer } from 'http';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+import Database from 'better-sqlite3';
+import routes from './routes.js';
+import complaintRoutes from './complaintRoutes.js';
+import authRoutes from './authRoutes.js';
+import auditRoutes from './auditRoutes.js';
+import fileRoutes from './fileRoutes.js';
+import simpleDocRoutes from './simpleDocRoutes.js';
+import adminRoutes from './adminRoutes.js';
+import batchTestRoutes from './batchTestRoutes.js';
+import dailyTaskRoutes from './dailyTaskRoutes.js';
+import formRoutes from './formRoutes.js';
+import taskboardRoutes from './taskboardRoutes.js';import plannerRoutes from './plannerRoutes.js';
+import { setupWebSocket } from './websocket.js';
+import { requireAuth } from './authMiddleware.js';
+import { auditApiMiddleware } from './auditMiddleware.js';
+import { repairSOPDocuments } from './sopDocumentRepair.js';
+import { validateNumericParams } from './validateId.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const app = express();
+const server = createServer(app);
+const PORT = process.env.PORT || 3002;
+
+// Session store
+const SqliteStore = sqliteStoreFactory(session);
+const sessionDataDir = process.env.KKI_DATA_DIR || join(__dirname, '..', 'data');
+const sessionDb = new Database(join(sessionDataDir, 'sessions.db'));
+
+// Middleware
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow all origins for API integration (dev + cloudflare tunnels)
+    callback(null, true);
+  },
+  credentials: true,
+}));
+app.use(express.json({ limit: '5mb' }));
+
+// Trust proxy for correct IP in audit logs
+app.set('trust proxy', 1);
+
+// Session middleware
+app.use(session({
+  store: new SqliteStore({
+    client: sessionDb,
+    expired: { clear: true, intervalMs: 900000 }, // Clear expired sessions every 15 min
+  }),
+  secret: process.env.SESSION_SECRET || 'kki-qms-session-secret-2026',
+  name: 'qms.sid',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    httpOnly: true,
+    secure: false, // Set to true in production with HTTPS
+    sameSite: 'lax',
+  },
+}));
+
+// Validate numeric ID parameters globally to prevent injection/crash on string IDs.
+// Catches any /api/.../:id or /api/.../:id/... pattern where :id segment should be numeric.
+app.use('/api', (req, res, next) => {
+  // Extract path segments and check common ID patterns
+  const segments = req.path.split('/').filter(Boolean);
+  // Check segments that follow known resource names (sops, complaints, ccrs, users, documents, audit, files)
+  const resources = ['sops', 'complaints', 'ccrs', 'users', 'documents', 'audit', 'files', 'corrective-actions', 'batch-tests', 'daily-tasks', 'sop-forms'];
+  for (let i = 0; i < segments.length - 1; i++) {
+    if (resources.includes(segments[i])) {
+      const idSegment = segments[i + 1];
+      // Skip known sub-paths that aren't IDs
+      if (['analytics', 'upload', 'by-lot', 'bulk-read-content', 'status', 'admin', 'completions', 'templates', 'results', 'verify', 'bulk', 'summary', 'fields', 'entries', 'forms', 'operators', 'export', 'admin-override', 'unlock', 'load'].includes(idSegment)) continue;
+      if (!/^\d+$/.test(idSegment)) {
+        return res.status(400).json({ error: `Invalid ID '${idSegment}': must be a numeric value` });
+      }
+    }
+  }
+  next();
+});
+
+// Taskboard routes (no auth — standalone Cloudflare Pages board)
+app.use('/api/taskboard', (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && (origin.endsWith('.pages.dev') || origin.includes('localhost'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+app.use('/api/taskboard', taskboardRoutes);
+
+// Planner routes (no auth — standalone Cloudflare Pages planner)
+app.use('/api/planner', (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && (origin.endsWith('.pages.dev') || origin.includes('localhost'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+app.use('/api/planner', plannerRoutes);
+
+// Auth routes (no auth required for login)
+app.use('/api', authRoutes);
+
+// Audit API middleware (auto-logs mutations)
+app.use('/api', auditApiMiddleware);
+
+// Protected API routes - require auth
+app.use('/api', requireAuth, routes);
+app.use('/api', requireAuth, complaintRoutes);
+app.use('/api', requireAuth, auditRoutes);
+app.use('/api', requireAuth, fileRoutes);
+app.use('/api', requireAuth, simpleDocRoutes);
+app.use('/api', requireAuth, adminRoutes);
+app.use('/api', requireAuth, batchTestRoutes);
+app.use('/api', requireAuth, dailyTaskRoutes);
+app.use('/api', requireAuth, formRoutes);
+
+// Global error handler — prevent stack trace leaks
+app.use((err, req, res, _next) => {
+  // Handle multer errors gracefully
+  if (err.name === 'MulterError' || err.message?.includes('Only PDF')) {
+    return res.status(400).json({ error: err.message });
+  }
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// Serve static files in production
+const clientDist = join(__dirname, '..', '..', 'client', 'dist');
+app.use(express.static(clientDist));
+app.get('*', (req, res) => {
+  if (!req.path.startsWith('/api')) {
+    res.sendFile(join(clientDist, 'index.html'));
+  }
+});
+
+// WebSocket
+setupWebSocket(server);
+
+// Start server
+server.listen(PORT, '0.0.0.0', async () => {
+  console.log(`KKI QMS Server running on http://0.0.0.0:${PORT}`);
+  
+  // Run SOP document repair on startup
+  try {
+    await repairSOPDocuments();
+  } catch (error) {
+    console.error('Startup repair failed:', error);
+  }
+});
+
+export default app;

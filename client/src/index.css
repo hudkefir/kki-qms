@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Print styles */
+@media print {
+  nav,
+  .sidebar,
+  .no-print {
+    display: none !important;
+  }
+
+  .main-content {
+    margin-left: 0 !important;
+    padding: 0 !important;
+  }
+
+  body {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-break {
+    page-break-before: always;
+  }
+
+  .print-break-inside-avoid {
+    page-break-inside: avoid;
+  }
+
+  .print-daily-tasks {
+    font-size: 11pt;
+    line-height: 1.4;
+    color: #000;
+  }
+
+  .print-daily-tasks table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .print-daily-tasks th,
+  .print-daily-tasks td {
+    border-bottom: 1px solid #ccc;
+    padding: 4px 6px;
+    text-align: left;
+  }
+
+  .print-daily-tasks th {
+    border-bottom: 2px solid #666;
+    font-weight: 600;
+  }
+}

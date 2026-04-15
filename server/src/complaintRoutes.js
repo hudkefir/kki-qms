@@ -1,0 +1,639 @@
+import { Router } from 'express';
+import db from './database.js';
+import { broadcast } from './websocket.js';
+import { requireWriteAccess, requireRole } from './authMiddleware.js';
+import { logAudit } from './auditMiddleware.js';
+import { sanitizeBody } from './sanitize.js';
+
+const router = Router();
+
+// ==================== COMPLAINTS ====================
+
+// GET /api/complaints
+router.get('/complaints', (req, res) => {
+  try {
+    const { status, severity, product_sku, source, lot_number, search, date_from, date_to } = req.query;
+    let query = 'SELECT * FROM complaints WHERE 1=1';
+    const params = [];
+
+    if (status) { query += ' AND status = ?'; params.push(status); }
+    if (severity) { query += ' AND severity = ?'; params.push(severity); }
+    if (product_sku) { query += ' AND product_sku = ?'; params.push(product_sku); }
+    if (source) { query += ' AND source LIKE ?'; params.push(`%${source}%`); }
+    if (lot_number) { query += ' AND lot_number = ?'; params.push(lot_number); }
+    if (date_from) { query += ' AND date_received >= ?'; params.push(date_from); }
+    if (date_to) { query += ' AND date_received <= ?'; params.push(date_to); }
+    if (search) {
+      query += ' AND (complaint_number LIKE ? OR description LIKE ? OR reporter LIKE ? OR store_location LIKE ? OR lot_number LIKE ? OR product_name LIKE ?)';
+      const s = `%${search}%`;
+      params.push(s, s, s, s, s, s);
+    }
+
+    query += ' ORDER BY date_received DESC, id DESC';
+    const complaints = db.prepare(query).all(...params);
+    res.json(complaints);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/complaints/analytics
+router.get('/complaints/analytics', (req, res) => {
+  try {
+    const byProduct = db.prepare(`
+      SELECT product_name, product_sku, COUNT(*) as count
+      FROM complaints GROUP BY product_sku ORDER BY count DESC
+    `).all();
+
+    const byIssueType = db.prepare(`
+      SELECT issue_type, COUNT(*) as count
+      FROM complaints GROUP BY issue_type ORDER BY count DESC
+    `).all();
+
+    const bySource = db.prepare(`
+      SELECT source, COUNT(*) as count
+      FROM complaints GROUP BY source ORDER BY count DESC
+    `).all();
+
+    const bySeverity = db.prepare(`
+      SELECT severity, COUNT(*) as count
+      FROM complaints GROUP BY severity ORDER BY count DESC
+    `).all();
+
+    const byStatus = db.prepare(`
+      SELECT status, COUNT(*) as count
+      FROM complaints GROUP BY status ORDER BY count DESC
+    `).all();
+
+    const byMonth = db.prepare(`
+      SELECT strftime('%Y-%m', date_received) as month, COUNT(*) as count
+      FROM complaints GROUP BY month ORDER BY month
+    `).all();
+
+    const byLot = db.prepare(`
+      SELECT lot_number, product_name, product_sku, COUNT(*) as count, GROUP_CONCAT(complaint_number) as complaint_numbers
+      FROM complaints WHERE lot_number != '' GROUP BY lot_number ORDER BY count DESC
+    `).all();
+
+    const totalOpen = db.prepare("SELECT COUNT(*) as count FROM complaints WHERE status NOT IN ('resolved','closed')").get().count;
+    const totalAll = db.prepare('SELECT COUNT(*) as count FROM complaints').get().count;
+    const totalResolved = db.prepare("SELECT COUNT(*) as count FROM complaints WHERE status IN ('resolved','closed')").get().count;
+
+    // Average resolution time (for resolved/closed complaints)
+    const avgResolution = db.prepare(`
+      SELECT AVG(julianday(updated_at) - julianday(date_received)) as avg_days
+      FROM complaints WHERE status IN ('resolved','closed')
+    `).get();
+
+    res.json({
+      byProduct, byIssueType, bySource, bySeverity, byStatus, byMonth, byLot,
+      totalOpen, totalAll, totalResolved,
+      avgResolutionDays: avgResolution?.avg_days ? Math.round(avgResolution.avg_days) : null,
+    });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/complaints/by-lot/:lot
+router.get('/complaints/by-lot/:lot', (req, res) => {
+  try {
+    const complaints = db.prepare('SELECT * FROM complaints WHERE lot_number = ? ORDER BY date_received DESC').all(req.params.lot);
+    res.json(complaints);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/complaints/:id
+router.get('/complaints/:id', (req, res) => {
+  try {
+    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+
+    // Get linked CCR info if exists
+    let linkedCCR = null;
+    if (complaint.linked_ccr_id) {
+      linkedCCR = db.prepare('SELECT id, ccr_number, title, status FROM ccrs WHERE id = ?').get(complaint.linked_ccr_id);
+    }
+
+    res.json({ ...complaint, linkedCCR });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/complaints
+router.post('/complaints', requireWriteAccess, (req, res) => {
+  try {
+    const sanitized = sanitizeBody(req.body);
+    const {
+      date_received, source = '', reporter = '', store_location = '',
+      product_sku = '', product_name = '', lot_number = '', best_before = '',
+      quantity_affected = 0, issue_type = '', severity = 'low',
+      description = '', status = 'open'
+    } = sanitized;
+
+    if (!date_received) return res.status(400).json({ error: 'date_received is required' });
+
+    const validSeverities = ['low', 'medium', 'high', 'critical'];
+    if (!validSeverities.includes(severity)) {
+      return res.status(400).json({ error: `Invalid severity. Must be one of: ${validSeverities.join(', ')}` });
+    }
+
+    // Generate complaint number
+    const year = new Date(date_received).getFullYear();
+    const lastInYear = db.prepare(
+      "SELECT complaint_number FROM complaints WHERE complaint_number LIKE ? ORDER BY complaint_number DESC LIMIT 1"
+    ).get(`KK-CMP-${year}-%`);
+
+    let seq = 1;
+    if (lastInYear) {
+      const parts = lastInYear.complaint_number.split('-');
+      seq = parseInt(parts[3], 10) + 1;
+    }
+    const complaint_number = `KK-CMP-${year}-${String(seq).padStart(3, '0')}`;
+
+    const sessionUser = req.session?.user;
+    const createdBy = sessionUser?.display_name || sessionUser?.username || '';
+
+    const info = db.prepare(`
+      INSERT INTO complaints (complaint_number, date_received, source, reporter, store_location, product_sku, product_name, lot_number, best_before, quantity_affected, issue_type, severity, description, status, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(complaint_number, date_received, source, reporter, store_location, product_sku, product_name, lot_number, best_before, quantity_affected, issue_type, severity, description, status, createdBy);
+
+    const created = db.prepare('SELECT * FROM complaints WHERE id = ?').get(info.lastInsertRowid);
+    logAudit(req, 'create_complaints', 'complaints', created.id, complaint_number, { new_values: { complaint_number, date_received, source, reporter, product_name, lot_number, severity, status } });
+    broadcast('complaint_created', created);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/complaints/:id
+router.put('/complaints/:id', requireWriteAccess, (req, res) => {
+  try {
+    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+
+    const sanitized = sanitizeBody(req.body);
+    const fields = [
+      'date_received', 'source', 'reporter', 'store_location', 'product_sku',
+      'product_name', 'lot_number', 'best_before', 'quantity_affected',
+      'issue_type', 'severity', 'description', 'status', 'linked_ccr_id'
+    ];
+
+    const updates = [];
+    const params = [];
+    for (const field of fields) {
+      if (sanitized[field] !== undefined) {
+        updates.push(`${field} = ?`);
+        params.push(sanitized[field]);
+      }
+    }
+
+    // User attribution
+    const sessionUser = req.session?.user;
+    updates.push('updated_by = ?');
+    params.push(sessionUser?.display_name || sessionUser?.username || '');
+
+    updates.push("updated_at = datetime('now')");
+
+    if (updates.length === 2) return res.json(complaint); // only updated_by + updated_at = no real change
+
+    params.push(req.params.id);
+    db.prepare(`UPDATE complaints SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+
+    const updated = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+
+    // Audit log with old/new values
+    const oldVals = {};
+    const newVals = {};
+    for (const field of fields) {
+      if (sanitized[field] !== undefined && sanitized[field] !== complaint[field]) {
+        oldVals[field] = complaint[field];
+        newVals[field] = sanitized[field];
+      }
+    }
+    if (Object.keys(oldVals).length > 0) {
+      logAudit(req, 'update_complaints', 'complaints', req.params.id, complaint.complaint_number, { old_values: oldVals, new_values: newVals });
+    }
+
+    broadcast('complaint_updated', updated);
+    res.json(updated);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/complaints/:id (admin only)
+router.delete('/complaints/:id', requireRole('admin'), (req, res) => {
+  try {
+    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+
+    db.prepare('DELETE FROM ccr_complaints WHERE complaint_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM complaints WHERE id = ?').run(req.params.id);
+    logAudit(req, 'delete_complaints', 'complaints', req.params.id, complaint.complaint_number, { old_values: complaint });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==================== CCRs ====================
+
+// GET /api/ccrs
+router.get('/ccrs', (req, res) => {
+  try {
+    const { status, search } = req.query;
+    let query = 'SELECT * FROM ccrs WHERE 1=1';
+    const params = [];
+
+    if (status) { query += ' AND status = ?'; params.push(status); }
+    if (search) {
+      query += ' AND (ccr_number LIKE ? OR title LIKE ? OR recipient_company LIKE ?)';
+      const s = `%${search}%`;
+      params.push(s, s, s);
+    }
+
+    query += ' ORDER BY date_created DESC';
+    const ccrs = db.prepare(query).all(...params);
+
+    // Enrich with complaint count and action stats
+    const enriched = ccrs.map(ccr => {
+      const complaintCount = db.prepare('SELECT COUNT(*) as count FROM ccr_complaints WHERE ccr_id = ?').get(ccr.id).count;
+      const actions = db.prepare('SELECT * FROM corrective_actions WHERE ccr_id = ?').all(ccr.id);
+      const totalActions = actions.length;
+      const completedActions = actions.filter(a => a.status === 'completed').length;
+      const overdueActions = actions.filter(a => a.status === 'overdue' || (a.target_date && a.status !== 'completed' && new Date(a.target_date) < new Date())).length;
+
+      return { ...ccr, complaintCount, totalActions, completedActions, overdueActions };
+    });
+
+    res.json(enriched);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/ccrs/:id
+router.get('/ccrs/:id', (req, res) => {
+  try {
+    const ccr = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    if (!ccr) return res.status(404).json({ error: 'CCR not found' });
+
+    const complaints = db.prepare(`
+      SELECT c.* FROM complaints c
+      JOIN ccr_complaints cc ON c.id = cc.complaint_id
+      WHERE cc.ccr_id = ?
+      ORDER BY c.date_received DESC
+    `).all(req.params.id);
+
+    const actions = db.prepare('SELECT * FROM corrective_actions WHERE ccr_id = ? ORDER BY id').all(req.params.id);
+
+    res.json({
+      ...ccr,
+      root_causes: JSON.parse(ccr.root_causes || '[]'),
+      preventive_measures: JSON.parse(ccr.preventive_measures || '[]'),
+      complaints,
+      actions,
+    });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/ccrs
+router.post('/ccrs', requireWriteAccess, (req, res) => {
+  try {
+    const {
+      title, date_created, status = 'draft',
+      recipient_company = '', recipient_contact = '', recipient_email = '',
+      root_causes = [], preventive_measures = [],
+      target_resolution_date = null, notes = '', complaint_ids = []
+    } = req.body;
+
+    if (!title) return res.status(400).json({ error: 'title is required' });
+
+    const year = new Date(date_created || Date.now()).getFullYear();
+    const lastInYear = db.prepare(
+      "SELECT ccr_number FROM ccrs WHERE ccr_number LIKE ? ORDER BY ccr_number DESC LIMIT 1"
+    ).get(`KK-CCR-${year}-%`);
+
+    let seq = 1;
+    if (lastInYear) {
+      const parts = lastInYear.ccr_number.split('-');
+      seq = parseInt(parts[3], 10) + 1;
+    }
+    const ccr_number = `KK-CCR-${year}-${String(seq).padStart(3, '0')}`;
+
+    const sessionUser = req.session?.user;
+    const createdBy = sessionUser?.display_name || sessionUser?.username || '';
+
+    const createCCR = db.transaction(() => {
+      const info = db.prepare(`
+        INSERT INTO ccrs (ccr_number, title, date_created, status, recipient_company, recipient_contact, recipient_email, root_causes, preventive_measures, target_resolution_date, notes, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(ccr_number, title, date_created || new Date().toISOString().slice(0, 10), status, recipient_company, recipient_contact, recipient_email, JSON.stringify(root_causes), JSON.stringify(preventive_measures), target_resolution_date, notes, createdBy);
+
+      const ccrId = info.lastInsertRowid;
+
+      // Link complaints
+      const linkStmt = db.prepare('INSERT INTO ccr_complaints (ccr_id, complaint_id) VALUES (?, ?)');
+      const updateCmpl = db.prepare('UPDATE complaints SET linked_ccr_id = ? WHERE id = ?');
+      for (const cId of complaint_ids) {
+        linkStmt.run(ccrId, cId);
+        updateCmpl.run(ccrId, cId);
+      }
+
+      return ccrId;
+    });
+
+    const ccrId = createCCR();
+    const created = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(ccrId);
+    logAudit(req, 'create_ccrs', 'ccrs', ccrId, ccr_number, { new_values: { ccr_number, title, status, recipient_company, complaint_ids } });
+    broadcast('ccr_created', created);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/ccrs/:id
+router.put('/ccrs/:id', requireWriteAccess, (req, res) => {
+  try {
+    const ccr = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    if (!ccr) return res.status(404).json({ error: 'CCR not found' });
+
+    const fields = [
+      'title', 'date_created', 'status', 'recipient_company', 'recipient_contact',
+      'recipient_email', 'target_resolution_date', 'actual_resolution_date', 'notes'
+    ];
+
+    const updates = [];
+    const params = [];
+    for (const field of fields) {
+      if (req.body[field] !== undefined) {
+        updates.push(`${field} = ?`);
+        params.push(req.body[field]);
+      }
+    }
+
+    // Handle JSON fields
+    if (req.body.root_causes !== undefined) {
+      updates.push('root_causes = ?');
+      params.push(JSON.stringify(req.body.root_causes));
+    }
+    if (req.body.preventive_measures !== undefined) {
+      updates.push('preventive_measures = ?');
+      params.push(JSON.stringify(req.body.preventive_measures));
+    }
+
+    // User attribution
+    const sessionUser = req.session?.user;
+    updates.push('updated_by = ?');
+    params.push(sessionUser?.display_name || sessionUser?.username || '');
+
+    updates.push("updated_at = datetime('now')");
+    if (updates.length === 2) return res.json(ccr); // only updated_by + updated_at = no real change
+
+    params.push(req.params.id);
+    db.prepare(`UPDATE ccrs SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+
+    const updated = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+
+    // Audit log with old/new values
+    const ccrOld = {};
+    const ccrNew = {};
+    for (const field of fields) {
+      if (req.body[field] !== undefined && req.body[field] !== ccr[field]) {
+        ccrOld[field] = ccr[field];
+        ccrNew[field] = req.body[field];
+      }
+    }
+    if (req.body.root_causes !== undefined) { ccrOld.root_causes = ccr.root_causes; ccrNew.root_causes = JSON.stringify(req.body.root_causes); }
+    if (req.body.preventive_measures !== undefined) { ccrOld.preventive_measures = ccr.preventive_measures; ccrNew.preventive_measures = JSON.stringify(req.body.preventive_measures); }
+    if (Object.keys(ccrOld).length > 0) {
+      logAudit(req, 'update_ccrs', 'ccrs', req.params.id, ccr.ccr_number, { old_values: ccrOld, new_values: ccrNew });
+    }
+
+    broadcast('ccr_updated', updated);
+    res.json(updated);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/ccrs/:id/complaints - link complaints to CCR
+router.post('/ccrs/:id/complaints', requireWriteAccess, (req, res) => {
+  try {
+    const ccr = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    if (!ccr) return res.status(404).json({ error: 'CCR not found' });
+
+    const { complaint_ids = [] } = req.body;
+    const linkStmt = db.prepare('INSERT OR IGNORE INTO ccr_complaints (ccr_id, complaint_id) VALUES (?, ?)');
+    const updateCmpl = db.prepare('UPDATE complaints SET linked_ccr_id = ? WHERE id = ?');
+
+    for (const cId of complaint_ids) {
+      linkStmt.run(req.params.id, cId);
+      updateCmpl.run(req.params.id, cId);
+    }
+
+    const complaints = db.prepare(`
+      SELECT c.* FROM complaints c JOIN ccr_complaints cc ON c.id = cc.complaint_id WHERE cc.ccr_id = ?
+    `).all(req.params.id);
+
+    logAudit(req, 'link_complaints', 'ccrs', req.params.id, ccr.ccr_number, { new_values: { linked_complaint_ids: complaint_ids } });
+    res.json(complaints);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/ccrs/:id/actions
+router.get('/ccrs/:id/actions', (req, res) => {
+  try {
+    const actions = db.prepare('SELECT * FROM corrective_actions WHERE ccr_id = ? ORDER BY id').all(req.params.id);
+    res.json(actions);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/ccrs/:id/actions
+router.post('/ccrs/:id/actions', requireWriteAccess, (req, res) => {
+  try {
+    const ccr = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    if (!ccr) return res.status(404).json({ error: 'CCR not found' });
+
+    const { description, responsible = '', target_date = null, status = 'pending', notes = '' } = req.body;
+    if (!description) return res.status(400).json({ error: 'description is required' });
+
+    const sessionUser = req.session?.user;
+    const createdBy = sessionUser?.display_name || sessionUser?.username || '';
+
+    const info = db.prepare(`
+      INSERT INTO corrective_actions (ccr_id, description, responsible, target_date, status, notes, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(req.params.id, description, responsible, target_date, status, notes, createdBy);
+
+    const created = db.prepare('SELECT * FROM corrective_actions WHERE id = ?').get(info.lastInsertRowid);
+    logAudit(req, 'create_action', 'corrective_actions', created.id, ccr.ccr_number, { new_values: { ccr_id: req.params.id, description, responsible, target_date, status } });
+    broadcast('action_created', { ...created, ccr_number: ccr.ccr_number });
+    res.status(201).json(created);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/ccrs/:id/actions/:actionId
+router.put('/ccrs/:id/actions/:actionId', requireWriteAccess, (req, res) => {
+  try {
+    const action = db.prepare('SELECT * FROM corrective_actions WHERE id = ? AND ccr_id = ?').get(req.params.actionId, req.params.id);
+    if (!action) return res.status(404).json({ error: 'Action not found' });
+
+    const fields = ['description', 'responsible', 'target_date', 'completion_date', 'status', 'notes'];
+    const updates = [];
+    const params = [];
+
+    for (const field of fields) {
+      if (req.body[field] !== undefined) {
+        updates.push(`${field} = ?`);
+        params.push(req.body[field]);
+      }
+    }
+
+    // User attribution
+    const sessionUser = req.session?.user;
+    updates.push('updated_by = ?');
+    params.push(sessionUser?.display_name || sessionUser?.username || '');
+
+    updates.push("updated_at = datetime('now')");
+    if (updates.length === 2) return res.json(action); // only updated_by + updated_at = no real change
+
+    params.push(req.params.actionId);
+    db.prepare(`UPDATE corrective_actions SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+
+    const updated = db.prepare('SELECT * FROM corrective_actions WHERE id = ?').get(req.params.actionId);
+
+    // Audit log with old/new values
+    const actOld = {};
+    const actNew = {};
+    for (const field of fields) {
+      if (req.body[field] !== undefined && req.body[field] !== action[field]) {
+        actOld[field] = action[field];
+        actNew[field] = req.body[field];
+      }
+    }
+    if (Object.keys(actOld).length > 0) {
+      logAudit(req, 'update_action', 'corrective_actions', req.params.actionId, action.description?.slice(0, 60), { old_values: actOld, new_values: actNew });
+    }
+
+    broadcast('action_updated', updated);
+    res.json(updated);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/ccrs/:id (admin only)
+router.delete('/ccrs/:id', requireRole('admin'), (req, res) => {
+  try {
+    const ccr = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    if (!ccr) return res.status(404).json({ error: 'CCR not found' });
+
+    db.prepare('DELETE FROM ccr_complaints WHERE ccr_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM corrective_actions WHERE ccr_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM ccrs WHERE id = ?').run(req.params.id);
+    logAudit(req, 'delete_ccrs', 'ccrs', req.params.id, ccr.ccr_number, { old_values: ccr });
+    res.json({ success: true, message: `CCR ${ccr.ccr_number} deleted` });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/ccrs/:id/actions/:actionId (admin only)
+router.delete('/ccrs/:id/actions/:actionId', requireRole('admin'), (req, res) => {
+  try {
+    const action = db.prepare('SELECT * FROM corrective_actions WHERE id = ? AND ccr_id = ?').get(req.params.actionId, req.params.id);
+    if (!action) return res.status(404).json({ error: 'Action not found' });
+
+    db.prepare('DELETE FROM corrective_actions WHERE id = ?').run(req.params.actionId);
+    logAudit(req, 'delete_action', 'corrective_actions', req.params.actionId, action.description?.slice(0, 60), { old_values: action });
+    res.json({ success: true, message: 'Corrective action deleted' });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==================== QA DASHBOARD ====================
+
+// GET /api/qa-dashboard
+router.get('/qa-dashboard', (req, res) => {
+  try {
+    // Complaint stats
+    const totalComplaints = db.prepare('SELECT COUNT(*) as count FROM complaints').get().count;
+    const openComplaints = db.prepare("SELECT COUNT(*) as count FROM complaints WHERE status NOT IN ('resolved','closed')").get().count;
+
+    const complaintsBySeverity = db.prepare(`
+      SELECT severity, COUNT(*) as count FROM complaints GROUP BY severity
+    `).all();
+
+    const complaintsByProduct = db.prepare(`
+      SELECT product_name, product_sku, COUNT(*) as count FROM complaints GROUP BY product_sku ORDER BY count DESC
+    `).all();
+
+    // Trend data - last 6 months
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const complaintTrend = db.prepare(`
+      SELECT strftime('%Y-%m', date_received) as month, COUNT(*) as count
+      FROM complaints WHERE date_received >= ?
+      GROUP BY month ORDER BY month
+    `).all(sixMonthsAgo.toISOString().slice(0, 10));
+
+    // CCR stats
+    const totalCCRs = db.prepare('SELECT COUNT(*) as count FROM ccrs').get().count;
+    const openCCRs = db.prepare("SELECT COUNT(*) as count FROM ccrs WHERE status NOT IN ('closed')").get().count;
+
+    const overdueActions = db.prepare(`
+      SELECT COUNT(*) as count FROM corrective_actions
+      WHERE status NOT IN ('completed') AND target_date < date('now')
+    `).get().count;
+
+    const totalActions = db.prepare('SELECT COUNT(*) as count FROM corrective_actions').get().count;
+    const completedActions = db.prepare("SELECT COUNT(*) as count FROM corrective_actions WHERE status = 'completed'").get().count;
+
+    // Top affected lots
+    const topLots = db.prepare(`
+      SELECT lot_number, product_name, COUNT(*) as count
+      FROM complaints WHERE lot_number != ''
+      GROUP BY lot_number ORDER BY count DESC LIMIT 5
+    `).all();
+
+    // Recent activity
+    const recentComplaints = db.prepare(`
+      SELECT id, complaint_number, date_received, product_name, issue_type, severity, status, created_at
+      FROM complaints ORDER BY created_at DESC LIMIT 5
+    `).all();
+
+    const recentCCRUpdates = db.prepare(`
+      SELECT id, ccr_number, title, status, updated_at
+      FROM ccrs ORDER BY updated_at DESC LIMIT 5
+    `).all();
+
+    res.json({
+      complaints: { total: totalComplaints, open: openComplaints, bySeverity: complaintsBySeverity, byProduct: complaintsByProduct, trend: complaintTrend },
+      ccrs: { total: totalCCRs, open: openCCRs, overdueActions, totalActions, completedActions, resolutionRate: totalActions > 0 ? Math.round((completedActions / totalActions) * 100) : 0 },
+      topLots,
+      recentComplaints,
+      recentCCRUpdates,
+    });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+export default router;

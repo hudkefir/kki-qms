@@ -1,0 +1,13 @@
+node_modules/
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.DS_Store
+screenshots/
+logs/
+tunnel_url.txt
+CURRENT_TUNNEL_URL.txt
+WORKING_QMS_URL.txt
+CURRENT_PROFESSIONAL_URL.txt
+PROFESSIONAL_QMS_URL.txt

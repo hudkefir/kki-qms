@@ -1,0 +1,181 @@
+import { Router } from 'express';
+import db from './database.js';
+
+const router = Router();
+
+// ──── TASKS ────
+
+// GET /api/taskboard/tasks — list all tasks
+router.get('/tasks', (req, res) => {
+  try {
+    const tasks = db.prepare('SELECT * FROM taskboard_tasks ORDER BY sort_order ASC, id ASC').all();
+    res.json(tasks);
+  } catch (err) {
+    console.error('Taskboard get tasks error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/taskboard/tasks — replace entire board
+router.post('/tasks', (req, res) => {
+  try {
+    const { tasks } = req.body;
+    if (!Array.isArray(tasks)) {
+      return res.status(400).json({ error: 'tasks must be an array' });
+    }
+
+    const save = db.transaction(() => {
+      db.prepare('DELETE FROM taskboard_tasks').run();
+      const insert = db.prepare(`
+        INSERT INTO taskboard_tasks (task, operator, section, zone, backup, notes, status, num, sort_order, completed_at, completed_by, progress_note)
+        VALUES (@task, @operator, @section, @zone, @backup, @notes, @status, @num, @sort_order, @completed_at, @completed_by, @progress_note)
+      `);
+      for (const t of tasks) {
+        insert.run({
+          task: t.task || '',
+          operator: t.operator || '',
+          section: t.section || '',
+          zone: t.zone || '',
+          backup: t.backup || '',
+          notes: t.notes || '',
+          status: t.status || 'todo',
+          num: t.num ?? null,
+          sort_order: t.sort_order ?? 0,
+          completed_at: t.completed_at || null,
+          completed_by: t.completed_by || null,
+          progress_note: t.progress_note || null,
+        });
+      }
+    });
+    save();
+
+    const saved = db.prepare('SELECT * FROM taskboard_tasks ORDER BY sort_order ASC, id ASC').all();
+    res.json({ ok: true, count: saved.length, tasks: saved });
+  } catch (err) {
+    console.error('Taskboard save tasks error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ──── TEMPLATES ────
+
+// GET /api/taskboard/templates — list templates
+router.get('/templates', (req, res) => {
+  try {
+    const templates = db.prepare('SELECT * FROM taskboard_templates ORDER BY created_at DESC').all();
+    res.json(templates);
+  } catch (err) {
+    console.error('Taskboard get templates error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/taskboard/templates — save a template
+router.post('/templates', (req, res) => {
+  try {
+    const { name, description, created_by, items } = req.body;
+    if (!name) return res.status(400).json({ error: 'name is required' });
+
+    const save = db.transaction(() => {
+      const result = db.prepare(
+        'INSERT INTO taskboard_templates (name, description, created_by) VALUES (?, ?, ?)'
+      ).run(name, description || '', created_by || '');
+
+      const templateId = result.lastInsertRowid;
+      if (Array.isArray(items)) {
+        const insert = db.prepare(`
+          INSERT INTO taskboard_template_items (template_id, task, operator, section, zone, backup, notes, sort_order)
+          VALUES (@template_id, @task, @operator, @section, @zone, @backup, @notes, @sort_order)
+        `);
+        for (const item of items) {
+          insert.run({
+            template_id: templateId,
+            task: item.task || '',
+            operator: item.operator || '',
+            section: item.section || '',
+            zone: item.zone || '',
+            backup: item.backup || '',
+            notes: item.notes || '',
+            sort_order: item.sort_order ?? 0,
+          });
+        }
+      }
+      return templateId;
+    });
+
+    const templateId = save();
+    const template = db.prepare('SELECT * FROM taskboard_templates WHERE id = ?').get(templateId);
+    const templateItems = db.prepare('SELECT * FROM taskboard_template_items WHERE template_id = ? ORDER BY sort_order').all(templateId);
+    res.json({ ...template, items: templateItems });
+  } catch (err) {
+    console.error('Taskboard save template error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/taskboard/templates/:id — delete template
+router.delete('/templates/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const template = db.prepare('SELECT * FROM taskboard_templates WHERE id = ?').get(id);
+    if (!template) return res.status(404).json({ error: 'Template not found' });
+
+    db.transaction(() => {
+      db.prepare('DELETE FROM taskboard_template_items WHERE template_id = ?').run(id);
+      db.prepare('DELETE FROM taskboard_templates WHERE id = ?').run(id);
+    })();
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Taskboard delete template error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/taskboard/templates/:id/load — get template items
+router.post('/templates/:id/load', (req, res) => {
+  try {
+    const { id } = req.params;
+    const template = db.prepare('SELECT * FROM taskboard_templates WHERE id = ?').get(id);
+    if (!template) return res.status(404).json({ error: 'Template not found' });
+
+    const items = db.prepare('SELECT * FROM taskboard_template_items WHERE template_id = ? ORDER BY sort_order').all(id);
+    res.json({ ...template, items });
+  } catch (err) {
+    console.error('Taskboard load template error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ──── AUDIT ────
+
+// GET /api/taskboard/audit — get audit log
+router.get('/audit', (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+    const entries = db.prepare('SELECT * FROM taskboard_audit ORDER BY timestamp DESC LIMIT ?').all(limit);
+    res.json(entries);
+  } catch (err) {
+    console.error('Taskboard get audit error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/taskboard/audit — add audit entry
+router.post('/audit', (req, res) => {
+  try {
+    const { task_id, task_name, operator, action } = req.body;
+    if (!action) return res.status(400).json({ error: 'action is required' });
+
+    const result = db.prepare(
+      'INSERT INTO taskboard_audit (task_id, task_name, operator, action) VALUES (?, ?, ?, ?)'
+    ).run(task_id ?? null, task_name || '', operator || '', action);
+
+    res.json({ ok: true, id: result.lastInsertRowid });
+  } catch (err) {
+    console.error('Taskboard add audit error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+export default router;

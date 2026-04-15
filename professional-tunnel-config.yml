@@ -1,0 +1,24 @@
+# KKI QMS Professional Tunnel Configuration
+# This will be updated automatically when you provide the tunnel token
+
+tunnel: YOUR_TUNNEL_ID_HERE
+credentials-file: ~/.cloudflared/YOUR_TUNNEL_ID.json
+
+ingress:
+  # QMS Main Application
+  - hostname: qms.kefirkultures.com
+    service: http://localhost:5174
+  
+  # QMS API (optional, for direct API access)
+  - hostname: api.qms.kefirkultures.com
+    service: http://localhost:3002
+  
+  # Catch-all rule (required)
+  - service: http_status:404
+
+# Additional settings for production
+originRequest:
+  noTLSVerify: false
+  connectTimeout: 30s
+  tlsTimeout: 30s
+  keepAliveTimeout: 90s

@@ -1,0 +1,25 @@
+{
+  "name": "kki-qms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "KKI QA Document Control System (QMS)",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "build": "npm run build -w client",
+    "start": "npm run start -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "mammoth": "^1.12.0",
+    "multer": "^2.1.1",
+    "playwright": "^1.58.2"
+  }
+}
