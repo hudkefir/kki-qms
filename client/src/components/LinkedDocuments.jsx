@@ -180,7 +180,10 @@ export default function LinkedDocuments({ linkedType, linkedId, category }) {
         )}
 
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Linked Documents</h2>
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Linked Documents</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Supporting files — drafts, reference materials, superseded versions, related forms.</p>
+          </div>
           {canWrite() && (
             <label className="flex items-center gap-1.5 px-3 py-1.5 bg-navy-800 text-white rounded-lg text-sm font-medium hover:bg-navy-700 cursor-pointer transition-colors">
               <Upload className="w-4 h-4" />

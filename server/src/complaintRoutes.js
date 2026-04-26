@@ -7,19 +7,35 @@ import { sanitizeBody } from './sanitize.js';
 
 const router = Router();
 
+// Ensure status history table exists
+db.exec(`
+  CREATE TABLE IF NOT EXISTS complaint_status_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    complaint_id INTEGER NOT NULL,
+    old_status TEXT,
+    new_status TEXT NOT NULL,
+    changed_by TEXT DEFAULT '',
+    reason TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (complaint_id) REFERENCES complaints(id)
+  )
+`);
+
 // ==================== COMPLAINTS ====================
 
 // GET /api/complaints
 router.get('/complaints', (req, res) => {
   try {
-    const { status, severity, product_sku, source, lot_number, search, date_from, date_to } = req.query;
+    const { status, severity, product_sku, source, lot_number, search, date_from, date_to, issue_type, include_archived } = req.query;
     let query = 'SELECT * FROM complaints WHERE 1=1';
+    if (include_archived !== 'true') { query += ' AND (archived = 0 OR archived IS NULL)'; }
     const params = [];
 
     if (status) { query += ' AND status = ?'; params.push(status); }
     if (severity) { query += ' AND severity = ?'; params.push(severity); }
     if (product_sku) { query += ' AND product_sku = ?'; params.push(product_sku); }
     if (source) { query += ' AND source LIKE ?'; params.push(`%${source}%`); }
+    if (issue_type) { query += ' AND issue_type = ?'; params.push(issue_type); }
     if (lot_number) { query += ' AND lot_number = ?'; params.push(lot_number); }
     if (date_from) { query += ' AND date_received >= ?'; params.push(date_from); }
     if (date_to) { query += ' AND date_received <= ?'; params.push(date_to); }
@@ -117,7 +133,10 @@ router.get('/complaints/:id', (req, res) => {
       linkedCCR = db.prepare('SELECT id, ccr_number, title, status FROM ccrs WHERE id = ?').get(complaint.linked_ccr_id);
     }
 
-    res.json({ ...complaint, linkedCCR });
+    // Get comments
+    const comments = db.prepare('SELECT * FROM complaint_comments WHERE complaint_id = ? ORDER BY created_at ASC').all(req.params.id);
+
+    res.json({ ...complaint, linkedCCR, comments });
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
@@ -131,7 +150,7 @@ router.post('/complaints', requireWriteAccess, (req, res) => {
       date_received, source = '', reporter = '', store_location = '',
       product_sku = '', product_name = '', lot_number = '', best_before = '',
       quantity_affected = 0, issue_type = '', severity = 'low',
-      description = '', status = 'open'
+      description = '', status = 'open', assigned_to = ''
     } = sanitized;
 
     if (!date_received) return res.status(400).json({ error: 'date_received is required' });
@@ -158,12 +177,12 @@ router.post('/complaints', requireWriteAccess, (req, res) => {
     const createdBy = sessionUser?.display_name || sessionUser?.username || '';
 
     const info = db.prepare(`
-      INSERT INTO complaints (complaint_number, date_received, source, reporter, store_location, product_sku, product_name, lot_number, best_before, quantity_affected, issue_type, severity, description, status, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(complaint_number, date_received, source, reporter, store_location, product_sku, product_name, lot_number, best_before, quantity_affected, issue_type, severity, description, status, createdBy);
+      INSERT INTO complaints (complaint_number, date_received, source, reporter, store_location, product_sku, product_name, lot_number, best_before, quantity_affected, issue_type, severity, description, status, assigned_to, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(complaint_number, date_received, source, reporter, store_location, product_sku, product_name, lot_number, best_before, quantity_affected, issue_type, severity, description, status, assigned_to, createdBy);
 
     const created = db.prepare('SELECT * FROM complaints WHERE id = ?').get(info.lastInsertRowid);
-    logAudit(req, 'create_complaints', 'complaints', created.id, complaint_number, { new_values: { complaint_number, date_received, source, reporter, product_name, lot_number, severity, status } });
+    logAudit(req, 'create_complaints', 'complaints', created.id, complaint_number, { new_values: { complaint_number, date_received, source, reporter, product_name, lot_number, severity, status, assigned_to } });
     broadcast('complaint_created', created);
     res.status(201).json(created);
   } catch (err) {
@@ -181,7 +200,7 @@ router.put('/complaints/:id', requireWriteAccess, (req, res) => {
     const fields = [
       'date_received', 'source', 'reporter', 'store_location', 'product_sku',
       'product_name', 'lot_number', 'best_before', 'quantity_affected',
-      'issue_type', 'severity', 'description', 'status', 'linked_ccr_id'
+      'issue_type', 'severity', 'description', 'status', 'linked_ccr_id', 'assigned_to'
     ];
 
     const updates = [];
@@ -220,6 +239,12 @@ router.put('/complaints/:id', requireWriteAccess, (req, res) => {
       logAudit(req, 'update_complaints', 'complaints', req.params.id, complaint.complaint_number, { old_values: oldVals, new_values: newVals });
     }
 
+    // If status changed via edit form, record in status history
+    if (sanitized.status !== undefined && sanitized.status !== complaint.status) {
+      db.prepare(`INSERT INTO complaint_status_history (complaint_id, old_status, new_status, changed_by, reason) VALUES (?, ?, ?, ?, ?)`)
+        .run(req.params.id, complaint.status, sanitized.status, sessionUser?.display_name || sessionUser?.username || '', 'Updated via edit form');
+    }
+
     broadcast('complaint_updated', updated);
     res.json(updated);
   } catch (err) {
@@ -228,6 +253,46 @@ router.put('/complaints/:id', requireWriteAccess, (req, res) => {
 });
 
 // DELETE /api/complaints/:id (admin only)
+
+// PATCH /api/complaints/:id/archive
+router.patch('/complaints/:id/archive', requireWriteAccess, (req, res) => {
+  try {
+    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+    if (complaint.archived === 1) return res.json({ message: 'Already archived', complaint });
+
+    const sessionUser = req.session?.user;
+    const updatedBy = sessionUser?.display_name || sessionUser?.username || '';
+    db.prepare("UPDATE complaints SET archived = 1, updated_by = ?, updated_at = datetime('now') WHERE id = ?").run(updatedBy, req.params.id);
+    const updated = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+
+    logAudit(req, 'archive_complaint', 'complaints', updated.id, updated.complaint_number, { old_values: { archived: 0 }, new_values: { archived: 1 } });
+    broadcast({ type: 'complaint_archived', complaint: updated });
+    res.json(updated);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PATCH /api/complaints/:id/unarchive
+router.patch('/complaints/:id/unarchive', requireWriteAccess, (req, res) => {
+  try {
+    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+    if (!complaint.archived) return res.json({ message: 'Not archived', complaint });
+
+    const sessionUser = req.session?.user;
+    const updatedBy = sessionUser?.display_name || sessionUser?.username || '';
+    db.prepare("UPDATE complaints SET archived = 0, updated_by = ?, updated_at = datetime('now') WHERE id = ?").run(updatedBy, req.params.id);
+    const updated = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+
+    logAudit(req, 'unarchive_complaint', 'complaints', updated.id, updated.complaint_number, { old_values: { archived: 1 }, new_values: { archived: 0 } });
+    broadcast({ type: 'complaint_unarchived', complaint: updated });
+    res.json(updated);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
 router.delete('/complaints/:id', requireRole('admin'), (req, res) => {
   try {
     const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
@@ -237,6 +302,148 @@ router.delete('/complaints/:id', requireRole('admin'), (req, res) => {
     db.prepare('DELETE FROM complaints WHERE id = ?').run(req.params.id);
     logAudit(req, 'delete_complaints', 'complaints', req.params.id, complaint.complaint_number, { old_values: complaint });
     res.json({ success: true });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+// ==================== COMPLAINT COMMENTS ====================
+
+// GET /api/complaints/:id/comments
+router.get('/complaints/:id/comments', (req, res) => {
+  try {
+    const complaint = db.prepare('SELECT id FROM complaints WHERE id = ?').get(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+
+    const comments = db.prepare('SELECT * FROM complaint_comments WHERE complaint_id = ? ORDER BY created_at ASC').all(req.params.id);
+    res.json(comments);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/complaints/:id/comments
+router.post('/complaints/:id/comments', requireWriteAccess, (req, res) => {
+  try {
+    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+
+    const sanitized = sanitizeBody(req.body);
+    const { comment = '', attachment_path = '', email_ref = '' } = sanitized;
+    if (!comment.trim()) return res.status(400).json({ error: 'comment is required' });
+
+    const sessionUser = req.session?.user;
+    const author = sessionUser?.display_name || sessionUser?.username || '';
+
+    const info = db.prepare(
+      "INSERT INTO complaint_comments (complaint_id, author, comment, attachment_path, email_ref) VALUES (?, ?, ?, ?, ?)"
+    ).run(req.params.id, author, comment.trim(), attachment_path, email_ref);
+
+    const created = db.prepare('SELECT * FROM complaint_comments WHERE id = ?').get(info.lastInsertRowid);
+
+    // Update complaint updated_at
+    db.prepare("UPDATE complaints SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+
+    logAudit(req, 'add_comment', 'complaints', req.params.id, complaint.complaint_number, { new_values: { comment: comment.trim(), author } });
+    broadcast('complaint_comment_added', { complaint_id: req.params.id, complaint_number: complaint.complaint_number, comment: created });
+    res.status(201).json(created);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/complaints/:id/comments/:commentId (admin only)
+router.delete('/complaints/:id/comments/:commentId', requireRole('admin'), (req, res) => {
+  try {
+    const comment = db.prepare('SELECT * FROM complaint_comments WHERE id = ? AND complaint_id = ?').get(req.params.commentId, req.params.id);
+    if (!comment) return res.status(404).json({ error: 'Comment not found' });
+
+    db.prepare('DELETE FROM complaint_comments WHERE id = ?').run(req.params.commentId);
+
+    const complaint = db.prepare('SELECT complaint_number FROM complaints WHERE id = ?').get(req.params.id);
+    logAudit(req, 'delete_comment', 'complaints', req.params.id, complaint?.complaint_number, { old_values: { comment: comment.comment, author: comment.author } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==================== COMPLAINT STATUS HISTORY ====================
+
+// GET /api/complaints/:id/status-history
+router.get('/complaints/:id/status-history', (req, res) => {
+  try {
+    const complaint = db.prepare('SELECT id FROM complaints WHERE id = ?').get(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+    const history = db.prepare('SELECT * FROM complaint_status_history WHERE complaint_id = ? ORDER BY created_at ASC').all(req.params.id);
+    res.json(history);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+// GET /api/complaints/:id/timeline
+router.get('/complaints/:id/timeline', (req, res) => {
+  try {
+    const complaint = db.prepare('SELECT id FROM complaints WHERE id = ?').get(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+
+    const statusChanges = db.prepare(
+      'SELECT id, "status_change" as type, old_status, new_status, changed_by as actor, reason, created_at FROM complaint_status_history WHERE complaint_id = ? ORDER BY created_at ASC'
+    ).all(req.params.id).map(r => ({ ...r, type: 'status_change' }));
+
+    const comments = db.prepare(
+      'SELECT id, "comment" as type, author as actor, comment, created_at FROM complaint_comments WHERE complaint_id = ? ORDER BY created_at ASC'
+    ).all(req.params.id).map(r => ({ ...r, type: 'comment' }));
+
+    const fieldEdits = db.prepare(
+      "SELECT id, 'field_edit' as type, username as actor, old_values, new_values, timestamp as created_at FROM audit_logs WHERE resource_type = 'complaints' AND resource_id = ? AND action = 'update_complaints' ORDER BY timestamp ASC"
+    ).all(String(req.params.id)).map(r => ({ ...r, type: 'field_edit' }));
+
+    const timeline = [...statusChanges, ...comments, ...fieldEdits].sort((a, b) => {
+      return new Date(a.created_at) - new Date(b.created_at);
+    });
+
+    res.json(timeline);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/complaints/:id/status
+router.post('/complaints/:id/status', requireWriteAccess, (req, res) => {
+  try {
+    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+
+    const sanitized = sanitizeBody(req.body);
+    const { status, reason = '' } = sanitized;
+
+    const VALID_STATUSES = ['open', 'investigating', 'corrective_action', 'resolved', 'closed'];
+    if (!VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}` });
+    }
+
+    const sessionUser = req.session?.user;
+    const changedBy = sessionUser?.display_name || sessionUser?.username || '';
+    const oldStatus = complaint.status;
+
+    db.prepare("UPDATE complaints SET status = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(status, changedBy, req.params.id);
+
+    db.prepare(`INSERT INTO complaint_status_history (complaint_id, old_status, new_status, changed_by, reason) VALUES (?, ?, ?, ?, ?)`)
+      .run(req.params.id, oldStatus, status, changedBy, reason);
+
+    const updated = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+
+    logAudit(req, 'status_change', 'complaints', req.params.id, complaint.complaint_number, {
+      old_values: { status: oldStatus },
+      new_values: { status, reason },
+    });
+    broadcast('complaint_updated', updated);
+    res.json(updated);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
@@ -544,6 +751,7 @@ router.delete('/ccrs/:id', requireRole('admin'), (req, res) => {
     const ccr = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
     if (!ccr) return res.status(404).json({ error: 'CCR not found' });
 
+    db.prepare('UPDATE complaints SET linked_ccr_id = NULL WHERE linked_ccr_id = ?').run(req.params.id);
     db.prepare('DELETE FROM ccr_complaints WHERE ccr_id = ?').run(req.params.id);
     db.prepare('DELETE FROM corrective_actions WHERE ccr_id = ?').run(req.params.id);
     db.prepare('DELETE FROM ccrs WHERE id = ?').run(req.params.id);

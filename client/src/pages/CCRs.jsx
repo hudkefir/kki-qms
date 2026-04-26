@@ -89,6 +89,19 @@ export default function CCRs() {
         <div>
           <p className="text-sm text-gray-500 font-medium">Customer Complaint Responses</p>
           <h1 className="text-3xl font-bold text-gray-900">CCR Registry</h1>
+          <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800 max-w-2xl">
+            <p className="font-semibold mb-1">What is a CCR?</p>
+            <p className="mb-2">A <strong>Customer Complaint Response (CCR)</strong> is a formal corrective action document initiated when a complaint involves:</p>
+            <ul className="list-disc ml-5 mb-2 space-y-0.5">
+              <li>Illness, allergic reaction, or adverse health effects</li>
+              <li>Foreign material or contamination</li>
+              <li>Product safety failures (e.g., undeclared allergens, microbiological issues)</li>
+              <li>Recurring issues — same problem across multiple complaints or batches</li>
+              <li>Regulatory non-conformances</li>
+            </ul>
+            <p className="font-semibold mb-1">How to initiate:</p>
+            <p>Click <strong>"New CCR"</strong> above, link it to the originating complaint, document the root cause analysis, corrective actions, and preventive measures. Assign a target resolution date and track to closure.</p>
+          </div>
         </div>
         <button onClick={() => setShowWizard(true)} className="flex items-center gap-2 px-4 py-2 bg-navy-800 text-white rounded-lg text-sm font-medium hover:bg-navy-700 transition-colors">
           <Plus className="w-4 h-4" />

@@ -3,9 +3,10 @@
 
 AGENTS=(
     "com.kefir.qms-server"
-    "com.kefir.qms-client"
     "com.kefir.qms-tunnel"
 )
+# Note: com.kefir.qms-client (Vite dev server) removed — not needed in production.
+# Built frontend is served by the Express backend.
 PLIST_DIR="$HOME/Library/LaunchAgents"
 
 start() {
@@ -54,11 +55,7 @@ status() {
     else
         echo "  ✗ Backend not listening on 3002"
     fi
-    if lsof -i :5174 -sTCP:LISTEN >/dev/null 2>&1; then
-        echo "  ✓ Frontend on port 5174"
-    else
-        echo "  ✗ Frontend not listening on 5174"
-    fi
+    echo "  ℹ Frontend: served by backend (built assets)"
     if pgrep -f "cloudflared tunnel.*kki-qms" >/dev/null 2>&1; then
         echo "  ✓ Cloudflare tunnel running"
     else

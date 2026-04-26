@@ -2,7 +2,8 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import {
   FileText, CheckCircle, AlertTriangle, XCircle, Clock,
-  ChevronRight, Shield, TrendingUp, AlertCircle, FileCheck, BarChart3, Users, Activity
+  ChevronRight, Shield, TrendingUp, AlertCircle, FileCheck, BarChart3, Users, Activity,
+  GitPullRequest, AlertOctagon
 } from 'lucide-react';
 import {
   Chart as ChartJS,
@@ -109,25 +110,65 @@ export default function Dashboard() {
         <h1 className="text-3xl font-bold text-gray-900">QMS Dashboard</h1>
       </div>
 
-      {/* SOP Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-        {sopStatCards.map(card => (
-          <div key={card.label} className={`bg-white rounded-xl shadow-sm border ${card.border} p-5 hover:shadow-md transition-shadow`}>
-            <div className="flex items-start justify-between">
-              <div className={`${card.bg} p-2.5 rounded-lg`}>
-                <card.icon className={`w-5 h-5 ${card.color}`} />
-              </div>
-              {card.badge && (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${card.badgeColor}`}>
-                  {card.badge}
-                </span>
-              )}
+
+      {/* QMS Module Overview */}
+      {dashboard?.qms && (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+          {[
+            { label: 'Complaints', total: dashboard.qms.complaints.total, open: dashboard.qms.complaints.open, color: 'text-orange-600', bg: 'bg-orange-50', link: '/complaints' },
+            { label: 'CCRs', total: dashboard.qms.ccrs.total, open: dashboard.qms.ccrs.open, color: 'text-blue-600', bg: 'bg-blue-50', link: '/ccrs' },
+            { label: 'CAPAs', total: dashboard.qms.capas.total, open: dashboard.qms.capas.open, color: 'text-green-600', bg: 'bg-green-50', link: '/capas' },
+            { label: 'Deviations', total: dashboard.qms.deviations.total, open: dashboard.qms.deviations.open, color: 'text-red-600', bg: 'bg-red-50', link: '/deviations' },
+            { label: 'Change Requests', total: dashboard.qms.changeRequests.total, open: dashboard.qms.changeRequests.open, color: 'text-purple-600', bg: 'bg-purple-50', link: '/change-requests' },
+            { label: 'Suppliers', total: dashboard.qms.suppliers.total, open: dashboard.qms.suppliers.approved, color: 'text-cyan-600', bg: 'bg-cyan-50', link: '/suppliers', openLabel: 'approved' },
+          ].map(mod => (
+            <Link key={mod.label} to={mod.link} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{mod.label}</p>
+              <p className={`text-2xl font-bold ${mod.color} mt-1`}>{mod.total}</p>
+              <p className="text-xs text-gray-400 mt-1">{mod.open} {mod.openLabel || 'open'}</p>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {/* Upcoming Deadlines */}
+      {dashboard?.deadlines?.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="bg-amber-50 p-2.5 rounded-lg">
+              <Clock className="w-5 h-5 text-amber-600" />
             </div>
-            <p className="text-3xl font-bold text-gray-900 mt-3">{card.value}</p>
-            <p className="text-sm text-gray-500 mt-1">{card.label}</p>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Upcoming Deadlines</h2>
+              <p className="text-xs text-gray-500">Next 10 action items by due date</p>
+            </div>
           </div>
-        ))}
-      </div>
+          <div className="space-y-2">
+            {dashboard.deadlines.map((item, i) => {
+              const daysLeft = Math.ceil((new Date(item.deadline) - new Date()) / (1000 * 60 * 60 * 24));
+              const isOverdue = daysLeft < 0;
+              const isUrgent = daysLeft >= 0 && daysLeft <= 7;
+              const typeColors = { CAPA: 'bg-green-100 text-green-700', CR: 'bg-purple-100 text-purple-700', DEV: 'bg-red-100 text-red-700' };
+              return (
+                <Link key={i} to={item.type === 'CAPA' ? '/capas' : item.type === 'CR' ? '/change-requests' : '/deviations'}
+                  className={`flex items-center justify-between p-3 rounded-lg border transition-colors hover:bg-gray-50 ${isOverdue ? 'bg-red-50 border-red-200' : isUrgent ? 'bg-amber-50 border-amber-200' : 'border-gray-100'}`}>
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <span className={`flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold ${typeColors[item.type] || 'bg-gray-100 text-gray-600'}`}>{item.type}</span>
+                    <span className="text-xs font-medium text-gray-500">{item.ref_id}</span>
+                    <span className="text-sm text-gray-900 truncate">{item.title?.slice(0, 50)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                    <span className={`text-xs font-semibold ${isOverdue ? 'text-red-600' : isUrgent ? 'text-amber-600' : 'text-gray-500'}`}>
+                      {isOverdue ? `${Math.abs(daysLeft)}d overdue` : daysLeft === 0 ? 'Today' : `${daysLeft}d left`}
+                    </span>
+                    <span className="text-xs text-gray-400">{item.deadline}</span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Complaint & CCR Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
@@ -175,47 +216,130 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {/* Audit Readiness */}
+
+      {/* SOP Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+        {sopStatCards.map(card => (
+          <div key={card.label} className={`bg-white rounded-xl shadow-sm border ${card.border} p-5 hover:shadow-md transition-shadow`}>
+            <div className="flex items-start justify-between">
+              <div className={`${card.bg} p-2.5 rounded-lg`}>
+                <card.icon className={`w-5 h-5 ${card.color}`} />
+              </div>
+              {card.badge && (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${card.badgeColor}`}>
+                  {card.badge}
+                </span>
+              )}
+            </div>
+            <p className="text-3xl font-bold text-gray-900 mt-3">{card.value}</p>
+            <p className="text-sm text-gray-500 mt-1">{card.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* QMS Decision Guide */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="bg-navy-50 p-2.5 rounded-lg">
-              <Shield className="w-5 h-5 text-navy-600" />
+        <details className="group">
+          <summary className="flex items-center gap-3 mb-4 cursor-pointer list-none">
+            <div className="bg-indigo-50 p-2.5 rounded-lg">
+              <FileText className="w-5 h-5 text-indigo-600" />
             </div>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">Audit Readiness</h2>
-              <p className="text-sm text-gray-500">SGS Audit compliance status</p>
+            <div className="flex-1">
+              <h2 className="text-lg font-bold text-gray-900">QMS Decision Guide</h2>
+              <p className="text-xs text-gray-500">Which module to use and when — click to expand</p>
             </div>
-          </div>
-          <div className="text-right">
-            <div className="flex items-center gap-2">
-              <Clock className={`w-4 h-4 ${daysUntil <= 30 ? 'text-red-500' : daysUntil <= 90 ? 'text-amber-500' : 'text-gray-400'}`} />
-              <span className={`text-sm font-semibold ${daysUntil <= 30 ? 'text-red-600' : daysUntil <= 90 ? 'text-amber-600' : 'text-gray-600'}`}>
-                {daysUntil} days until SGS Audit
-              </span>
+            <ChevronRight className="w-5 h-5 text-gray-400 transition-transform group-open:rotate-90" />
+          </summary>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+          {/* Complaint */}
+          <Link to="/complaints" className="block p-4 rounded-lg border-2 border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertCircle className="w-5 h-5 text-orange-600" />
+              <h3 className="font-bold text-orange-800">Complaint</h3>
+            </div>
+            <p className="text-sm text-orange-700 mb-2">A customer or retailer reported a problem with the product.</p>
+            <p className="text-xs text-orange-600 font-medium">Examples: taste issues, packaging damage, illness report, foreign material found</p>
+          </Link>
+
+          {/* CCR */}
+          <Link to="/ccrs" className="block p-4 rounded-lg border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors">
+            <div className="flex items-center gap-2 mb-2">
+              <FileCheck className="w-5 h-5 text-blue-600" />
+              <h3 className="font-bold text-blue-800">CCR</h3>
+            </div>
+            <p className="text-sm text-blue-700 mb-2">Complaint investigation reveals a safety concern, illness, foreign material, or recurring pattern.</p>
+            <p className="text-xs text-blue-600 font-medium">Triggered by: critical/high severity complaints, multiple complaints on same issue, regulatory concern</p>
+          </Link>
+
+          {/* CAPA */}
+          <Link to="/capas" className="block p-4 rounded-lg border-2 border-green-200 bg-green-50 hover:bg-green-100 transition-colors">
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              <h3 className="font-bold text-green-800">CAPA</h3>
+            </div>
+            <p className="text-sm text-green-700 mb-2">Root cause analysis shows a systemic issue needing a permanent fix and prevention plan.</p>
+            <p className="text-xs text-green-600 font-medium">Triggered by: CCR findings, audit observations, deviation patterns, SOP/GMP gaps</p>
+          </Link>
+
+          {/* Change Control */}
+          <Link to="/change-requests" className="block p-4 rounded-lg border-2 border-purple-200 bg-purple-50 hover:bg-purple-100 transition-colors">
+            <div className="flex items-center gap-2 mb-2">
+              <GitPullRequest className="w-5 h-5 text-purple-600" />
+              <h3 className="font-bold text-purple-800">Change Control</h3>
+            </div>
+            <p className="text-sm text-purple-700 mb-2">You want to intentionally change a process, supplier, equipment, or document.</p>
+            <p className="text-xs text-purple-600 font-medium">Examples: new supplier, recipe change, equipment swap, SOP update, packaging change</p>
+          </Link>
+
+          {/* Deviation */}
+          <Link to="/deviations" className="block p-4 rounded-lg border-2 border-red-200 bg-red-50 hover:bg-red-100 transition-colors">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertOctagon className="w-5 h-5 text-red-600" />
+              <h3 className="font-bold text-red-800">Deviation</h3>
+            </div>
+            <p className="text-sm text-red-700 mb-2">Something during production deviated from an SOP, spec, or expected procedure.</p>
+            <p className="text-xs text-red-600 font-medium">Examples: temperature excursion, wrong ingredient amount, missed cleaning step, equipment malfunction</p>
+          </Link>
+
+          {/* Batch Testing */}
+          <Link to="/batch-testing" className="block p-4 rounded-lg border-2 border-cyan-200 bg-cyan-50 hover:bg-cyan-100 transition-colors">
+            <div className="flex items-center gap-2 mb-2">
+              <Activity className="w-5 h-5 text-cyan-600" />
+              <h3 className="font-bold text-cyan-800">Batch Testing</h3>
+            </div>
+            <p className="text-sm text-cyan-700 mb-2">Record and review quality test results for each production batch.</p>
+            <p className="text-xs text-cyan-600 font-medium">Tests: pH, coliform, E. coli, Salmonella, yeast & mold, seal integrity</p>
+          </Link>
+        </div>
+
+        {/* Decision Flow */}
+        <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+          <h3 className="text-sm font-bold text-gray-700 mb-3">Decision Flow: Something Happened — What Do I Do?</h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex items-start gap-3">
+              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-bold">1</span>
+              <p className="text-gray-700"><strong>Customer/retailer reports a problem?</strong> → Open a <span className="text-orange-700 font-semibold">Complaint</span>. Investigate and document findings.</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold">2</span>
+              <p className="text-gray-700"><strong>Investigation reveals safety/health risk or recurring pattern?</strong> → Escalate to a <span className="text-blue-700 font-semibold">CCR</span>. Not every complaint needs one — only safety, illness, foreign material, or trends.</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-bold">3</span>
+              <p className="text-gray-700"><strong>Root cause is systemic and needs a permanent fix?</strong> → Create a <span className="text-green-700 font-semibold">CAPA</span>. Define corrective + preventive actions, assign responsibility, verify effectiveness.</p>
+            </div>
+            <div className="flex items-start gap-3 pt-2 border-t border-gray-200">
+              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-xs font-bold">!</span>
+              <p className="text-gray-700"><strong>Production deviated from procedure?</strong> → File a <span className="text-red-700 font-semibold">Deviation</span> immediately. Assess impact, determine if product can be released or must be held.</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-xs font-bold">Δ</span>
+              <p className="text-gray-700"><strong>Planning an intentional change?</strong> → Submit a <span className="text-purple-700 font-semibold">Change Request</span> before making any modification. Must be approved before implementation.</p>
             </div>
           </div>
         </div>
-        <div className="flex items-end gap-6">
-          <div>
-            <span className={`text-5xl font-bold ${readiness >= 80 ? 'text-green-600' : readiness >= 50 ? 'text-amber-600' : 'text-red-600'}`}>
-              {readiness}%
-            </span>
-          </div>
-          <div className="flex-1">
-            <div className="w-full bg-gray-100 rounded-full h-4">
-              <div
-                className={`h-4 rounded-full transition-all duration-500 ${readiness >= 80 ? 'bg-green-500' : readiness >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
-                style={{ width: `${readiness}%` }}
-              />
-            </div>
-            <div className="flex justify-between text-xs text-gray-400 mt-1">
-              <span>0%</span>
-              <span>50%</span>
-              <span>100%</span>
-            </div>
-          </div>
-        </div>
+        </details>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">

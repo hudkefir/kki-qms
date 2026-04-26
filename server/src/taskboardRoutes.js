@@ -424,6 +424,12 @@ router.put('/v2/operators', (req, res) => {
   try {
     const ops = req.body;
     if (!Array.isArray(ops)) return res.status(400).json({ error: 'body must be an array' });
+    // SAFETY: reject empty push if server already has operators
+    const existing = db.prepare('SELECT COUNT(*) as c FROM tb_operators').get().c;
+    if (ops.length === 0 && existing > 0) {
+      console.warn('[TASKBOARD SAFETY] Blocked empty operators push (server has ' + existing + ')');
+      return res.json({ ok: true, count: existing, blocked: true });
+    }
     db.transaction(() => {
       db.prepare('DELETE FROM tb_operators').run();
       const insert = db.prepare('INSERT INTO tb_operators (id, name, role, zone, color, avatar, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)');
@@ -632,6 +638,12 @@ router.put('/v2/daily-config', (req, res) => {
   try {
     const items = req.body;
     if (!Array.isArray(items)) return res.status(400).json({ error: 'body must be an array' });
+    // SAFETY: reject empty push if server already has daily config
+    const existingDc = db.prepare('SELECT COUNT(*) as c FROM tb_daily_config').get().c;
+    if (items.length === 0 && existingDc > 0) {
+      console.warn('[TASKBOARD SAFETY] Blocked empty daily-config push (server has ' + existingDc + ')');
+      return res.json({ ok: true, count: existingDc, blocked: true });
+    }
     db.transaction(() => {
       db.prepare('DELETE FROM tb_daily_config').run();
       const insert = db.prepare('INSERT INTO tb_daily_config (task_text, section, tag, sort_order, enabled) VALUES (?, ?, ?, ?, ?)');

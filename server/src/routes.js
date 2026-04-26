@@ -36,6 +36,20 @@ router.get('/dashboard', (req, res) => {
       LIMIT 10
     `).all();
 
+    // QMS module counts
+    const complaintCount = db.prepare('SELECT COUNT(*) as c FROM complaints').get().c;
+    const openComplaints = db.prepare("SELECT COUNT(*) as c FROM complaints WHERE status NOT IN ('closed','resolved')").get().c;
+    const ccrCount = db.prepare('SELECT COUNT(*) as c FROM ccrs').get().c;
+    const openCcrs = db.prepare("SELECT COUNT(*) as c FROM ccrs WHERE status NOT IN ('closed','sent')").get().c;
+    const capaCount = db.prepare('SELECT COUNT(*) as c FROM capas').get().c;
+    const openCapas = db.prepare("SELECT COUNT(*) as c FROM capas WHERE status NOT IN ('closed','completed')").get().c;
+    const deviationCount = db.prepare('SELECT COUNT(*) as c FROM deviation_reports').get().c;
+    const openDeviations = db.prepare("SELECT COUNT(*) as c FROM deviation_reports WHERE status != 'closed'").get().c;
+    const crCount = db.prepare('SELECT COUNT(*) as c FROM change_requests').get().c;
+    const openCrs = db.prepare("SELECT COUNT(*) as c FROM change_requests WHERE status NOT IN ('closed','completed','rejected')").get().c;
+    const supplierCount = db.prepare('SELECT COUNT(*) as c FROM suppliers').get().c;
+    const approvedSuppliers = db.prepare("SELECT COUNT(*) as c FROM suppliers WHERE status = 'approved'").get().c;
+
     res.json({
       totalSops,
       cleanCount,
@@ -44,6 +58,25 @@ router.get('/dashboard', (req, res) => {
       auditReadinessPercent,
       categoryCounts,
       recentActivity,
+      qms: {
+        complaints: { total: complaintCount, open: openComplaints },
+        ccrs: { total: ccrCount, open: openCcrs },
+        capas: { total: capaCount, open: openCapas },
+        deviations: { total: deviationCount, open: openDeviations },
+        changeRequests: { total: crCount, open: openCrs },
+        suppliers: { total: supplierCount, approved: approvedSuppliers },
+      },
+      deadlines: db.prepare(`
+        SELECT 'CAPA' as type, capa_id as ref_id, ('CAPA: ' || capa_id) as title, target_date as deadline, status
+        FROM capas WHERE status NOT IN ('closed','completed') AND target_date IS NOT NULL
+        UNION ALL
+        SELECT 'CR', request_id, title, proposed_effective_date, status
+        FROM change_requests WHERE status NOT IN ('closed','completed','rejected') AND proposed_effective_date IS NOT NULL
+        UNION ALL
+        SELECT 'DEV', report_id, title, investigation_due_date, status
+        FROM deviation_reports WHERE status != 'closed' AND investigation_due_date IS NOT NULL
+        ORDER BY deadline ASC LIMIT 10
+      `).all(),
     });
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -453,10 +486,46 @@ router.post('/sops/:id/read-content', requireWriteAccess, async (req, res) => {
       return res.status(404).json({ error: 'SOP not found' });
     }
 
-    // Find linked document
-    let document = db.prepare(
+    // Find linked document — check documents table first, then sop_files table
+    // Check both documents and sop_files tables, pick the newest file
+    let document = null;
+    
+    const docRecord = db.prepare(
       'SELECT * FROM documents WHERE linked_type = ? AND linked_id = ? AND category = ? ORDER BY upload_date DESC LIMIT 1'
     ).get('sop', id, 'sop');
+
+    const sopFile = db.prepare(
+      'SELECT * FROM sop_files WHERE sop_id = ? ORDER BY id DESC LIMIT 1'
+    ).get(id);
+
+    let sopFileDoc = null;
+    if (sopFile) {
+      const sopDocsDir = join(process.cwd(), 'documents');
+      const sopFilePath = join(sopDocsDir, sopFile.filename);
+      if (existsSync(sopFilePath)) {
+        sopFileDoc = {
+          id: sopFile.id,
+          filename: sopFile.filename,
+          original_name: sopFile.original_name,
+          file_type: sopFile.file_type,
+          file_size: sopFile.file_size,
+          upload_date: sopFile.uploaded_at,
+          _source: 'sop_files',
+          _filepath: sopFilePath,
+        };
+      }
+    }
+
+    // Pick whichever is newer (prefer sop_files if both exist and sop_files is newer)
+    if (docRecord && sopFileDoc) {
+      const docDate = new Date(docRecord.upload_date || 0).getTime();
+      const sfDate = new Date(sopFileDoc.upload_date || 0).getTime();
+      document = sfDate >= docDate ? sopFileDoc : docRecord;
+      console.log(`Picked ${document._source || 'documents'} table file: ${document.original_name}`);
+    } else {
+      document = sopFileDoc || docRecord;
+      if (document) console.log(`Found document in ${document._source || 'documents'}: ${document.original_name}`);
+    }
 
     // AUTO-REPAIR: If no document found, try to find and link orphaned files
     if (!document) {
@@ -509,7 +578,7 @@ router.post('/sops/:id/read-content', requireWriteAccess, async (req, res) => {
     }
 
     // Determine file path
-    const filePath = join(process.env.KKI_DOCS_DIR || '/Users/kefirbot/KKI/QMS/SOPs', document.filename);
+    const filePath = document._filepath || join(process.env.KKI_DOCS_DIR || '/Users/kefirbot/KKI/QMS/SOPs', document.filename);
     
     // AUTO-REPAIR: Check if file exists, if not try to fix filename
     if (!existsSync(filePath)) {

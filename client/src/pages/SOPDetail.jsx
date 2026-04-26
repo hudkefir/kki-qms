@@ -32,6 +32,7 @@ import {
 import { useFetch, apiPut, apiPost, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/LoadingSpinner';
+import FormattedText from '../components/FormattedText';
 import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
 import LinkedDocuments from '../components/LinkedDocuments';
@@ -810,7 +811,7 @@ export default function SOPDetail() {
                   <div>
                     <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2 pb-2 border-b border-gray-100">Responsibilities</h3>
                     <div className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap bg-purple-50 border border-purple-100 rounded-lg p-4">
-                      {sop.responsibilities || 'Not specified.'}
+                      {<FormattedText text={sop.responsibilities} variant="roles" />}
                     </div>
                   </div>
 
@@ -826,7 +827,7 @@ export default function SOPDetail() {
                   <div>
                     <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2 pb-2 border-b border-gray-100">References</h3>
                     <div className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap bg-gray-50 border border-gray-200 rounded-lg p-4">
-                      {sop.sop_references || 'None.'}
+                      {<FormattedText text={sop.sop_references} variant="references" />}
                     </div>
                   </div>
 
@@ -852,7 +853,10 @@ export default function SOPDetail() {
             <div className="space-y-6">
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">SOP Files</h3>
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">SOP Files</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">The official current version of this SOP. Upload new versions here when approved.</p>
+                  </div>
                   {canWrite() && (
                     <label className="flex items-center gap-1.5 px-3 py-1.5 bg-navy-800 text-white rounded-lg text-sm font-medium hover:bg-navy-700 cursor-pointer transition-colors">
                       <Upload className="w-4 h-4" />

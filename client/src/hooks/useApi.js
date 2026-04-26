@@ -85,3 +85,20 @@ export async function apiDelete(url) {
   }
   return res.json();
 }
+
+export async function apiPatch(url, body) {
+  const res = await fetch(url, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    const err = new Error(data.error || 'Request failed');
+    err.status = res.status;
+    err.details = data;
+    throw err;
+  }
+  return data;
+}

@@ -1,0 +1,356 @@
+import { Router } from 'express';
+import db from './database.js';
+import { requireWriteAccess, requireRole } from './authMiddleware.js';
+import { logAudit } from './auditMiddleware.js';
+import { broadcast } from './websocket.js';
+import { sanitizeBody } from './sanitize.js';
+
+const router = Router();
+
+// ==================== BOOTSTRAP TABLE ====================
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      contact_name TEXT DEFAULT '',
+      contact_email TEXT DEFAULT '',
+      contact_phone TEXT DEFAULT '',
+      address TEXT DEFAULT '',
+      products_supplied TEXT DEFAULT '',
+      status TEXT DEFAULT 'pending' CHECK(status IN ('approved','conditional','suspended','pending')),
+      approval_date TEXT,
+      next_review_date TEXT,
+      risk_level TEXT DEFAULT 'low' CHECK(risk_level IN ('low','medium','high')),
+      certification TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_by TEXT DEFAULT '',
+      updated_by TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS supplier_documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+      document_type TEXT DEFAULT 'other',
+      filename TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      file_size INTEGER DEFAULT 0,
+      uploaded_by TEXT DEFAULT '',
+      uploaded_at TEXT DEFAULT (datetime('now')),
+      notes TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS supplier_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+      review_date TEXT NOT NULL,
+      reviewer TEXT DEFAULT '',
+      outcome TEXT DEFAULT 'approved' CHECK(outcome IN ('approved','conditional','suspended')),
+      findings TEXT DEFAULT '',
+      corrective_actions TEXT DEFAULT '',
+      next_review TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+} catch (e) {
+  console.log('Supplier tables already exist or migration error:', e.message);
+}
+
+// GET /api/suppliers
+router.get('/suppliers', (req, res) => {
+  try {
+    const { status, risk_level, search } = req.query;
+    let query = 'SELECT * FROM suppliers WHERE 1=1';
+    const params = [];
+
+    if (status) { query += ' AND status = ?'; params.push(status); }
+    if (risk_level) { query += ' AND risk_level = ?'; params.push(risk_level); }
+    if (search) {
+      query += ' AND (LOWER(name) LIKE LOWER(?) OR LOWER(products_supplied) LIKE LOWER(?) OR LOWER(contact_name) LIKE LOWER(?))';
+      params.push('%' + search + '%', '%' + search + '%', '%' + search + '%');
+    }
+
+    query += ' ORDER BY name';
+    const suppliers = db.prepare(query).all(...params);
+    res.json(suppliers);
+  } catch (err) {
+    console.error('Get suppliers error:', err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/suppliers/summary
+router.get('/suppliers/summary', (req, res) => {
+  try {
+    const total = db.prepare('SELECT COUNT(*) as count FROM suppliers').get().count;
+    const approved = db.prepare("SELECT COUNT(*) as count FROM suppliers WHERE status = 'approved'").get().count;
+    const conditional = db.prepare("SELECT COUNT(*) as count FROM suppliers WHERE status = 'conditional'").get().count;
+    const suspended = db.prepare("SELECT COUNT(*) as count FROM suppliers WHERE status = 'suspended'").get().count;
+    const pending = db.prepare("SELECT COUNT(*) as count FROM suppliers WHERE status = 'pending'").get().count;
+    const overdue = db.prepare("SELECT COUNT(*) as count FROM suppliers WHERE next_review_date < date('now') AND status != 'suspended'").get().count;
+    res.json({ total, approved, conditional, suspended, pending, overdue });
+  } catch (err) {
+    console.error('Supplier summary error:', err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/suppliers/:id
+
+// GET /api/suppliers/checklist/summary
+router.get("/suppliers/checklist/summary", (req, res) => {
+  try {
+    const suppliers = db.prepare("SELECT id, name, status FROM suppliers ORDER BY name").all();
+    const summary = suppliers.map(s => {
+      const total = db.prepare("SELECT COUNT(*) as c FROM supplier_checklist WHERE supplier_id = ? AND required = 1").get(s.id).c;
+      const done = db.prepare("SELECT COUNT(*) as c FROM supplier_checklist WHERE supplier_id = ? AND required = 1 AND completed = 1").get(s.id).c;
+      const missing = db.prepare("SELECT item_name FROM supplier_checklist WHERE supplier_id = ? AND required = 1 AND completed = 0 ORDER BY item_name").all(s.id).map(r => r.item_name);
+      return { ...s, total_required: total, completed: done, percentage: total > 0 ? Math.round(done / total * 100) : 0, missing };
+    });
+    res.json(summary);
+  } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
+router.get('/suppliers/:id', (req, res) => {
+  try {
+    const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+
+    const documents = db.prepare('SELECT * FROM supplier_documents WHERE supplier_id = ? ORDER BY uploaded_at DESC').all(req.params.id);
+    const reviews = db.prepare('SELECT * FROM supplier_reviews WHERE supplier_id = ? ORDER BY review_date DESC').all(req.params.id);
+
+    res.json({ ...supplier, documents, reviews });
+  } catch (err) {
+    console.error('Get supplier error:', err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/suppliers
+router.post('/suppliers', requireWriteAccess, (req, res) => {
+  try {
+    const sanitized = sanitizeBody(req.body);
+    const { name, contact_name = '', contact_email = '', contact_phone = '', address = '', products_supplied = '', status = 'pending', approval_date = null, next_review_date = null, risk_level = 'low', certification = '', notes = '' } = sanitized;
+    if (!name) return res.status(400).json({ error: 'Supplier name is required' });
+
+    const user = req.session?.user;
+    const created_by = user?.display_name || user?.username || '';
+
+    const info = db.prepare('INSERT INTO suppliers (name, contact_name, contact_email, contact_phone, address, products_supplied, status, approval_date, next_review_date, risk_level, certification, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, contact_name, contact_email, contact_phone, address, products_supplied, status, approval_date, next_review_date, risk_level, certification, notes, created_by);
+
+    const created = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(info.lastInsertRowid);
+    logAudit(req, 'create_supplier', 'suppliers', created.id, name, { new_values: sanitized });
+    broadcast('supplier_created', created);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('Create supplier error:', err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/suppliers/:id
+router.put('/suppliers/:id', requireWriteAccess, (req, res) => {
+  try {
+    const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+
+    const sanitized = sanitizeBody(req.body);
+    const fields = ['name', 'contact_name', 'contact_email', 'contact_phone', 'address', 'products_supplied', 'status', 'approval_date', 'next_review_date', 'risk_level', 'certification', 'notes'];
+
+    const updates = []; const params = []; const oldValues = {}; const newValues = {};
+    for (const field of fields) {
+      if (sanitized[field] !== undefined) {
+        updates.push(field + ' = ?'); params.push(sanitized[field]);
+        if (sanitized[field] !== supplier[field]) { oldValues[field] = supplier[field]; newValues[field] = sanitized[field]; }
+      }
+    }
+
+    const user = req.session?.user;
+    updates.push('updated_by = ?'); params.push(user?.display_name || user?.username || '');
+    updates.push("updated_at = datetime('now')");
+    if (updates.length <= 2) return res.json(supplier);
+
+    params.push(req.params.id);
+    db.prepare('UPDATE suppliers SET ' + updates.join(', ') + ' WHERE id = ?').run(...params);
+    const updated = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+
+    if (Object.keys(oldValues).length > 0) logAudit(req, 'update_supplier', 'suppliers', req.params.id, supplier.name, { old_values: oldValues, new_values: newValues });
+    broadcast('supplier_updated', updated);
+    res.json(updated);
+  } catch (err) {
+    console.error('Update supplier error:', err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PATCH /api/suppliers/:id/status (admin only)
+router.patch('/suppliers/:id/status', requireRole('admin'), (req, res) => {
+  try {
+    const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+
+    const { status } = req.body;
+    const valid = ['approved', 'conditional', 'suspended', 'pending'];
+    if (!valid.includes(status)) return res.status(400).json({ error: 'Invalid status. Must be one of: ' + valid.join(', ') });
+
+    const user = req.session?.user;
+    db.prepare("UPDATE suppliers SET status = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?").run(status, user?.display_name || user?.username || '', req.params.id);
+    if (status === 'approved' && !supplier.approval_date) db.prepare("UPDATE suppliers SET approval_date = date('now') WHERE id = ?").run(req.params.id);
+
+    const updated = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    logAudit(req, 'update_supplier_status', 'suppliers', req.params.id, supplier.name, { old_values: { status: supplier.status }, new_values: { status } });
+    broadcast('supplier_updated', updated);
+    res.json(updated);
+  } catch (err) {
+    console.error('Update supplier status error:', err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/suppliers/:id (admin only)
+router.delete('/suppliers/:id', requireRole('admin'), (req, res) => {
+  try {
+    const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+
+    db.prepare('DELETE FROM supplier_documents WHERE supplier_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM supplier_reviews WHERE supplier_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM suppliers WHERE id = ?').run(req.params.id);
+
+    logAudit(req, 'delete_supplier', 'suppliers', req.params.id, supplier.name, { old_values: supplier });
+    broadcast('supplier_deleted', { id: parseInt(req.params.id), name: supplier.name });
+    res.json({ success: true, message: 'Supplier ' + supplier.name + ' deleted' });
+  } catch (err) {
+    console.error('Delete supplier error:', err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/suppliers/:id/reviews
+router.post('/suppliers/:id/reviews', requireWriteAccess, (req, res) => {
+  try {
+    const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+
+    const { review_date, outcome = 'approved', findings = '', corrective_actions = '', next_review = '' } = req.body;
+    if (!review_date) return res.status(400).json({ error: 'review_date is required' });
+
+    const user = req.session?.user;
+    const reviewer = user?.display_name || user?.username || '';
+
+    const info = db.prepare('INSERT INTO supplier_reviews (supplier_id, review_date, reviewer, outcome, findings, corrective_actions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)').run(req.params.id, review_date, reviewer, outcome, findings, corrective_actions, next_review);
+
+    // Update supplier status based on review
+    const updateFields = ["status = ?", "updated_at = datetime('now')"];
+    const updateParams = [outcome];
+    if (next_review) { updateFields.push('next_review_date = ?'); updateParams.push(next_review); }
+    updateParams.push(req.params.id);
+    db.prepare('UPDATE suppliers SET ' + updateFields.join(', ') + ' WHERE id = ?').run(...updateParams);
+
+    const created = db.prepare('SELECT * FROM supplier_reviews WHERE id = ?').get(info.lastInsertRowid);
+    logAudit(req, 'create_supplier_review', 'supplier_reviews', created.id, supplier.name, { new_values: { review_date, outcome, findings } });
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('Create supplier review error:', err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+// ==================== DOCUMENT UPLOAD ====================
+import multer from "multer";
+import { join, dirname, extname } from "path";
+import { fileURLToPath } from "url";
+import { existsSync, mkdirSync, unlinkSync } from "fs";
+
+const __filename_s = fileURLToPath(import.meta.url);
+const __dirname_s = dirname(__filename_s);
+const supplierDocsDir = join(__dirname_s, "..", "..", "documents", "Suppliers");
+if (!existsSync(supplierDocsDir)) mkdirSync(supplierDocsDir, { recursive: true });
+
+const supplierUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, supplierDocsDir),
+    filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
+  }),
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
+
+router.post("/suppliers/:id/documents", requireWriteAccess, supplierUpload.single("file"), (req, res) => {
+  try {
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(req.params.id);
+    if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    const { document_type = "other", description = "", notes = "" } = req.body;
+    const user = req.session?.user;
+    const uploaded_by = user?.display_name || user?.username || "";
+
+    const info = db.prepare(
+      "INSERT INTO supplier_documents (supplier_id, filename, original_name, document_type, notes, file_size, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(req.params.id, req.file.filename, req.file.originalname, document_type, description || notes || "", req.file.size, uploaded_by);
+
+    const doc = db.prepare("SELECT * FROM supplier_documents WHERE id = ?").get(info.lastInsertRowid);
+    logAudit(req, "upload_supplier_doc", "supplier_documents", doc.id, supplier.name, { document_type, original_name: req.file.originalname });
+    res.status(201).json(doc);
+  } catch (err) {
+    console.error("Supplier doc upload error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/suppliers/:id/documents/:docId/download", (req, res) => {
+  try {
+    const doc = db.prepare("SELECT * FROM supplier_documents WHERE id = ? AND supplier_id = ?").get(req.params.docId, req.params.id);
+    if (!doc) return res.status(404).json({ error: "Document not found" });
+    res.download(join(supplierDocsDir, doc.filename), doc.original_name);
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// DELETE /api/suppliers/:id/documents/:docId (admin only)
+router.delete("/suppliers/:id/documents/:docId", requireRole("admin"), (req, res) => {
+  try {
+    const doc = db.prepare("SELECT * FROM supplier_documents WHERE id = ? AND supplier_id = ?").get(req.params.docId, req.params.id);
+    if (!doc) return res.status(404).json({ error: "Document not found" });
+
+    // Remove file from disk
+    const filePath = join(supplierDocsDir, doc.filename);
+    try { unlinkSync(filePath); } catch (e) { /* file may already be gone */ }
+
+    db.prepare("DELETE FROM supplier_documents WHERE id = ?").run(doc.id);
+
+    const supplier = db.prepare("SELECT name FROM suppliers WHERE id = ?").get(req.params.id);
+    logAudit(req, "delete_supplier_doc", "supplier_documents", doc.id, supplier?.name || "", { old_values: { original_name: doc.original_name, document_type: doc.document_type } });
+    res.json({ success: true, message: "Document deleted" });
+  } catch (err) {
+    console.error("Delete supplier doc error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+// GET /api/suppliers/:id/checklist
+router.get("/suppliers/:id/checklist", (req, res) => {
+  try {
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(req.params.id);
+    if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const items = db.prepare("SELECT * FROM supplier_checklist WHERE supplier_id = ? ORDER BY required DESC, completed ASC, item_name ASC").all(req.params.id);
+    const total = items.filter(i => i.required).length;
+    const done = items.filter(i => i.required && i.completed).length;
+    res.json({ supplier_id: supplier.id, supplier_name: supplier.name, total_required: total, completed: done, percentage: total > 0 ? Math.round(done / total * 100) : 0, items });
+  } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
+// PATCH /api/suppliers/:id/checklist/:itemId
+router.patch("/suppliers/:id/checklist/:itemId", requireWriteAccess, (req, res) => {
+  try {
+    const item = db.prepare("SELECT * FROM supplier_checklist WHERE id = ? AND supplier_id = ?").get(req.params.itemId, req.params.id);
+    if (!item) return res.status(404).json({ error: "Checklist item not found" });
+    const { completed, notes, required } = req.body;
+    const updates = []; const params = [];
+    if (completed !== undefined) { updates.push("completed = ?"); params.push(completed ? 1 : 0); updates.push(completed ? "completed_date = datetime('now')" : "completed_date = NULL"); }
+    if (notes !== undefined) { updates.push("notes = ?"); params.push(notes); }
+    if (required !== undefined) { updates.push("required = ?"); params.push(required ? 1 : 0); }
+    updates.push("updated_at = datetime('now')"); params.push(req.params.itemId);
+    db.prepare("UPDATE supplier_checklist SET " + updates.join(", ") + " WHERE id = ?").run(...params);
+    res.json(db.prepare("SELECT * FROM supplier_checklist WHERE id = ?").get(req.params.itemId));
+  } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
+export default router;

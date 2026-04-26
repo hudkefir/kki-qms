@@ -26,7 +26,10 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     // Sanitize filename to prevent path traversal
-    cb(null, sanitizeFilename(file.originalname));
+    // Prefix with timestamp to prevent version overwrites on disk
+    const ext = extname(file.originalname).toLowerCase();
+    const base = basename(sanitizeFilename(file.originalname), ext);
+    cb(null, `${base}_${Date.now()}${ext}`);
   },
 });
 
@@ -88,6 +91,14 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
     );
 
     const created = db.prepare('SELECT * FROM sop_files WHERE id = ?').get(info.lastInsertRowid);
+
+    // Auto-update SOP version from filename (e.g. "KK-SOP-00100_..._v1_0.docx" → "1.0")
+    const versionMatch = req.file.originalname.match(/_v(\d+[._]\d+)/i);
+    if (versionMatch) {
+      const newVersion = versionMatch[1].replace('_', '.');
+      db.prepare('UPDATE sops SET version = ?, updated_at = datetime(\'now\') WHERE id = ?').run(newVersion, req.params.id);
+    }
+
     logAudit(req, 'upload_file', 'sops', req.params.id, sop.sop_number, {
       filename: req.file.originalname,
       version,

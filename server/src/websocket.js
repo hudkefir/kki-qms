@@ -5,11 +5,11 @@ let wss = null;
 export function setupWebSocket(server) {
   wss = new WebSocketServer({ server });
 
+  let connCount = 0;
   wss.on('connection', (ws) => {
-    console.log('WebSocket client connected');
-    ws.on('close', () => {
-      console.log('WebSocket client disconnected');
-    });
+    connCount++;
+    if (connCount % 100 === 1) console.log('WebSocket connections (total this session):', connCount);
+    ws.on('close', () => {});
   });
 
   return wss;

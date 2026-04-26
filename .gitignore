@@ -1,4 +1,5 @@
 node_modules/
+*.db
 *.db-journal
 *.db-wal
 *.db-shm
@@ -11,3 +12,14 @@ CURRENT_TUNNEL_URL.txt
 WORKING_QMS_URL.txt
 CURRENT_PROFESSIONAL_URL.txt
 PROFESSIONAL_QMS_URL.txt
+backups/
+uploads/
+*.bak
+*.bak-*
+*.broken
+*.pre-*
+client/client/
+server/documents/
+documents/
+*.bak
+*.archive-bak

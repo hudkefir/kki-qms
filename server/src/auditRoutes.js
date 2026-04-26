@@ -162,4 +162,19 @@ router.get('/audit-logs/filters', requireAuth, requireRole('admin'), (req, res) 
   }
 });
 
+
+// GET /api/audit-trail/:resourceType/:resourceId - Per-record audit trail
+router.get('/audit-trail/:resourceType/:resourceId', requireAuth, (req, res) => {
+  try {
+    const { resourceType, resourceId } = req.params;
+    const logs = db.prepare(
+      'SELECT * FROM audit_logs WHERE (resource_type = ? OR resource_type = ?) AND resource_id = ? ORDER BY timestamp DESC LIMIT 100'
+    ).all(resourceType, resourceType + 's', resourceId);
+    res.json(logs);
+  } catch (err) {
+    console.error('Audit trail error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

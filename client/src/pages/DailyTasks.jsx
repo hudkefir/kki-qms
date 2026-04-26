@@ -16,12 +16,15 @@ const SHIFT_OPTIONS = [
 ];
 
 const CATEGORY_COLORS = {
-  'Pre-Production':    { border: '#3B82F6', bg: 'rgba(59,130,246,0.08)',  headerBg: 'bg-blue-100',   headerText: 'text-blue-800',   dot: 'bg-blue-500' },
+  'Daily Activities':  { border: '#3B82F6', bg: 'rgba(59,130,246,0.08)',  headerBg: 'bg-blue-100',   headerText: 'text-blue-800',   dot: 'bg-blue-500' },
+  'Chemical Prep':     { border: '#10B981', bg: 'rgba(16,185,129,0.08)', headerBg: 'bg-green-100',  headerText: 'text-green-800',  dot: 'bg-green-500' },
+  'Cleanroom Prep':    { border: '#14B8A6', bg: 'rgba(20,184,166,0.08)', headerBg: 'bg-teal-100',   headerText: 'text-teal-800',   dot: 'bg-teal-500' },
+  'EOD Cleaning':      { border: '#F59E0B', bg: 'rgba(245,158,11,0.08)', headerBg: 'bg-orange-100', headerText: 'text-orange-800', dot: 'bg-orange-500' },
+  'Post-Production':   { border: '#8B5CF6', bg: 'rgba(139,92,246,0.08)', headerBg: 'bg-purple-100', headerText: 'text-purple-800', dot: 'bg-purple-500' },
+  'Bin Washing':       { border: '#06B6D4', bg: 'rgba(6,182,212,0.08)',  headerBg: 'bg-cyan-100',   headerText: 'text-cyan-800',   dot: 'bg-cyan-500' },
+  'Pre-Production':    { border: '#3B82F6', bg: 'rgba(59,130,246,0.08)', headerBg: 'bg-blue-100',   headerText: 'text-blue-800',   dot: 'bg-blue-500' },
   'During Production': { border: '#10B981', bg: 'rgba(16,185,129,0.08)', headerBg: 'bg-green-100',  headerText: 'text-green-800',  dot: 'bg-green-500' },
-  'Post-Production':   { border: '#F59E0B', bg: 'rgba(245,158,11,0.08)', headerBg: 'bg-orange-100', headerText: 'text-orange-800', dot: 'bg-orange-500' },
-  'Weekly':            { border: '#8B5CF6', bg: 'rgba(139,92,246,0.08)', headerBg: 'bg-purple-100', headerText: 'text-purple-800', dot: 'bg-purple-500' },
-  'Cleaning':          { border: '#14B8A6', bg: 'rgba(20,184,166,0.08)', headerBg: 'bg-teal-100',   headerText: 'text-teal-800',   dot: 'bg-teal-500' },
-  'Safety':            { border: '#EF4444', bg: 'rgba(239,68,68,0.08)',  headerBg: 'bg-red-100',    headerText: 'text-red-800',    dot: 'bg-red-500' },
+  'Weekly':            { border: '#EF4444', bg: 'rgba(239,68,68,0.08)',  headerBg: 'bg-red-100',    headerText: 'text-red-800',    dot: 'bg-red-500' },
 };
 
 const DEFAULT_CAT = { border: '#6B7280', bg: 'rgba(107,114,128,0.06)', headerBg: 'bg-gray-100', headerText: 'text-gray-800', dot: 'bg-gray-400' };
@@ -30,7 +33,7 @@ function getCat(category) {
   return CATEGORY_COLORS[category] || DEFAULT_CAT;
 }
 
-const CATEGORY_ORDER = ['Pre-Production', 'During Production', 'Post-Production', 'Weekly', 'Cleaning', 'Safety'];
+const CATEGORY_ORDER = ['Daily Activities', 'Chemical Prep', 'Cleanroom Prep', 'EOD Cleaning', 'Post-Production', 'Bin Washing', 'Pre-Production', 'During Production', 'Weekly'];
 
 function formatTime(isoStr) {
   if (!isoStr) return '';

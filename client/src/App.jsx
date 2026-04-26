@@ -1,12 +1,11 @@
 import React from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
-import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList } from 'lucide-react';
+import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import SOPLibrary from './pages/SOPLibrary';
 import SOPDetail from './pages/SOPDetail';
-import AuditPrep from './pages/AuditPrep';
 import Complaints from './pages/Complaints';
 import ComplaintDetail from './pages/ComplaintDetail';
 import CCRs from './pages/CCRs';
@@ -16,8 +15,27 @@ import UserManagement from './pages/UserManagement';
 import AuditLogs from './pages/AuditLogs';
 import DocumentLibrary from './pages/DocumentLibrary';
 import BatchTesting from './pages/BatchTesting';
+import BatchTestDetail from './pages/BatchTestDetail';
 import DailyTasks from './pages/DailyTasks';
+import ChangeRequests from './pages/ChangeRequests';
+import ChangeRequestDetail from './pages/ChangeRequestDetail';
+import Deviations from './pages/Deviations';
+import DeviationDetail from './pages/DeviationDetail';
+import CAPAs from './pages/CAPAs';
+import CAPADetail from './pages/CAPADetail';
+import Equipment from './pages/Equipment';
+import EquipmentDetail from './pages/EquipmentDetail';
+import Maintenance from './pages/Maintenance';
+import WorkOrderDetail from './pages/WorkOrderDetail';
+import RecallCenter from './pages/RecallCenter';
+import Suppliers from './pages/Suppliers';
+import SupplierDetail from './pages/SupplierDetail';
+import RecallDetail from './pages/RecallDetail';
+import TraceabilityDetail from './pages/TraceabilityDetail';
+import CrisisDetail from './pages/CrisisDetail';
 import useWebSocket from './hooks/useWebSocket';
+import AccessDenied from "./components/AccessDenied";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 function getDaysUntilAudit() {
   const audit = new Date('2026-04-23');
@@ -32,6 +50,26 @@ const ROLE_COLORS = {
   viewer: 'bg-gray-500/20 text-gray-300',
   operator: 'bg-green-500/20 text-green-300',
 };
+
+function DateTimeClock() {
+  const [now, setNow] = React.useState(new Date());
+  React.useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return (
+    <div className="text-center">
+      <p className="text-xs font-semibold text-navy-200">
+        {days[now.getDay()]}, {months[now.getMonth()]} {now.getDate()}, {now.getFullYear()}
+      </p>
+      <p className="text-lg font-bold text-white tracking-wide">
+        {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+      </p>
+    </div>
+  );
+}
 
 export default function App() {
   const { user, loading, logout, hasRole } = useAuth();
@@ -57,21 +95,44 @@ export default function App() {
     return <Login />;
   }
 
-  const navItems = [
-    { to: '/', icon: Home, label: 'Dashboard', end: true },
-    { to: '/sops', icon: FileText, label: 'SOP Library' },
-    { to: '/complaints', icon: AlertCircle, label: 'Complaints' },
-    { to: '/ccrs', icon: FileCheck, label: 'CCRs' },
-    { to: '/documents', icon: FolderOpen, label: 'Documents' },
-    { to: '/batch-testing', icon: FlaskConical, label: 'Batch Testing' },
-    { to: '/daily-tasks', icon: ClipboardList, label: 'Daily Tasks' },
-    { to: '/analytics', icon: BarChart3, label: 'Analytics' },
-    { to: '/audit', icon: ClipboardCheck, label: 'Audit Prep' },
-    // Admin-only items
-    ...(hasRole('admin') ? [
-      { to: '/users', icon: Users, label: 'Users', divider: true },
-      { to: '/audit-logs', icon: ScrollText, label: 'Audit Log' },
-    ] : []),
+  const navGroups = [
+    { items: [{ to: '/', icon: Home, label: 'Dashboard', end: true }] },
+    { label: 'Quality & Compliance',
+      items: [
+        { to: '/complaints', icon: AlertCircle, label: 'Complaints' },
+        { to: '/ccrs', icon: FileCheck, label: 'CCRs' },
+        { to: '/deviations', icon: AlertOctagon, label: 'Deviations' },
+        { to: '/capas', icon: ShieldCheck, label: 'CAPAs' },
+        { to: '/change-requests', icon: GitPullRequest, label: 'Change Control' },
+      ]
+    },
+    { label: 'Production',
+      items: [
+        { to: '/batch-testing', icon: FlaskConical, label: 'Batch Testing' },
+        { to: '/daily-tasks', icon: ClipboardList, label: 'Daily Tasks' },
+        { to: '/equipment', icon: Cog, label: 'Equipment' },
+        { to: '/maintenance', icon: Wrench, label: 'Maintenance' },
+      ]
+    },
+    { label: 'Documents & Suppliers',
+      items: [
+        { to: '/sops', icon: FileText, label: 'SOP Library' },
+        { to: '/documents', icon: FolderOpen, label: 'Documents' },
+        { to: '/suppliers', icon: Package, label: 'Suppliers' },
+      ]
+    },
+    { label: 'Risk & Readiness',
+      items: [
+        { to: '/recalls', icon: AlertTriangle, label: 'Recall Center' },
+        { to: '/analytics', icon: BarChart3, label: 'Analytics' },
+      ]
+    },
+    ...(hasRole('admin') ? [{ label: 'Admin',
+      items: [
+        { to: '/users', icon: Users, label: 'Users' },
+        { to: '/audit-logs', icon: ScrollText, label: 'Audit Log' },
+      ]
+    }] : []),
   ];
 
   return (
@@ -89,6 +150,11 @@ export default function App() {
               <p className="text-xs text-navy-300 leading-tight">Document Control System</p>
             </div>
           </div>
+        </div>
+
+        {/* Date & Time */}
+        <div className="px-4 py-2.5 border-b border-navy-700 bg-navy-750">
+          <DateTimeClock />
         </div>
 
         {/* User Info */}
@@ -117,24 +183,29 @@ export default function App() {
 
         {/* Navigation */}
         <div className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map(({ to, icon: Icon, label, end, divider }) => (
-            <React.Fragment key={to}>
-              {divider && <div className="border-t border-navy-700 my-2" />}
-              <NavLink
-                to={to}
-                end={end}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-navy-600 text-white'
-                      : 'text-navy-300 hover:bg-navy-700 hover:text-white'
-                  }`
-                }
-              >
-                <Icon className="w-5 h-5" />
-                {label}
-              </NavLink>
-            </React.Fragment>
+          {navGroups.map((group, gi) => (
+            <div key={gi} className={gi > 0 ? 'mt-3 pt-3 border-t border-navy-700/50' : ''}>
+              {group.label && (
+                <p className="px-3 mb-1.5 text-[10px] font-bold text-navy-500 uppercase tracking-wider">{group.label}</p>
+              )}
+              {group.items.map(({ to, icon: Icon, label, end }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={end}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'bg-navy-600 text-white'
+                        : 'text-navy-300 hover:bg-navy-700 hover:text-white'
+                    }`
+                  }
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </div>
 
@@ -180,15 +251,43 @@ export default function App() {
             <Route path="/ccrs/:id" element={<CCRDetail />} />
             <Route path="/documents" element={<DocumentLibrary />} />
             <Route path="/batch-testing" element={<BatchTesting />} />
+            <Route path="/batch-testing/:id" element={<BatchTestDetail />} />
             <Route path="/daily-tasks" element={<DailyTasks />} />
+            <Route path="/change-requests" element={<ChangeRequests />} />
+            <Route path="/change-requests/:id" element={<ChangeRequestDetail />} />
+            <Route path="/deviations" element={<Deviations />} />
+            <Route path="/deviations/:id" element={<DeviationDetail />} />
+            <Route path="/capas" element={<CAPAs />} />
+            <Route path="/capas/:id" element={<CAPADetail />} />
+            <Route path="/equipment" element={<Equipment />} />
+            <Route path="/equipment/:id" element={<EquipmentDetail />} />
+            <Route path="/maintenance" element={<Maintenance />} />
+            <Route path="/work-orders/:id" element={<WorkOrderDetail />} />
+            <Route path="/recalls" element={<RecallCenter />} />
+            <Route path="/suppliers" element={<Suppliers />} />
+            <Route path="/suppliers/:id" element={<SupplierDetail />} />
+            <Route path="/recalls/:id" element={<RecallDetail />} />
+            <Route path="/traceability-exercises/:id" element={<TraceabilityDetail />} />
+            <Route path="/crisis-events/:id" element={<CrisisDetail />} />
             <Route path="/analytics" element={<Analytics />} />
-            <Route path="/audit" element={<AuditPrep />} />
-            {hasRole('admin') && (
-              <>
-                <Route path="/users" element={<UserManagement />} />
-                <Route path="/audit-logs" element={<AuditLogs />} />
-              </>
-            )}
+            <Route path="/users" element={
+              <ProtectedRoute roles={["admin"]} label="Admin">
+                <UserManagement />
+              </ProtectedRoute>
+            } />
+            <Route path="/audit-logs" element={
+              <ProtectedRoute roles={["admin"]} label="Admin">
+                <AuditLogs />
+              </ProtectedRoute>
+            } />
+            <Route path="*" element={
+              <div className="min-h-[60vh] flex items-center justify-center">
+                <div className="text-center">
+                  <h2 className="text-xl font-bold text-gray-200 mb-2">Page Not Found</h2>
+                  <p className="text-gray-400">The page you are looking for does not exist.</p>
+                </div>
+              </div>
+            } />
           </Routes>
         </div>
       </main>

@@ -18,6 +18,13 @@ import batchTestRoutes from './batchTestRoutes.js';
 import dailyTaskRoutes from './dailyTaskRoutes.js';
 import formRoutes from './formRoutes.js';
 import taskboardRoutes from './taskboardRoutes.js';import plannerRoutes from './plannerRoutes.js';
+import changeControlRoutes from './changeControlRoutes.js';
+import maintenanceRoutes from './maintenanceRoutes.js';
+import recallRoutes from './recallRoutes.js';
+import sosRoutes from './sosRoutes.js';
+import printRoutes from './printRoutes.js';
+import environmentalRoutes from './environmentalRoutes.js';
+import supplierRoutes from './supplierRoutes.js';
 import { setupWebSocket } from './websocket.js';
 import { requireAuth } from './authMiddleware.js';
 import { auditApiMiddleware } from './auditMiddleware.js';
@@ -74,12 +81,12 @@ app.use('/api', (req, res, next) => {
   // Extract path segments and check common ID patterns
   const segments = req.path.split('/').filter(Boolean);
   // Check segments that follow known resource names (sops, complaints, ccrs, users, documents, audit, files)
-  const resources = ['sops', 'complaints', 'ccrs', 'users', 'documents', 'audit', 'files', 'corrective-actions', 'batch-tests', 'daily-tasks', 'sop-forms'];
+  const resources = ['sops', 'complaints', 'ccrs', 'users', 'documents', 'audit', 'files', 'corrective-actions', 'batch-tests', 'daily-tasks', 'sop-forms', 'change-requests', 'deviations', 'capas', 'change-control', 'equipment', 'pm-schedules', 'work-orders', 'recalls', 'traceability-exercises', 'crisis-events', 'recall', 'suppliers'];
   for (let i = 0; i < segments.length - 1; i++) {
     if (resources.includes(segments[i])) {
       const idSegment = segments[i + 1];
       // Skip known sub-paths that aren't IDs
-      if (['analytics', 'upload', 'by-lot', 'bulk-read-content', 'status', 'admin', 'completions', 'templates', 'results', 'verify', 'bulk', 'summary', 'fields', 'entries', 'forms', 'operators', 'export', 'admin-override', 'unlock', 'load'].includes(idSegment)) continue;
+      if (['analytics', 'upload', 'by-lot', 'bulk-read-content', 'status', 'admin', 'completions', 'templates', 'results', 'verify', 'bulk', 'summary', 'fields', 'entries', 'forms', 'operators', 'export', 'admin-override', 'unlock', 'load', 'classify', 'approve', 'reject', 'effectiveness', 'investigate', 'disposition', 'dashboard', 'overdue', 'upcoming', 'complete', 'hold', 'notify-cfia', 'notify-customers', 'distribution', 'close', 'resolve', 'parse-coa-multi', 'print', 'environmental', 'updates', 'link-batch', 'link-complaint', 'available-complaints', 'available-batches', 'audit-trail', 'suggest-links', 'import', 'reviews', 'checklist'].includes(idSegment)) continue;
       if (!/^\d+$/.test(idSegment)) {
         return res.status(400).json({ error: `Invalid ID '${idSegment}': must be a numeric value` });
       }
@@ -93,13 +100,13 @@ app.use('/api/taskboard', (req, res, next) => {
   const origin = req.headers.origin;
   if (origin && (origin.endsWith('.pages.dev') || origin.includes('localhost'))) {
     res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type');
   }
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
-app.use('/api/taskboard', taskboardRoutes);
+app.use("/api/taskboard", (req, res, next) => { console.log("[TB]", req.method, req.path); next(); }, taskboardRoutes);
 
 // Planner routes (no auth — standalone Cloudflare Pages planner)
 app.use('/api/planner', (req, res, next) => {
@@ -130,6 +137,13 @@ app.use('/api', requireAuth, adminRoutes);
 app.use('/api', requireAuth, batchTestRoutes);
 app.use('/api', requireAuth, dailyTaskRoutes);
 app.use('/api', requireAuth, formRoutes);
+app.use('/api', requireAuth, changeControlRoutes);
+app.use('/api', requireAuth, maintenanceRoutes);
+app.use('/api', requireAuth, recallRoutes);
+app.use('/api', requireAuth, sosRoutes);
+app.use('/api', printRoutes);
+app.use('/api', requireAuth, environmentalRoutes);
+app.use('/api', requireAuth, supplierRoutes);
 
 // Global error handler — prevent stack trace leaks
 app.use((err, req, res, _next) => {
@@ -140,6 +154,10 @@ app.use((err, req, res, _next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
+
+// Serve uploaded files (batch testing docs, etc.)
+const uploadsDir = join(__dirname, '..', '..', 'uploads');
+app.use('/uploads', express.static(uploadsDir));
 
 // Serve static files in production
 const clientDist = join(__dirname, '..', '..', 'client', 'dist');

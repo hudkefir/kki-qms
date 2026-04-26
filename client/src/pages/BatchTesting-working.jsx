@@ -1,8 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useRef } from 'react';
 import {
   FlaskConical, Plus, Search, Filter, CheckCircle, XCircle, Clock,
-  ChevronDown, ChevronUp, Save, X, Trash2, Printer, FileText, Paperclip, ExternalLink, Cog, FileUp, Truck
+  ChevronDown, ChevronUp, Save, X, Trash2, Printer, FileText, Paperclip, ExternalLink
 } from 'lucide-react';
 import { useFetch, apiPost, apiPut, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
@@ -13,14 +12,12 @@ const STATUS_COLORS = {
   pass: 'bg-green-100 text-green-700',
   fail: 'bg-red-100 text-red-700',
   pending: 'bg-amber-100 text-amber-700',
-  to_be_shipped: 'bg-blue-100 text-blue-700',
 };
 
 const STATUS_ICONS = {
   pass: CheckCircle,
   fail: XCircle,
   pending: Clock,
-  to_be_shipped: Truck,
 };
 
 const PROFILE_LABELS = {
@@ -282,16 +279,6 @@ export default function BatchTesting() {
   const canWrite = user?.role === 'admin' || user?.role === 'manager';
 
   const [statusFilter, setStatusFilter] = useState('');
-  const navigate = useNavigate();
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [visibleColumns, setVisibleColumns] = useState(() => {
-    try { const v = JSON.parse(localStorage.getItem('batch-visible-columns')); if (v) return v; } catch(e) {}
-    return { batch_number: true, product_name: true, status: true, test_date: true, lab_name: true, test_profile: true, tested_by: true, sample_date: false, report_date: false, lab_report_number: false, notes: false, created_by: false };
-  });
-  const [showColumnPicker, setShowColumnPicker] = useState(false);
-  const [bulkUploading, setBulkUploading] = useState(false);
-  const [bulkResults, setBulkResults] = useState(null);
-  const bulkFileRef = useRef();
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
@@ -316,39 +303,9 @@ export default function BatchTesting() {
     report_date: '',
   });
 
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 300);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-  useEffect(() => {
-    localStorage.setItem('batch-visible-columns', JSON.stringify(visibleColumns));
-  }, [visibleColumns]);
-
-  const COLUMN_OPTIONS = {
-    batch_number: 'Lot / Batch #', product_name: 'Product', status: 'Status', test_date: 'Test Date',
-    lab_name: 'Lab', test_profile: 'Profile', tested_by: 'Tested By', sample_date: 'Sample Date',
-    report_date: 'Report Date', lab_report_number: 'Report #', notes: 'Notes', created_by: 'Created By',
-  };
-
-  const handleBulkCoaUpload = async () => {
-    const file = bulkFileRef.current?.files?.[0];
-    if (!file) return;
-    setBulkUploading(true); setBulkResults(null);
-    try {
-      const formData = new FormData();
-      formData.append('coa', file);
-      const resp = await fetch('/api/batch-tests/parse-coa-multi', { method: 'POST', body: formData, credentials: 'include' });
-      const data = await resp.json();
-      if (data.error) throw new Error(data.error);
-      setBulkResults(data);
-      refetch();
-    } catch (err) { alert('Bulk upload failed: ' + err.message); }
-    finally { setBulkUploading(false); if (bulkFileRef.current) bulkFileRef.current.value = ''; }
-  };
-
   const queryParams = new URLSearchParams();
   if (statusFilter) queryParams.set('status', statusFilter);
-  if (debouncedSearch) queryParams.set('search', debouncedSearch);
+  if (searchTerm) queryParams.set('search', searchTerm);
 
   const { data: tests, loading, error, refetch } = useFetch(`/api/batch-tests?${queryParams.toString()}`);
 
@@ -436,16 +393,7 @@ export default function BatchTesting() {
     }
   };
 
-  let batchTests = Array.isArray(tests) ? tests.filter(Boolean) : [];
-  if (searchTerm && searchTerm !== debouncedSearch) {
-    const term = searchTerm.toLowerCase();
-    batchTests = batchTests.filter(t =>
-      (t.batch_number || '').toLowerCase().includes(term) ||
-      (t.product_name || '').toLowerCase().includes(term) ||
-      (t.product_sku || '').toLowerCase().includes(term) ||
-      (t.tested_by || '').toLowerCase().includes(term)
-    );
-  }
+  const batchTests = tests || [];
 
   if (loading) return <LoadingSpinner message="Loading batch tests..." />;
   if (error) return <div className="text-center py-16 text-red-600">{error}</div>;
@@ -495,84 +443,14 @@ export default function BatchTesting() {
               <option value="pass">Pass</option>
               <option value="fail">Fail</option>
               <option value="pending">Pending</option>
-              <option value="to_be_shipped">To Be Shipped</option>
             </select>
           </div>
-          {/* Column Picker */}
-          <div className="relative">
-            <button onClick={() => setShowColumnPicker(!showColumnPicker)}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50" title="Choose visible columns">
-              <Cog className="w-4 h-4 text-gray-400" /><span className="text-gray-600">Columns</span>
-            </button>
-            {showColumnPicker && (
-              <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-56">
-                <div className="text-xs font-semibold text-gray-500 uppercase mb-2">Visible Columns</div>
-                {Object.entries(COLUMN_OPTIONS).map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-2 py-1 px-1 hover:bg-gray-50 rounded cursor-pointer text-sm">
-                    <input type="checkbox" checked={visibleColumns[key] !== false}
-                      onChange={(e) => setVisibleColumns(prev => ({ ...prev, [key]: e.target.checked }))} className="rounded border-gray-300" />
-                    {label}
-                  </label>
-                ))}
-                <div className="border-t mt-2 pt-2 flex justify-between">
-                  <button onClick={() => setVisibleColumns(Object.fromEntries(Object.keys(COLUMN_OPTIONS).map(k => [k, true])))} className="text-xs text-indigo-600 hover:underline">Show All</button>
-                  <button onClick={() => setShowColumnPicker(false)} className="text-xs text-gray-500 hover:underline">Close</button>
-                </div>
-              </div>
-            )}
-          </div>
-          {/* Bulk COA Upload */}
-          {canWrite && (
-            <div>
-              <input type="file" ref={bulkFileRef} accept=".pdf" className="hidden" onChange={handleBulkCoaUpload} />
-              <button onClick={() => bulkFileRef.current?.click()} disabled={bulkUploading}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-sky-600 text-white rounded-lg text-sm font-medium hover:bg-sky-700 disabled:opacity-50">
-                <FileUp className="w-4 h-4" />{bulkUploading ? 'Processing...' : 'Upload Multi-Lot COA'}
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Bulk Results Modal */}
-      {bulkResults && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setBulkResults(null)}>
-          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-2xl p-6" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">COA Processing Results</h2>
-              <button onClick={() => setBulkResults(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="text-sm text-gray-500 mb-4">
-              Source: <strong>{bulkResults.sourceFile}</strong> — {bulkResults.totalPages} pages, {bulkResults.lotsFound} lots detected
-            </div>
-            <div className="space-y-3">
-              {(bulkResults.results || []).map((r, i) => (
-                <div key={i} className={'p-3 rounded-lg border ' + (r.batchTestFound ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50')}>
-                  <div className="flex items-center justify-between">
-                    <div><span className="font-semibold text-gray-900">Lot {r.lotNumber}</span>
-                      {r.productName && <span className="text-gray-500 ml-2">— {r.productName}</span>}
-                    </div>
-                    <span className={'text-xs px-2 py-0.5 rounded-full font-medium ' + (r.batchTestFound ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700')}>
-                      {r.batchTestFound ? 'Matched' : 'No batch found'}
-                    </span>
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {r.pageCount} page(s) • {r.totalParsed} tests parsed • {(r.matched || []).length} auto-filled
-                    {r.attachment && <span className="ml-2 text-sky-600">📎 PDF attached</span>}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button onClick={() => setBulkResults(null)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Done</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Summary chips */}
       <div className="flex flex-wrap gap-2 mb-6">
-        {['pass', 'fail', 'pending', 'to_be_shipped'].map(s => {
+        {['pass', 'fail', 'pending'].map(s => {
           const count = batchTests.filter(t => t.status === s).length;
           const Icon = STATUS_ICONS[s];
           return (
@@ -586,7 +464,7 @@ export default function BatchTesting() {
               }`}
             >
               <Icon className="w-3.5 h-3.5" />
-              {s === 'to_be_shipped' ? 'To Ship' : s.charAt(0).toUpperCase() + s.slice(1)}
+              {s.charAt(0).toUpperCase() + s.slice(1)}
               <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold bg-white/60">{count}</span>
             </button>
           );
@@ -609,7 +487,7 @@ export default function BatchTesting() {
                 {/* Header row */}
                 <div
                   className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-gray-50/50 transition-colors"
-                  onClick={() => navigate(`/batch-testing/${test.id}`)}
+                  onClick={() => handleExpandToggle(test.id)}
                 >
                   <div className={`p-2 rounded-lg ${STATUS_COLORS[test.status]}`}>
                     <Icon className="w-5 h-5" />
@@ -626,14 +504,12 @@ export default function BatchTesting() {
                         </span>
                       )}
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-sm text-gray-500">
-                      {visibleColumns.product_name !== false && test.product_name && <span>{test.product_name}</span>}
-                      {visibleColumns.test_date !== false && <span>{test.test_date}</span>}
-                      {visibleColumns.tested_by !== false && test.tested_by && <span>by {test.tested_by}</span>}
-                      {visibleColumns.lab_name !== false && test.lab_name && <span className="text-indigo-500">Lab: {test.lab_name}</span>}
-                      {visibleColumns.sample_date && test.sample_date && <span>Sampled: {test.sample_date}</span>}
-                      {visibleColumns.report_date && test.report_date && <span>Reported: {test.report_date}</span>}
-                      {visibleColumns.lab_report_number && test.lab_report_number && <span className="text-indigo-400">Ref: {test.lab_report_number}</span>}
+                    <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
+                      {test.product_name && <span>{test.product_name}</span>}
+                      {test.product_sku && <span>SKU: {test.product_sku}</span>}
+                      <span>{test.test_date}</span>
+                      <span>by {test.tested_by}</span>
+                      {test.lab_name && <span className="text-indigo-500">Lab: {test.lab_name}</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -745,7 +621,6 @@ export default function BatchTesting() {
                                           className={`border border-gray-200 rounded px-2 py-1 text-sm font-medium ${getResultColor(r)}`}
                                         >
                                           <option value="pending">Pending</option>
-              <option value="to_be_shipped">To Be Shipped</option>
                                           <option value="pass">Pass</option>
                                           <option value="fail">Fail</option>
                                           <option value="na">N/A</option>

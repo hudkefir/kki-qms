@@ -15,6 +15,22 @@ if (!existsSync(dataDir)) {
 const dbPath = join(dataDir, 'qms.db');
 const db = new Database(dbPath);
 
+// SAFETY CHECK: REFUSE to start without KKI_DATA_DIR in production
+if (!process.env.KKI_DATA_DIR) {
+  console.error("");
+  console.error("🚨 FATAL: KKI_DATA_DIR not set!");
+  console.error("🚨 The server would use the WRONG database and you would lose data.");
+  console.error("🚨 Production DB: /Users/kefirbot/KKI/Databases/qms.db");
+  console.error("🚨 Use: bash restart-server.sh");
+  console.error("");
+  if (!process.env.QMS_ALLOW_FALLBACK_DB) {
+    console.error("Refusing to start. Set QMS_ALLOW_FALLBACK_DB=1 to override (dev only).");
+    process.exit(1);
+  }
+  console.error("⚠️  QMS_ALLOW_FALLBACK_DB set — using fallback DB. NOT PRODUCTION.");
+}
+console.log('📂 Database: ' + dbPath);
+
 // Enable WAL mode for better concurrency
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
@@ -209,7 +225,7 @@ db.exec(`
     product_name TEXT DEFAULT '',
     test_date TEXT NOT NULL,
     tested_by TEXT DEFAULT '',
-    status TEXT DEFAULT 'pending' CHECK(status IN ('pass','fail','pending')),
+    status TEXT DEFAULT 'pending' CHECK(status IN ('pass','fail','pending','to_be_shipped')),
     notes TEXT DEFAULT '',
     created_by TEXT DEFAULT '',
     updated_by TEXT DEFAULT '',
@@ -446,6 +462,8 @@ const batchTestNewCols = [
   { table: 'batch_test_results', col: 'test_category', def: "TEXT DEFAULT 'routine'" },
   { table: 'batch_test_results', col: 'target_min', def: "TEXT DEFAULT ''" },
   { table: 'batch_test_results', col: 'target_max', def: "TEXT DEFAULT ''" },
+  { table: 'batch_test_results', col: 'comments', def: "TEXT DEFAULT ''" },
+  { table: 'batch_tests', col: 'attachments', def: "TEXT DEFAULT '[]'" },
 ];
 for (const { table, col, def } of batchTestNewCols) {
   try {
@@ -1150,6 +1168,339 @@ try {
 } catch (e) {
   // columns already exist
 }
+
+// ──── Change Control, Deviation & CAPA tables ────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS change_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id TEXT UNIQUE NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL CHECK(category IN ('ingredient','process','equipment','packaging','cleaning','document','system','facility','ccp')),
+    classification TEXT CHECK(classification IN ('minor','major','critical')),
+    status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','pending_review','approved','rejected','implementing','monitoring','effectiveness_check','closed')),
+    initiator TEXT NOT NULL,
+    food_safety_impact TEXT DEFAULT '{}',
+    proposed_effective_date TEXT,
+    actual_effective_date TEXT,
+    affected_documents TEXT DEFAULT '[]',
+    training_required INTEGER DEFAULT 0,
+    is_emergency INTEGER DEFAULT 0,
+    rejection_reason TEXT,
+    monitoring_end_date TEXT,
+    effectiveness_check_date TEXT,
+    effectiveness_result TEXT CHECK(effectiveness_result IN ('effective','not_effective')),
+    effectiveness_notes TEXT,
+    approved_by TEXT,
+    approved_at TEXT,
+    closed_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS deviation_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id TEXT UNIQUE NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL CHECK(category IN ('sop_bpr','ccp','product_spec','supplier_ingredient','cleaning','equipment','other')),
+    classification TEXT CHECK(classification IN ('critical','major','minor')),
+    status TEXT NOT NULL DEFAULT 'reported' CHECK(status IN ('reported','under_investigation','capa_defined','capa_implemented','effectiveness_check','closed')),
+    discovered_by TEXT NOT NULL,
+    discovered_at TEXT NOT NULL,
+    location TEXT,
+    affected_batches TEXT DEFAULT '[]',
+    affected_products TEXT DEFAULT '[]',
+    immediate_action TEXT,
+    is_ccp_deviation INTEGER DEFAULT 0,
+    process_stopped INTEGER DEFAULT 0,
+    product_on_hold INTEGER DEFAULT 0,
+    root_cause_method TEXT CHECK(root_cause_method IN ('five_whys','fishbone','timeline')),
+    root_cause TEXT,
+    scope_assessment TEXT,
+    product_disposition TEXT CHECK(product_disposition IN ('release','hold','donate','reject_destroy','recall_evaluation')),
+    disposition_rationale TEXT,
+    investigation_due_date TEXT,
+    escalated_from_minor INTEGER DEFAULT 0,
+    closed_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS capas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    capa_id TEXT UNIQUE NOT NULL,
+    source_type TEXT NOT NULL CHECK(source_type IN ('change_request','deviation')),
+    source_id INTEGER NOT NULL,
+    corrective_action TEXT NOT NULL,
+    preventive_action TEXT NOT NULL,
+    responsible_person TEXT NOT NULL,
+    target_date TEXT NOT NULL,
+    actual_completion_date TEXT,
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','in_progress','completed','overdue','closed')),
+    effectiveness_check_date TEXT,
+    effectiveness_result TEXT CHECK(effectiveness_result IN ('effective','not_effective','pending')),
+    effectiveness_notes TEXT,
+    linked_change_request_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS qms_sequence (
+    type TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    next_number INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (type, year)
+  );
+`);
+
+// Indexes for change control tables
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_change_requests_status ON change_requests(status);
+  CREATE INDEX IF NOT EXISTS idx_change_requests_category ON change_requests(category);
+  CREATE INDEX IF NOT EXISTS idx_deviation_reports_status ON deviation_reports(status);
+  CREATE INDEX IF NOT EXISTS idx_deviation_reports_category ON deviation_reports(category);
+  CREATE INDEX IF NOT EXISTS idx_capas_status ON capas(status);
+  CREATE INDEX IF NOT EXISTS idx_capas_source ON capas(source_type, source_id);
+`);
+
+// ──── Preventive Maintenance tables ────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS equipment (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    equipment_id TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    location TEXT NOT NULL,
+    manufacturer TEXT,
+    model TEXT,
+    serial_number TEXT,
+    date_installed TEXT,
+    is_critical INTEGER DEFAULT 0,
+    associated_sops TEXT DEFAULT '[]',
+    pm_frequency TEXT NOT NULL CHECK(pm_frequency IN ('daily','weekly','monthly','quarterly','semi_annual','annual')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','out_of_service','decommissioned')),
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS pm_schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    equipment_id INTEGER NOT NULL REFERENCES equipment(id),
+    task_name TEXT NOT NULL,
+    description TEXT,
+    frequency TEXT NOT NULL CHECK(frequency IN ('daily','weekly','monthly','quarterly','semi_annual','annual')),
+    category TEXT NOT NULL CHECK(category IN ('inspection','cleaning','lubrication','calibration_check','replacement','passivation','general')),
+    assigned_to TEXT,
+    last_completed_date TEXT,
+    next_due_date TEXT NOT NULL,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS pm_completions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    schedule_id INTEGER NOT NULL REFERENCES pm_schedules(id),
+    equipment_id INTEGER NOT NULL REFERENCES equipment(id),
+    completed_by TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed','completed_with_issues','skipped','deferred')),
+    notes TEXT,
+    issues_found TEXT,
+    parts_used TEXT DEFAULT '[]',
+    next_due_date TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS work_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_order_number TEXT UNIQUE NOT NULL,
+    equipment_id INTEGER NOT NULL REFERENCES equipment(id),
+    type TEXT NOT NULL CHECK(type IN ('preventive','corrective','emergency')),
+    priority TEXT NOT NULL DEFAULT 'routine' CHECK(priority IN ('routine','urgent','emergency')),
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','in_progress','awaiting_parts','completed','closed')),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    reported_by TEXT NOT NULL,
+    assigned_to TEXT,
+    work_performed TEXT,
+    parts_used TEXT DEFAULT '[]',
+    is_temporary_repair INTEGER DEFAULT 0,
+    temporary_repair_deadline TEXT,
+    temporary_repair_approved_by TEXT,
+    post_maintenance_sanitation INTEGER DEFAULT 0,
+    equipment_returned_to_service INTEGER DEFAULT 0,
+    returned_to_service_at TEXT,
+    completed_by TEXT,
+    completed_at TEXT,
+    verified_by TEXT,
+    food_safety_impact INTEGER DEFAULT 0,
+    affected_product TEXT,
+    product_disposition TEXT,
+    linked_deviation_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS wo_sequence (
+    year INTEGER PRIMARY KEY,
+    next_number INTEGER NOT NULL DEFAULT 1
+  );
+`);
+
+// Indexes for maintenance tables
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_equipment_status ON equipment(status);
+  CREATE INDEX IF NOT EXISTS idx_pm_schedules_equipment ON pm_schedules(equipment_id);
+  CREATE INDEX IF NOT EXISTS idx_pm_schedules_next_due ON pm_schedules(next_due_date);
+  CREATE INDEX IF NOT EXISTS idx_pm_completions_schedule ON pm_completions(schedule_id);
+  CREATE INDEX IF NOT EXISTS idx_work_orders_status ON work_orders(status);
+  CREATE INDEX IF NOT EXISTS idx_work_orders_equipment ON work_orders(equipment_id);
+`);
+
+// ──── Recall, Traceability & Crisis Management tables ────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS recalls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recall_id TEXT UNIQUE NOT NULL,
+    title TEXT NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('recall','withdrawal')),
+    classification TEXT CHECK(classification IN ('class_1','class_2','class_3')),
+    status TEXT NOT NULL DEFAULT 'initiated' CHECK(status IN ('initiated','investigating','hold_segregate','cfia_notified','customers_notified','recall_active','effectiveness_check','closed')),
+    trigger_type TEXT NOT NULL CHECK(trigger_type IN ('consumer_illness','pathogen','undeclared_allergen','foreign_material','ccp_deviation','supplier_recall','labelling_error','tampering','cfia_directive','other')),
+    trigger_description TEXT NOT NULL,
+    affected_products TEXT DEFAULT '[]',
+    affected_lot_codes TEXT DEFAULT '[]',
+    affected_batch_ids TEXT DEFAULT '[]',
+    root_cause TEXT,
+    risk_assessment TEXT,
+    total_quantity_produced INTEGER,
+    total_quantity_shipped INTEGER,
+    total_quantity_onsite INTEGER,
+    total_quantity_accounted INTEGER,
+    cfia_notified INTEGER DEFAULT 0,
+    cfia_notified_at TEXT,
+    cfia_contact_name TEXT,
+    cfia_reference_number TEXT,
+    customers_notified INTEGER DEFAULT 0,
+    recall_notice_sent INTEGER DEFAULT 0,
+    product_disposition TEXT CHECK(product_disposition IN ('destruction','return_to_supplier','pending')),
+    disposition_date TEXT,
+    disposition_witnessed_by TEXT,
+    linked_capa_id INTEGER,
+    initiated_by TEXT NOT NULL,
+    closed_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS recall_distribution (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recall_id INTEGER NOT NULL REFERENCES recalls(id),
+    customer_name TEXT NOT NULL,
+    customer_address TEXT,
+    contact_name TEXT,
+    contact_phone TEXT,
+    contact_email TEXT,
+    customer_type TEXT CHECK(customer_type IN ('distributor','retailer','direct_consumer','institution')),
+    lot_codes_shipped TEXT DEFAULT '[]',
+    quantity_shipped INTEGER NOT NULL DEFAULT 0,
+    quantity_accounted INTEGER DEFAULT 0,
+    notified INTEGER DEFAULT 0,
+    notified_at TEXT,
+    notified_method TEXT,
+    action_taken TEXT,
+    receipt_confirmed INTEGER DEFAULT 0,
+    effective INTEGER DEFAULT 0,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS recall_sequence (
+    year INTEGER PRIMARY KEY,
+    next_number INTEGER NOT NULL DEFAULT 1
+  );
+
+  CREATE TABLE IF NOT EXISTS traceability_exercises (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    exercise_id TEXT UNIQUE NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('finished_product','ingredient_supplier','auditor_initiated')),
+    status TEXT NOT NULL DEFAULT 'in_progress' CHECK(status IN ('in_progress','passed','failed','corrective_action')),
+    target_lot TEXT NOT NULL,
+    target_description TEXT,
+    start_time TEXT NOT NULL,
+    end_time TEXT,
+    elapsed_minutes INTEGER,
+    conducted_by TEXT NOT NULL,
+    backward_trace TEXT DEFAULT '{}',
+    forward_trace TEXT DEFAULT '{}',
+    total_produced INTEGER,
+    total_shipped INTEGER,
+    total_onsite INTEGER,
+    total_adjustments INTEGER DEFAULT 0,
+    reconciliation_percent REAL,
+    reconciled INTEGER DEFAULT 0,
+    team_reachable_1hr INTEGER DEFAULT 0,
+    evidence_complete INTEGER DEFAULT 0,
+    gaps_identified TEXT,
+    corrective_action TEXT,
+    corrective_action_due TEXT,
+    retest_date TEXT,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS crisis_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT UNIQUE NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('fire','flood','power_outage','refrigeration_failure','water_contamination','equipment_failure','security_breach','natural_disaster','it_failure','other')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','contained','resolved','closed')),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'moderate' CHECK(severity IN ('low','moderate','high','critical')),
+    reported_by TEXT NOT NULL,
+    reported_at TEXT NOT NULL,
+    production_stopped INTEGER DEFAULT 0,
+    product_held INTEGER DEFAULT 0,
+    affected_areas TEXT DEFAULT '[]',
+    affected_products TEXT DEFAULT '[]',
+    food_safety_impact INTEGER DEFAULT 0,
+    food_safety_assessment TEXT,
+    recall_triggered INTEGER DEFAULT 0,
+    linked_recall_id INTEGER,
+    notifications_sent TEXT DEFAULT '[]',
+    product_disposition TEXT,
+    disposition_rationale TEXT,
+    resolution TEXT,
+    resolved_at TEXT,
+    closed_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS crisis_sequence (
+    year INTEGER PRIMARY KEY,
+    next_number INTEGER NOT NULL DEFAULT 1
+  );
+
+  CREATE TABLE IF NOT EXISTS exercise_sequence (
+    year INTEGER PRIMARY KEY,
+    next_number INTEGER NOT NULL DEFAULT 1
+  );
+`);
+
+// Indexes for recall/traceability/crisis tables
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_recalls_status ON recalls(status);
+  CREATE INDEX IF NOT EXISTS idx_recalls_type ON recalls(type);
+  CREATE INDEX IF NOT EXISTS idx_recall_distribution_recall ON recall_distribution(recall_id);
+  CREATE INDEX IF NOT EXISTS idx_traceability_exercises_status ON traceability_exercises(status);
+  CREATE INDEX IF NOT EXISTS idx_crisis_events_status ON crisis_events(status);
+  CREATE INDEX IF NOT EXISTS idx_crisis_events_severity ON crisis_events(severity);
+`);
 
 seedDatabase();
 seedComplaintsAndCCRs();

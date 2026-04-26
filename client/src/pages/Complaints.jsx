@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import {
+import { Archive,
   AlertCircle, Plus, Search, Filter, Download, ChevronDown, ChevronUp,
   X, ExternalLink
 } from 'lucide-react';
@@ -17,7 +17,7 @@ const PRODUCT_OPTIONS = [
 
 const ISSUE_TYPES = [
   'Leaking', 'Separation', 'Mold', 'Fermentation/Bloating',
-  'Seal Failure', 'Off-Odor', 'Foreign Material', 'Other'
+  'Seal Failure', 'Off-Odor', 'Foreign Material', 'Illness/Adverse Reaction', 'Other'
 ];
 
 const SEVERITY_OPTIONS = ['low', 'medium', 'high', 'critical'];
@@ -41,7 +41,7 @@ const STATUS_STYLES = {
 const STATUS_LABELS = {
   open: 'Open',
   investigating: 'Under Investigation',
-  corrective_action: 'Corrective Action',
+  corrective_action: 'Pending Response',
   resolved: 'Resolved',
   closed: 'Closed',
 };
@@ -66,13 +66,15 @@ export { SeverityBadge, ComplaintStatusBadge, SEVERITY_STYLES, STATUS_STYLES, ST
 
 export default function Complaints() {
   const navigate = useNavigate();
-  const { data: complaints, loading, error, refetch } = useFetch('/api/complaints');
+  const [showArchived, setShowArchived] = useState(false);
+  const { data: complaints, loading, error, refetch } = useFetch(showArchived ? '/api/complaints?include_archived=true' : '/api/complaints');
 
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterSeverity, setFilterSeverity] = useState('');
   const [filterProduct, setFilterProduct] = useState('');
   const [filterSource, setFilterSource] = useState('');
+  const [filterIssueType, setFilterIssueType] = useState('');
   const [filterLot, setFilterLot] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [sortField, setSortField] = useState('date_received');
@@ -100,6 +102,7 @@ export default function Complaints() {
     if (filterSeverity) list = list.filter(c => c.severity === filterSeverity);
     if (filterProduct) list = list.filter(c => c.product_sku === filterProduct);
     if (filterSource) list = list.filter(c => c.source?.toLowerCase().includes(filterSource.toLowerCase()));
+    if (filterIssueType) list = list.filter(c => c.issue_type === filterIssueType);
     if (filterLot) list = list.filter(c => c.lot_number === filterLot);
 
     list.sort((a, b) => {
@@ -110,9 +113,9 @@ export default function Complaints() {
     });
 
     return list;
-  }, [complaints, search, filterStatus, filterSeverity, filterProduct, filterSource, filterLot, sortField, sortDir]);
+  }, [complaints, search, filterStatus, filterSeverity, filterProduct, filterSource, filterLot, filterIssueType, sortField, sortDir]);
 
-  const activeFilterCount = [filterStatus, filterSeverity, filterProduct, filterSource, filterLot].filter(Boolean).length;
+  const activeFilterCount = [filterStatus, filterSeverity, filterProduct, filterSource, filterLot, filterIssueType].filter(Boolean).length;
 
   const handleSort = (field) => {
     if (sortField === field) {
@@ -181,8 +184,27 @@ export default function Complaints() {
         <div>
           <p className="text-sm text-gray-500 font-medium">Customer Complaints</p>
           <h1 className="text-3xl font-bold text-gray-900">Complaint Registry</h1>
+          <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 max-w-2xl">
+            <p className="font-semibold mb-1">Complaint Handling Process</p>
+            <p className="mb-2">All customer complaints are logged here and triaged by severity. The investigation workflow is:</p>
+            <ol className="list-decimal ml-5 mb-2 space-y-0.5">
+              <li><strong>Log</strong> — record complaint details, product, lot number, and customer info</li>
+              <li><strong>Investigate</strong> — add investigation comments, review batch testing, check SOS Inventory data</li>
+              <li><strong>Escalate if needed</strong> — create a CCR for safety-critical complaints (illness, foreign object, contamination, recurring issues)</li>
+              <li><strong>Resolve</strong> — document root cause, corrective action, and customer disposition</li>
+              <li><strong>Close</strong> — mark resolved with documented evidence; archive when no longer active</li>
+            </ol>
+            <p><strong>Not every complaint needs a CCR.</strong> One-off quality issues (taste, texture, shipping damage) are resolved with investigation comments and proper closure. CCRs are reserved for safety-critical or recurring issues.</p>
+          </div>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => { setShowArchived(!showArchived); setTimeout(refetch, 100); }}
+            className={"flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-colors " + (showArchived ? 'bg-amber-50 border-amber-300 text-amber-700' : 'border-gray-300 text-gray-700 hover:bg-gray-50')}
+          >
+            <Archive className="w-4 h-4" />
+            {showArchived ? 'Hide Archived' : 'Show Archived'}
+          </button>
           <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
             <Download className="w-4 h-4" />
             Export CSV
@@ -220,7 +242,7 @@ export default function Complaints() {
         </div>
 
         {showFilters && (
-          <div className="mt-4 pt-4 border-t border-gray-200 grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="mt-4 pt-4 border-t border-gray-200 grid grid-cols-2 md:grid-cols-6 gap-3">
             <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border border-gray-300 rounded-lg text-sm px-3 py-2">
               <option value="">All Statuses</option>
               {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
@@ -232,6 +254,10 @@ export default function Complaints() {
             <select value={filterProduct} onChange={e => setFilterProduct(e.target.value)} className="border border-gray-300 rounded-lg text-sm px-3 py-2">
               <option value="">All Products</option>
               {PRODUCT_OPTIONS.map(p => <option key={p.sku} value={p.sku}>{p.sku} {p.name}</option>)}
+            </select>
+            <select value={filterIssueType} onChange={e => setFilterIssueType(e.target.value)} className="border border-gray-300 rounded-lg text-sm px-3 py-2">
+              <option value="">All Issue Types</option>
+              {ISSUE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
             <select value={filterLot} onChange={e => setFilterLot(e.target.value)} className="border border-gray-300 rounded-lg text-sm px-3 py-2">
               <option value="">All Lots</option>
@@ -247,7 +273,7 @@ export default function Complaints() {
               />
               {activeFilterCount > 0 && (
                 <button
-                  onClick={() => { setFilterStatus(''); setFilterSeverity(''); setFilterProduct(''); setFilterSource(''); setFilterLot(''); }}
+                  onClick={() => { setFilterStatus(''); setFilterSeverity(''); setFilterProduct(''); setFilterSource(''); setFilterLot(''); setFilterIssueType(''); }}
                   className="text-xs text-navy-600 hover:text-navy-800 whitespace-nowrap"
                 >
                   Clear all
@@ -259,13 +285,14 @@ export default function Complaints() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
         {[
           { label: 'Total', value: complaints?.length || 0, color: 'text-gray-900' },
           { label: 'Open', value: complaints?.filter(c => c.status === 'open').length || 0, color: 'text-blue-600' },
           { label: 'Investigating', value: complaints?.filter(c => c.status === 'investigating').length || 0, color: 'text-purple-600' },
           { label: 'Corrective Action', value: complaints?.filter(c => c.status === 'corrective_action').length || 0, color: 'text-amber-600' },
           { label: 'Critical', value: complaints?.filter(c => c.severity === 'critical').length || 0, color: 'text-red-600' },
+          { label: 'Archived', value: complaints?.filter(c => c.archived).length || 0, color: 'text-gray-400' },
         ].map(card => (
           <div key={card.label} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 text-center">
             <p className={`text-2xl font-bold ${card.color}`}>{card.value}</p>
@@ -316,7 +343,7 @@ export default function Complaints() {
                   <tr
                     key={c.id}
                     onClick={() => navigate(`/complaints/${c.id}`)}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
+                    className={"cursor-pointer transition-colors " + (c.archived ? "bg-gray-100 opacity-60 hover:opacity-80" : "hover:bg-gray-50")}
                   >
                     <td className="px-4 py-3 text-sm font-medium text-navy-700">{c.complaint_number}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{c.date_received}</td>
@@ -328,7 +355,7 @@ export default function Complaints() {
                     <td className="px-4 py-3 text-sm text-gray-600">{c.issue_type}</td>
                     <td className="px-4 py-3"><SeverityBadge severity={c.severity} /></td>
                     <td className="px-4 py-3 text-sm text-gray-600 text-center">{c.quantity_affected || '—'}</td>
-                    <td className="px-4 py-3"><ComplaintStatusBadge status={c.status} /></td>
+                    <td className="px-4 py-3"><div className="flex items-center gap-1"><ComplaintStatusBadge status={c.status} />{c.archived ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-500">Archived</span> : null}</div></td>
                   </tr>
                 ))
               )}
