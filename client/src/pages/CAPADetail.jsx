@@ -1149,6 +1149,47 @@ export default function CAPADetail() {
 
           <EditableCard
             icon={Shield}
+            iconColor="text-orange-500"
+            title="Containment / Immediate Action"
+            value={<FormattedText text={capa.containment_action} />}
+            rawValue={capa.containment_action || ""}
+            placeholder="No containment action documented"
+            isAdmin={isAdmin}
+            onSave={saveTextCard('containment_action')}
+          />
+
+          {/* Root Cause Method */}
+          <Card className="p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <FlaskConical className="w-5 h-5 text-amber-500" />
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Root Cause Method</h3>
+            </div>
+            {isAdmin ? (
+              <select
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                value={capa.root_cause_method || ""}
+                onChange={async (e) => {
+                  try {
+                    await apiPut(`/api/capas/${capa.id}`, { root_cause_method: e.target.value });
+                    refetch();
+                  } catch(err) { alert(err.message); }
+                }}
+              >
+                <option value="">— Select method —</option>
+                <option value="5 Whys">5 Whys</option>
+                <option value="Fishbone / Ishikawa">Fishbone / Ishikawa</option>
+                <option value="Fault Tree Analysis">Fault Tree Analysis</option>
+                <option value="Pareto Analysis">Pareto Analysis</option>
+                <option value="Failure Mode Effects Analysis">Failure Mode Effects Analysis (FMEA)</option>
+                <option value="Other">Other</option>
+              </select>
+            ) : (
+              <p className="text-sm text-gray-700">{capa.root_cause_method || "Not specified"}</p>
+            )}
+          </Card>
+
+          <EditableCard
+            icon={Shield}
             iconColor="text-red-500"
             title="Corrective Action"
             value={<FormattedText text={capa.corrective_action} />}
