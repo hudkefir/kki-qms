@@ -101,6 +101,13 @@ function lifecycleIndex(status) {
   return idx === -1 ? 0 : idx;
 }
 
+function formatFileSize(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
 // ── Reusable card shell ────────────────────────────────────────────────────
 
 function Card({ children, className = '' }) {
@@ -652,6 +659,58 @@ export default function CAPADetail() {
     }
   };
 
+  // ── Attachment helpers ────────────────────────────────────────────────
+
+  const fetchAttachments = async () => {
+    try {
+      const res = await fetch(`/api/capas/${id}/attachments`, { credentials: 'include' });
+      const data = await res.json();
+      setAttachments(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to fetch attachments:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (id) fetchAttachments();
+  }, [id]);
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`/api/capas/${id}/attachments`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      await fetchAttachments();
+    } catch (err) {
+      alert('Upload failed: ' + err.message);
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleDeleteAttachment = async (attachmentId) => {
+    if (!confirm('Delete this attachment?')) return;
+    try {
+      const res = await fetch(`/api/capas/${id}/attachments/${attachmentId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Delete failed');
+      await fetchAttachments();
+    } catch (err) {
+      alert('Failed to delete: ' + err.message);
+    }
+  };
+
   // ── Linked record helpers ──────────────────────────────────────────────
 
   const openBatchPicker = async () => {
@@ -727,6 +786,14 @@ export default function CAPADetail() {
   const linkedTests = capa.linked_tests || [];
   const linkedComplaints = capa.linked_complaints || [];
   const updates = capa.updates || [];
+  const filteredUpdates = timelineFilter === 'all' ? updates :
+    updates.filter(u => {
+      if (timelineFilter === 'notes') return u.type === 'note';
+      if (timelineFilter === 'evidence') return u.type === 'evidence';
+      if (timelineFilter === 'investigation') return u.type === 'investigation';
+      if (timelineFilter === 'status') return u.type === 'status_change';
+      return true;
+    });
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -1681,6 +1748,7 @@ export default function CAPADetail() {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="Describe what was done, what was found, or attach evidence..."
                 />
+                <p className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3 mt-2 border border-gray-100">Example: 2026-04-27 — Investigated temperature deviation on line 2. Reviewed log sheet, isolated affected product, notified supervisor.</p>
                 <div className="flex justify-end mt-3">
                   <button
                     onClick={handleSubmitUpdate}
@@ -1771,6 +1839,7 @@ export default function CAPADetail() {
             )}
           </div>
           <p className="text-xs text-gray-400 mb-4">Accepted: PDF, DOC, DOCX, XLS, XLSX, JPG, PNG (max 10MB)</p>
+          <p className="text-xs text-indigo-700 bg-indigo-50 rounded-lg p-3 mb-4 border border-indigo-100">Upload supporting evidence: photos, batch records, supplier COAs, calibration records, temperature logs, or corrective action evidence.</p>
           {attachments.length > 0 ? (
             <div className="space-y-2">
               {attachments.map(att => (
