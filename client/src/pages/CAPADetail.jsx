@@ -9,6 +9,7 @@ import {
   AlertTriangle, FileText, Plus, Send, CalendarDays,
   User, Pencil, X, FlaskConical, MessageSquare,
   RefreshCw, Activity, Tag, Paperclip, Trash2,
+  ChevronDown, ChevronRight, ArrowDownCircle, Zap, Upload, Download, Filter,
 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -189,6 +190,35 @@ function EditableCard({ icon: Icon, iconColor, title, value, rawValue, placehold
   );
 }
 
+// ── Collapsible section ───────────────────────────────────────────────────
+
+function CollapsibleSection({ icon: Icon, iconColor, title, defaultOpen = false, children, badge }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm transition-all duration-200">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-5 py-3.5 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          {Icon && <Icon className={`w-4 h-4 ${iconColor || 'text-gray-500'}`} />}
+          <span className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{title}</span>
+          {badge && <span className="ml-2">{badge}</span>}
+        </div>
+        {open
+          ? <ChevronDown className="w-4 h-4 text-gray-400 transition-transform duration-200" />
+          : <ChevronRight className="w-4 h-4 text-gray-400 transition-transform duration-200" />
+        }
+      </button>
+      <div className={`transition-all duration-200 ease-in-out ${open ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0 overflow-hidden'}`}>
+        <div className="p-5">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Progress bar ───────────────────────────────────────────────────────────
 
 // Stage gate requirements — what must be filled before advancing
@@ -279,17 +309,18 @@ function LifecycleBar({ status, onAdvance, isAdmin, capa, onQuickEdit }) {
           return (
             <React.Fragment key={step.key}>
               {i > 0 && (
-                <div className={`flex-1 h-1 rounded ${i <= current ? 'bg-indigo-500' : 'bg-gray-200'}`} />
+                <div className={`flex-1 h-1 rounded transition-all duration-500 ${i <= current ? 'bg-indigo-500' : 'bg-gray-200'}`} />
               )}
               <div className="flex flex-col items-center gap-1.5">
                 <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-colors ${
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all duration-300 ${
                     isCurrent
-                      ? 'bg-indigo-600 text-white border-indigo-600 ring-4 ring-indigo-100'
+                      ? 'bg-indigo-600 text-white border-indigo-600 ring-4 ring-indigo-100 scale-110 shadow-md shadow-indigo-200'
                       : isComplete
-                        ? 'bg-indigo-500 text-white border-indigo-500'
+                        ? 'bg-green-500 text-white border-green-500'
                         : 'bg-white text-gray-400 border-gray-200'
                   }`}
+                  style={isCurrent ? { animation: 'pulse 2s ease-in-out infinite' } : {}}
                 >
                   {isComplete && i < current ? <CheckCircle className="w-4 h-4" /> : i + 1}
                 </div>
@@ -503,6 +534,7 @@ export default function CAPADetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const canEditContent = user?.role === 'admin' || user?.role === 'operator';
 
   const { data: capa, loading, error, refetch } = useFetch(`/api/capas/${id}`);
 
@@ -529,6 +561,11 @@ export default function CAPADetail() {
   // Activity log
   const [updateContent, setUpdateContent] = useState('');
   const [updateType, setUpdateType] = useState('note');
+  const [attachments, setAttachments] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [sectionComments, setSectionComments] = useState({});
+  const [commentInputs, setCommentInputs] = useState({});
+  const [timelineFilter, setTimelineFilter] = useState('all');
   const [submittingUpdate, setSubmittingUpdate] = useState(false);
 
   // Linked records
@@ -695,6 +732,13 @@ export default function CAPADetail() {
 
   return (
     <div className="max-w-5xl mx-auto">
+      {/* Pulse animation for current step indicator */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0); }
+        }
+      `}</style>
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-6">
         <button
@@ -760,6 +804,24 @@ export default function CAPADetail() {
                   {isAdmin && <Pencil className="w-3.5 h-3.5 inline ml-2 text-gray-300" />}
                 </h1>
               )}
+              {/* Overdue / Due Soon badges */}
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {capa.target_date && capa.status !== 'closed' && new Date(capa.target_date) < new Date() && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-red-600 text-white animate-pulse">
+                    <Clock className="w-3 h-3" />
+                    OVERDUE
+                  </span>
+                )}
+                {capa.target_date && capa.status !== 'closed' && (() => {
+                  const daysLeft = Math.ceil((new Date(capa.target_date) - new Date()) / (1000 * 60 * 60 * 24));
+                  return daysLeft > 0 && daysLeft <= 7;
+                })() && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500 text-white">
+                    <Clock className="w-3 h-3" />
+                    DUE SOON — {Math.ceil((new Date(capa.target_date) - new Date()) / (1000 * 60 * 60 * 24))}d left
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-2 mt-1 text-sm text-gray-500">
                 {capa.created_at && <span>Opened {formatDate(capa.created_at)}</span>}
                 {editingField === 'source_type' ? (
@@ -1147,77 +1209,222 @@ export default function CAPADetail() {
             </div>
           </Card>
 
-          <EditableCard
+          {/* ── Collapsible CAPA Sections ──────────────────────────────── */}
+
+          <CollapsibleSection
+            icon={FileText}
+            iconColor="text-blue-500"
+            title="Description"
+            defaultOpen={capa.status === 'open'}
+            badge={capa.description ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Filled</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">Empty</span>}
+          >
+            <EditableCard
+              icon={FileText}
+              iconColor="text-blue-500"
+              title="Description — What Happened"
+              value={<FormattedText text={capa.description} />}
+              rawValue={capa.description || ""}
+              placeholder="Describe what happened, when it was discovered, what the impact is, and who was involved..."
+              isAdmin={canEditContent}
+              onSave={saveTextCard('description')}
+            />
+          </CollapsibleSection>
+
+          <CollapsibleSection
             icon={Shield}
             iconColor="text-orange-500"
             title="Containment / Immediate Action"
-            value={<FormattedText text={capa.containment_action} />}
-            rawValue={capa.containment_action || ""}
-            placeholder="No containment action documented"
-            isAdmin={isAdmin}
-            onSave={saveTextCard('containment_action')}
-          />
+            defaultOpen={capa.status === 'open' || capa.status === 'investigating'}
+            badge={capa.containment_action ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Filled</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">Empty</span>}
+          >
+            <EditableCard
+              icon={Shield}
+              iconColor="text-orange-500"
+              title="Containment / Immediate Action"
+              value={<FormattedText text={capa.containment_action} />}
+              rawValue={capa.containment_action || ""}
+              placeholder="What immediate actions were taken to contain the issue? (e.g. quarantine product, stop production line, isolate affected batch)"
+              isAdmin={canEditContent}
+              onSave={saveTextCard('containment_action')}
+            />
+          </CollapsibleSection>
 
-          {/* Root Cause Method */}
-          <Card className="p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <FlaskConical className="w-5 h-5 text-amber-500" />
-              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Root Cause Method</h3>
+          <CollapsibleSection
+            icon={FlaskConical}
+            iconColor="text-amber-500"
+            title="Root Cause Investigation"
+            defaultOpen={capa.status === 'investigating'}
+            badge={capa.root_cause_method ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">{capa.root_cause_method}</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">No method</span>}
+          >
+            <div className="mb-4">
+              <label className="text-sm font-medium text-gray-600 mb-1.5 block">Investigation Method</label>
+              {canEditContent ? (
+                <select
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  value={capa.root_cause_method || ""}
+                  onChange={async (e) => {
+                    try {
+                      await apiPut(`/api/capas/${capa.id}`, { root_cause_method: e.target.value });
+                      refetch();
+                    } catch(err) { alert(err.message); }
+                  }}
+                >
+                  <option value="">— Select method —</option>
+                  <option value="5 Whys">5 Whys</option>
+                  <option value="Fishbone / Ishikawa">Fishbone / Ishikawa</option>
+                  <option value="Fault Tree Analysis">Fault Tree Analysis</option>
+                  <option value="Pareto Analysis">Pareto Analysis</option>
+                  <option value="Failure Mode Effects Analysis">Failure Mode Effects Analysis (FMEA)</option>
+                  <option value="Other">Other</option>
+                </select>
+              ) : (
+                <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">{capa.root_cause_method || "Not specified"}</p>
+              )}
             </div>
-            {isAdmin ? (
-              <select
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                value={capa.root_cause_method || ""}
-                onChange={async (e) => {
-                  try {
-                    await apiPut(`/api/capas/${capa.id}`, { root_cause_method: e.target.value });
-                    refetch();
-                  } catch(err) { alert(err.message); }
-                }}
-              >
-                <option value="">— Select method —</option>
-                <option value="5 Whys">5 Whys</option>
-                <option value="Fishbone / Ishikawa">Fishbone / Ishikawa</option>
-                <option value="Fault Tree Analysis">Fault Tree Analysis</option>
-                <option value="Pareto Analysis">Pareto Analysis</option>
-                <option value="Failure Mode Effects Analysis">Failure Mode Effects Analysis (FMEA)</option>
-                <option value="Other">Other</option>
-              </select>
-            ) : (
-              <p className="text-sm text-gray-700">{capa.root_cause_method || "Not specified"}</p>
-            )}
-          </Card>
+            <EditableCard
+              icon={FlaskConical}
+              iconColor="text-amber-500"
+              title="Root Cause Analysis"
+              value={<FormattedText text={capa.root_cause_analysis} />}
+              rawValue={capa.root_cause_analysis || ""}
+              placeholder="Document the root cause analysis findings here..."
+              isAdmin={canEditContent}
+              onSave={saveTextCard('root_cause_analysis')}
+            />
+          </CollapsibleSection>
 
-          <EditableCard
+          <CollapsibleSection
             icon={Shield}
             iconColor="text-red-500"
             title="Corrective Action"
-            value={<FormattedText text={capa.corrective_action} />}
-            rawValue={capa.corrective_action || ""}
-            placeholder="No corrective action documented"
-            isAdmin={isAdmin}
-            onSave={saveTextCard('corrective_action')}
-          />
-          <EditableCard
+            defaultOpen={capa.status === 'action_defined' || capa.status === 'in_progress'}
+            badge={capa.corrective_action ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Defined</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">Empty</span>}
+          >
+            <EditableCard
+              icon={Shield}
+              iconColor="text-red-500"
+              title="Corrective Action"
+              value={<FormattedText text={capa.corrective_action} />}
+              rawValue={capa.corrective_action || ""}
+              placeholder="What corrective actions will be taken to fix the root cause?"
+              isAdmin={canEditContent}
+              onSave={saveTextCard('corrective_action')}
+            />
+          </CollapsibleSection>
+
+          <CollapsibleSection
             icon={AlertTriangle}
             iconColor="text-amber-500"
             title="Preventive Action"
-            value={<FormattedText text={capa.preventive_action} />}
-            rawValue={capa.preventive_action || ""}
-            placeholder="No preventive action documented"
-            isAdmin={isAdmin}
-            onSave={saveTextCard('preventive_action')}
-          />
-          <EditableCard
+            defaultOpen={capa.status === 'action_defined' || capa.status === 'in_progress'}
+            badge={capa.preventive_action ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Defined</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">Empty</span>}
+          >
+            <EditableCard
+              icon={AlertTriangle}
+              iconColor="text-amber-500"
+              title="Preventive Action"
+              value={<FormattedText text={capa.preventive_action} />}
+              rawValue={capa.preventive_action || ""}
+              placeholder="What preventive actions will prevent this from recurring?"
+              isAdmin={canEditContent}
+              onSave={saveTextCard('preventive_action')}
+            />
+          </CollapsibleSection>
+
+          <CollapsibleSection
             icon={Activity}
             iconColor="text-green-500"
-            title="Effectiveness Notes"
-            value={<FormattedText text={capa.effectiveness_notes} />}
-            rawValue={capa.effectiveness_notes || ""}
-            placeholder="No effectiveness notes"
-            isAdmin={isAdmin}
-            onSave={saveTextCard('effectiveness_notes')}
-          />
+            title="Effectiveness Verification"
+            defaultOpen={capa.status === 'pending_review' || capa.status === 'closed'}
+            badge={capa.effectiveness_notes ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Verified</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">Pending</span>}
+          >
+            <div className="space-y-4">
+              <EditableCard
+                icon={CheckCircle}
+                iconColor="text-purple-500"
+                title="Verification Method"
+                value={capa.verification_method || ""}
+                rawValue={capa.verification_method || ""}
+                placeholder="How will you verify effectiveness? (e.g. reduced complaint rate, re-test results, audit findings, monitoring data)"
+                isAdmin={canEditContent}
+                onSave={saveTextCard('verification_method')}
+              />
+              <EditableCard
+                icon={Activity}
+                iconColor="text-green-500"
+                title="Effectiveness Notes"
+                value={<FormattedText text={capa.effectiveness_notes} />}
+                rawValue={capa.effectiveness_notes || ""}
+                placeholder="Were the corrective/preventive actions effective? Document the verification results here."
+                isAdmin={canEditContent}
+                onSave={saveTextCard('effectiveness_notes')}
+              />
+            </div>
+          </CollapsibleSection>
+
+          {/* ── Action Bar — Advance / Send Back / Escalate ──────────── */}
+          {isAdmin && capa.status !== 'closed' && (
+            <Card className="p-5 bg-gradient-to-r from-gray-50 to-white border-2 border-dashed border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+                <Zap className="w-4 h-4 text-indigo-500" />
+                Quick Actions
+              </h3>
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Advance to next stage */}
+                {STAGE_GATES[capa.status] && (() => {
+                  const g = STAGE_GATES[capa.status];
+                  const canGo = g.required.every(r => capa[r.field] && String(capa[r.field]).trim().length > 0);
+                  return (
+                    <button
+                      onClick={async () => {
+                        if (!canGo) { alert('Complete all required fields before advancing.'); return; }
+                        try { await apiPut(`/api/capas/${capa.id}`, { status: g.next }); refetch(); } catch(e) { alert(e.message); }
+                      }}
+                      disabled={!canGo}
+                      className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                        canGo
+                          ? 'bg-green-600 text-white hover:bg-green-700 shadow-sm hover:shadow-md'
+                          : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                      }`}
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      {g.label} →
+                    </button>
+                  );
+                })()}
+
+                {/* Send back to previous stage */}
+                {lifecycleIndex(capa.status) > 0 && (
+                  <button
+                    onClick={async () => {
+                      const prevIdx = lifecycleIndex(capa.status) - 1;
+                      const prevStatus = LIFECYCLE_STEPS[prevIdx].key;
+                      if (!confirm(`Send this CAPA back to "${LIFECYCLE_STEPS[prevIdx].label}"?`)) return;
+                      try { await apiPut(`/api/capas/${capa.id}`, { status: prevStatus }); refetch(); } catch(e) { alert(e.message); }
+                    }}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 transition-all"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    Send Back
+                  </button>
+                )}
+
+                {/* Escalate to critical */}
+                {capa.priority !== 'critical' && capa.classification !== 'critical' && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm('Escalate this CAPA to Critical priority? This will flag it as highest urgency.')) return;
+                      try { await apiPut(`/api/capas/${capa.id}`, { priority: 'critical', classification: 'critical' }); refetch(); } catch(e) { alert(e.message); }
+                    }}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200 transition-all"
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                    Escalate
+                  </button>
+                )}
+              </div>
+            </Card>
+          )}
         </div>
       )}
 
@@ -1490,15 +1697,31 @@ export default function CAPADetail() {
 
           {/* Timeline */}
           <Card className="p-5">
-            <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4 flex items-center gap-2">
-              <FileText className="w-4 h-4 text-indigo-500" />
-              Timeline ({updates.length})
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+                <FileText className="w-4 h-4 text-indigo-500" />
+                Timeline ({filteredUpdates.length}{timelineFilter !== 'all' ? ` of ${updates.length}` : ''})
+              </h3>
+              <div className="flex gap-1">
+                {[
+                  { key: 'all', label: 'All' },
+                  { key: 'notes', label: 'Notes' },
+                  { key: 'evidence', label: 'Evidence' },
+                  { key: 'investigation', label: 'Investigation' },
+                  { key: 'status', label: 'Status' },
+                ].map(f => (
+                  <button key={f.key} onClick={() => setTimelineFilter(f.key)}
+                    className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${timelineFilter === f.key ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             {updates.length > 0 ? (
               <div className="relative">
                 <div className="absolute left-4 top-0 bottom-0 w-px bg-gray-200" />
                 <div className="space-y-4">
-                  {updates.map((entry, i) => (
+                  {filteredUpdates.map((entry, i) => (
                     <div key={entry.id || i} className="relative flex gap-4 pl-10">
                       <div className="absolute left-2.5 top-1.5 w-3 h-3 rounded-full bg-white border-2 border-indigo-400" />
                       <div className="flex-1 bg-gray-50 rounded-lg p-4 border border-gray-100">
@@ -1533,11 +1756,53 @@ export default function CAPADetail() {
       {/* DOCUMENTS TAB */}
       {activeTab === 'documents' && (
         <Card className="p-5">
-          <div className="text-center py-16 text-gray-400">
-            <Paperclip className="w-10 h-10 mx-auto mb-3 opacity-40" />
-            <h3 className="text-base font-medium text-gray-500 mb-1">Document Attachments</h3>
-            <p className="text-sm">Document management coming soon.</p>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+              <Paperclip className="w-4 h-4 text-indigo-500" />
+              Documents ({attachments.length})
+            </h3>
+            {(isAdmin || canEditContent) && (
+              <label className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 cursor-pointer transition-colors">
+                <Upload className="w-4 h-4" />
+                {uploading ? 'Uploading...' : 'Upload File'}
+                <input type="file" className="hidden" onChange={handleFileUpload} disabled={uploading}
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" />
+              </label>
+            )}
           </div>
+          <p className="text-xs text-gray-400 mb-4">Accepted: PDF, DOC, DOCX, XLS, XLSX, JPG, PNG (max 10MB)</p>
+          {attachments.length > 0 ? (
+            <div className="space-y-2">
+              {attachments.map(att => (
+                <div key={att.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-700 truncate">{att.original_name}</p>
+                      <p className="text-xs text-gray-400">{formatFileSize(att.file_size)} · {att.uploaded_by} · {formatDateTime(att.created_at)}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <a href={`/uploads/capa-docs/${att.filename}`} target="_blank" rel="noopener noreferrer"
+                      className="p-1.5 text-gray-400 hover:text-indigo-600 transition-colors" title="Download">
+                      <Download className="w-4 h-4" />
+                    </a>
+                    {isAdmin && (
+                      <button onClick={() => handleDeleteAttachment(att.id)}
+                        className="p-1.5 text-gray-400 hover:text-red-600 transition-colors" title="Delete">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-10 text-gray-400">
+              <Paperclip className="w-8 h-8 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">No documents yet. Upload evidence, photos, or supporting documents.</p>
+            </div>
+          )}
         </Card>
       )}
 

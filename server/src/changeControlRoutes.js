@@ -1,11 +1,55 @@
 import { Router } from 'express';
 import db from './database.js';
 import { broadcast } from './websocket.js';
-import { requireWriteAccess, requireRole } from './authMiddleware.js';
+import { requireWriteAccess, requireRole, requireContentAccess } from './authMiddleware.js';
 import { logAudit } from './auditMiddleware.js';
 import { sanitizeBody } from './sanitize.js';
+import multer from 'multer';
+import { existsSync, mkdirSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename_cc = fileURLToPath(import.meta.url);
+const __dirname_cc = dirname(__filename_cc);
+
+// ── Multer setup for CAPA document uploads ──
+const capaUploadsDir = join(__dirname_cc, '..', '..', 'uploads', 'capa-docs');
+if (!existsSync(capaUploadsDir)) { mkdirSync(capaUploadsDir, { recursive: true }); }
+
+const capaStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, capaUploadsDir),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = file.originalname.split('.').pop();
+    cb(null, 'capa-' + req.params.id + '-' + uniqueSuffix + '.' + ext);
+  }
+});
+
+const capaUpload = multer({
+  storage: capaStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const allowed = /pdf|doc|docx|xls|xlsx|jpg|jpeg|png|gif/;
+    const ext = file.originalname.split('.').pop().toLowerCase();
+    if (allowed.test(ext)) { cb(null, true); }
+    else { cb(new Error('File type not allowed. Accepted: PDF, DOC, DOCX, XLS, XLSX, JPG, PNG')); }
+  }
+});
 
 const router = Router();
+
+// ── Ensure capa_attachments table exists ──
+db.exec(`CREATE TABLE IF NOT EXISTS capa_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  capa_id INTEGER NOT NULL,
+  filename TEXT NOT NULL,
+  original_name TEXT NOT NULL,
+  file_size INTEGER DEFAULT 0,
+  mime_type TEXT DEFAULT '',
+  uploaded_by TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (capa_id) REFERENCES capas(id) ON DELETE CASCADE
+)`);
 
 // ──── Sequence helper ────
 function nextId(type) {
@@ -633,21 +677,28 @@ router.post('/capas', requireWriteAccess, (req, res) => {
 
 // PUT /api/capas/:id
 // DEBUG LOG
-router.put('/capas/:id', requireWriteAccess, (req, res) => { console.log('[CAPA PUT] id=' + req.params.id + ' body=' + JSON.stringify(req.body));
+router.put('/capas/:id', requireContentAccess, (req, res) => { console.log('[CAPA PUT] id=' + req.params.id + ' body=' + JSON.stringify(req.body));
   try {
     const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
 
     const sanitized = sanitizeBody(req.body);
-    const fields = [
-      'capa_id', 'source_type', 'source_id',
-      'corrective_action', 'preventive_action', 'responsible_person',
+    const isAdmin = req.session.user.role === 'admin';
+    // Content fields - operators can edit these
+    const contentFields = [
+      'corrective_action', 'preventive_action', 'description',
+      'root_cause_analysis', 'investigation_details', 'containment_action',
+      'root_cause_method', 'verification_method', 'effectiveness_notes', 'risk_assessment'
+    ];
+    // Admin-only fields
+    const adminFields = [
+      'capa_id', 'source_type', 'source_id', 'responsible_person',
       'target_date', 'actual_completion_date', 'status', 'linked_change_request_id',
-      'effectiveness_check_date', 'effectiveness_result', 'effectiveness_notes',
-      'title', 'description', 'classification', 'root_cause_analysis', 'risk_assessment',
-      'investigation_details', 'verification_method', 'priority', 'initiated_by',
+      'effectiveness_check_date', 'effectiveness_result',
+      'title', 'classification', 'priority', 'initiated_by',
       'department', 'category', 'linked_complaints_json'
     ];
+    const fields = isAdmin ? [...contentFields, ...adminFields] : contentFields;
 
     const updates = [];
     const params = [];
@@ -675,7 +726,7 @@ router.put('/capas/:id', requireWriteAccess, (req, res) => { console.log('[CAPA 
 
 // POST /api/capas/:id/effectiveness
 // POST /capas/:id/updates - Add an update/note to a CAPA
-router.post('/capas/:id/updates', requireWriteAccess, (req, res) => {
+router.post('/capas/:id/updates', requireContentAccess, (req, res) => {
   try {
     const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
@@ -879,6 +930,93 @@ router.post('/capas/:id/effectiveness', requireWriteAccess, (req, res) => {
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+
+// ==================== CAPA SECTION COMMENTS ====================
+
+// GET /capas/:id/comments - Get all comments for a CAPA (optionally filtered by section)
+router.get('/capas/:id/comments', (req, res) => {
+  try {
+    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    if (!capa) return res.status(404).json({ error: 'CAPA not found' });
+
+    const { section } = req.query;
+    let comments;
+    if (section) {
+      comments = db.prepare('SELECT * FROM capa_comments WHERE capa_id = ? AND section = ? ORDER BY created_at ASC').all(req.params.id, section);
+    } else {
+      comments = db.prepare('SELECT * FROM capa_comments WHERE capa_id = ? ORDER BY created_at ASC').all(req.params.id);
+    }
+    res.json(comments);
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
+});
+
+// POST /capas/:id/comments - Add a section comment
+router.post('/capas/:id/comments', requireContentAccess, (req, res) => {
+  try {
+    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    if (!capa) return res.status(404).json({ error: 'CAPA not found' });
+
+    const { section, comment } = req.body;
+    if (!section || !comment) return res.status(400).json({ error: 'section and comment are required' });
+
+    const author = req.session?.user?.display_name || req.session?.user?.username || 'Unknown';
+    const result = db.prepare('INSERT INTO capa_comments (capa_id, section, author, comment) VALUES (?, ?, ?, ?)').run(req.params.id, section, author, comment);
+    const newComment = db.prepare('SELECT * FROM capa_comments WHERE id = ?').get(result.lastInsertRowid);
+
+    logAudit(req, 'add_capa_comment', 'capa_comments', newComment.id, capa.capa_id, { section, comment: comment.substring(0, 100) });
+    res.status(201).json(newComment);
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
+});
+
+// ==================== CAPA ATTACHMENTS ====================
+
+// GET /capas/:id/attachments - List all attachments for a CAPA
+router.get('/capas/:id/attachments', (req, res) => {
+  try {
+    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    if (!capa) return res.status(404).json({ error: 'CAPA not found' });
+
+    const attachments = db.prepare('SELECT * FROM capa_attachments WHERE capa_id = ? ORDER BY created_at DESC').all(req.params.id);
+    res.json(attachments);
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
+});
+
+// POST /capas/:id/attachments - Upload a file attachment
+router.post('/capas/:id/attachments', requireContentAccess, capaUpload.single('file'), (req, res) => {
+  try {
+    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    if (!capa) return res.status(404).json({ error: 'CAPA not found' });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const uploader = req.session?.user?.display_name || req.session?.user?.username || 'Unknown';
+    const result = db.prepare('INSERT INTO capa_attachments (capa_id, filename, original_name, file_size, mime_type, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(req.params.id, req.file.filename, req.file.originalname, req.file.size, req.file.mimetype, uploader);
+
+    const attachment = db.prepare('SELECT * FROM capa_attachments WHERE id = ?').get(result.lastInsertRowid);
+    logAudit(req, 'upload_capa_attachment', 'capa_attachments', attachment.id, capa.capa_id, { filename: req.file.originalname });
+    res.status(201).json(attachment);
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /capas/:id/attachments/:attachmentId - Delete an attachment (admin only)
+router.delete('/capas/:id/attachments/:attachmentId', requireRole('admin'), async (req, res) => {
+  try {
+    const attachment = db.prepare('SELECT * FROM capa_attachments WHERE id = ? AND capa_id = ?').get(req.params.attachmentId, req.params.id);
+    if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
+
+    db.prepare('DELETE FROM capa_attachments WHERE id = ?').run(req.params.attachmentId);
+    // Try to delete the physical file
+    try {
+      const { unlinkSync } = await import('fs');
+      const fpath = join(capaUploadsDir, attachment.filename);
+      if (existsSync(fpath)) unlinkSync(fpath);
+    } catch (e) { console.warn('Could not delete file:', e.message); }
+
+    logAudit(req, 'delete_capa_attachment', 'capa_attachments', req.params.attachmentId, null, { filename: attachment.original_name });
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
 
 // ==================== DASHBOARD ====================

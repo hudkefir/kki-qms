@@ -35,3 +35,15 @@ export function requireWriteAccess(req, res, next) {
   }
   next();
 }
+
+// For routes where operators can contribute content (notes, descriptions, root cause)
+// Blocks only viewers — allows operator, manager, admin
+export function requireContentAccess(req, res, next) {
+  if (!req.session || !req.session.user) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  if (req.session.user.role === 'viewer') {
+    return res.status(403).json({ error: 'Read-only access.' });
+  }
+  next();
+}

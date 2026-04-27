@@ -37,12 +37,7 @@ import useWebSocket from './hooks/useWebSocket';
 import AccessDenied from "./components/AccessDenied";
 import ProtectedRoute from "./components/ProtectedRoute";
 
-function getDaysUntilAudit() {
-  const audit = new Date('2026-04-23');
-  const now = new Date();
-  const diff = audit - now;
-  return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
-}
+
 
 const ROLE_COLORS = {
   admin: 'bg-red-500/20 text-red-300',
@@ -74,9 +69,6 @@ function DateTimeClock() {
 export default function App() {
   const { user, loading, logout, hasRole } = useAuth();
   const { connected } = useWebSocket();
-  const daysUntil = getDaysUntilAudit();
-  const totalDays = 365;
-  const progress = Math.max(0, Math.min(100, ((totalDays - daysUntil) / totalDays) * 100));
 
   // Loading state
   if (loading) {
@@ -209,25 +201,7 @@ export default function App() {
           ))}
         </div>
 
-        {/* Audit Countdown */}
         <div className="px-4 py-4 border-t border-navy-700">
-          <div className="bg-navy-700/50 rounded-lg p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-navy-300 uppercase tracking-wide">SGS Audit</span>
-              <span className={`text-xs font-bold ${daysUntil <= 30 ? 'text-red-400' : daysUntil <= 90 ? 'text-amber-400' : 'text-green-400'}`}>
-                {daysUntil} days
-              </span>
-            </div>
-            <div className="w-full bg-navy-900 rounded-full h-1.5">
-              <div
-                className={`h-1.5 rounded-full transition-all ${
-                  daysUntil <= 30 ? 'bg-red-400' : daysUntil <= 90 ? 'bg-amber-400' : 'bg-green-400'
-                }`}
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <p className="text-[10px] text-navy-400 mt-1.5">April 23, 2026</p>
-          </div>
           {/* Connection indicator */}
           <div className="flex items-center gap-2 mt-3 px-1">
             <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
