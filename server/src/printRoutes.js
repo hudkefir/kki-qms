@@ -1,6 +1,5 @@
 import { Router } from 'express';
-import { execSync } from 'child_process';
-import { writeFileSync, readFileSync, unlinkSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import db from './database.js';
@@ -10,8 +9,6 @@ import { requireAuth } from './authMiddleware.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const router = Router();
-const tmpDir = join(__dirname, '..', '..', 'uploads', 'print-tmp');
-if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
 
 const COMPANY = {
   name: 'KEFIR Kultures Inc.',
@@ -65,24 +62,10 @@ tr:nth-child(even) td { background: #f9fafb; }
   <div class="doc-info"><strong>${title}</strong><br>${docNumber ? 'Doc: ' + docNumber + '<br>' : ''}Generated: ${now}</div>
 </div>
 ${content}
+<script>window.onload = () => window.print();</script>
 </body></html>`;
 }
 
-function generatePdf(html, filename) {
-  const htmlPath = join(tmpDir, filename + '.html');
-  const pdfPath = join(tmpDir, filename + '.pdf');
-  writeFileSync(htmlPath, html);
-  execSync(`/opt/homebrew/bin/weasyprint "${htmlPath}" "${pdfPath}" 2>/dev/null`, { timeout: 30000 });
-  const pdf = readFileSync(pdfPath);
-  try { unlinkSync(htmlPath); unlinkSync(pdfPath); } catch(e) {}
-  return pdf;
-}
-
-function sendPdf(res, pdf, filename) {
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-  res.send(pdf);
-}
 
 function capaHtml(c) {
   return `
@@ -110,8 +93,7 @@ router.get('/print/capa/:id', requireAuth, (req, res) => {
     const c = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
     if (!c) return res.status(404).json({ error: 'CAPA not found' });
     const html = baseHtml('CAPA Report', c.capa_id, capaHtml(c));
-    const pdf = generatePdf(html, 'capa-' + c.capa_id);
-    sendPdf(res, pdf, `${c.capa_id}_Report.pdf`);
+    res.send(html);
   } catch (err) { console.error('Print CAPA error:', err); res.status(500).json({ error: err.message }); }
 });
 
@@ -127,8 +109,7 @@ router.get('/print/capas', requireAuth, (req, res) => {
     content += '</table>';
     for (const c of capas) { content += '<div class="page-break"></div>' + capaHtml(c); }
     const html = baseHtml('CAPA Register', 'KK-CAPA-REG', content);
-    const pdf = generatePdf(html, 'capa-register');
-    sendPdf(res, pdf, 'CAPA_Register.pdf');
+    res.send(html);
   } catch (err) { console.error('Print CAPAs error:', err); res.status(500).json({ error: err.message }); }
 });
 
@@ -166,8 +147,7 @@ router.get('/print/batch-test/:id', requireAuth, (req, res) => {
     }
     content += '</table>';
     const html = baseHtml('Batch Test Report', 'LOT-' + bt.batch_number, content);
-    const pdf = generatePdf(html, 'batch-test-' + bt.batch_number);
-    sendPdf(res, pdf, `Batch_Test_Lot_${bt.batch_number}.pdf`);
+    res.send(html);
   } catch (err) { console.error('Print batch test error:', err); res.status(500).json({ error: err.message }); }
 });
 
@@ -182,8 +162,7 @@ router.get('/print/batch-tests', requireAuth, (req, res) => {
     }
     content += '</table>';
     const html = baseHtml('Batch Testing Register', 'KK-BT-REG', content);
-    const pdf = generatePdf(html, 'batch-testing-register');
-    sendPdf(res, pdf, 'Batch_Testing_Register.pdf');
+    res.send(html);
   } catch (err) { console.error('Print batch tests error:', err); res.status(500).json({ error: err.message }); }
 });
 
@@ -211,8 +190,7 @@ router.get('/print/ccr/:id', requireAuth, (req, res) => {
       content += '</table>';
     }
     const html = baseHtml('Change Control Record', c.ccr_number || '', content);
-    const pdf = generatePdf(html, 'ccr-' + (c.ccr_number || c.id));
-    sendPdf(res, pdf, `${c.ccr_number || 'CCR'}_Report.pdf`);
+    res.send(html);
   } catch (err) { console.error('Print CCR error:', err); res.status(500).json({ error: err.message }); }
 });
 
@@ -227,8 +205,7 @@ router.get('/print/ccrs', requireAuth, (req, res) => {
     }
     content += '</table>';
     const html = baseHtml('CCR Register', 'KK-CCR-REG', content);
-    const pdf = generatePdf(html, 'ccr-register');
-    sendPdf(res, pdf, 'CCR_Register.pdf');
+    res.send(html);
   } catch (err) { console.error('Print CCRs error:', err); res.status(500).json({ error: err.message }); }
 });
 
@@ -243,8 +220,7 @@ router.get('/print/complaints', requireAuth, (req, res) => {
     }
     content += '</table>';
     const html = baseHtml('Customer Complaint Log', 'KK-CMP-REG', content);
-    const pdf = generatePdf(html, 'complaint-register');
-    sendPdf(res, pdf, 'Complaint_Register.pdf');
+    res.send(html);
   } catch (err) { console.error('Print complaints error:', err); res.status(500).json({ error: err.message }); }
 });
 
@@ -300,8 +276,7 @@ router.get('/print/audit-package', requireAuth, (req, res) => {
     content += '</table>';
 
     const html = baseHtml('SGS Audit Document Package', 'KK-AUDIT-PKG-' + now, content);
-    const pdf = generatePdf(html, 'audit-package-' + now);
-    sendPdf(res, pdf, `KKI_Audit_Package_${now}.pdf`);
+    res.send(html);
   } catch (err) { console.error('Print audit package error:', err); res.status(500).json({ error: err.message }); }
 });
 
