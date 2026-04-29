@@ -6,10 +6,14 @@ WORKDIR /app
 
 COPY package*.json ./
 COPY server/package*.json ./server/
+COPY client/package*.json ./client/
 
 RUN npm install --workspaces
 
 COPY . .
+
+# Build the client
+RUN cd client && npm run build
 
 RUN chmod +x start.sh
 
