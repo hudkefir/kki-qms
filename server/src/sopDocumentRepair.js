@@ -18,7 +18,7 @@ export async function repairSOPDocuments() {
       return;
     }
 
-    const allSopDocs = await db.prepare('SELECT * FROM documents WHERE category = ?').all('sop');
+    const allSopDocs = await await db.all('SELECT * FROM documents WHERE category = ?', ['sop']);
     const actualFiles = readdirSync(sopDir).filter(f => f.endsWith('.docx') || f.endsWith('.pdf'));
     
     let fixed = 0;
@@ -35,12 +35,12 @@ export async function repairSOPDocuments() {
         const matchingFile = actualFiles.find(f => f === baseName || f.startsWith(baseName.replace(/\.(docx|pdf)$/, '')));
         
         if (matchingFile) {
-          await db.prepare('UPDATE documents SET filename = ? WHERE id = ?').run(matchingFile, doc.id);
+          await await db.run('UPDATE documents SET filename = ? WHERE id = ?', [matchingFile, doc.id]);
           fixed++;
         } else {
           // DISABLED: Don't delete document records automatically
           // This was causing uploaded documents to disappear
-          // db.prepare('DELETE FROM documents WHERE id = ?').run(doc.id);
+          // await db.run('DELETE FROM documents WHERE id = ?', [doc.id]);
           console.log(`⚠️ Document record exists but file missing: ${doc.filename} (keeping record)`);
           // deleted++;
         }
@@ -55,17 +55,17 @@ export async function repairSOPDocuments() {
         const sopMatch = file.match(/KK-SOP-(\d+)/);
         if (sopMatch) {
           const sopNumber = 'KK-SOP-' + sopMatch[1];
-          const sop = await db.prepare('SELECT id FROM sops WHERE sop_number = ?').get(sopNumber);
+          const sop = await await db.get('SELECT id FROM sops WHERE sop_number = ?', [sopNumber]);
           
           if (sop) {
             const stats = statSync(join(sopDir, file));
-            await db.prepare(`
+            await db.run(`
               INSERT INTO documents (filename, original_name, file_type, file_size, category, linked_type, linked_id, description, uploaded_by, version)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(
+            `, [
               file,
               file,
-              file.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              file.endsWith('.pdf']) ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
               stats.size,
               'sop',
               'sop',
@@ -93,7 +93,7 @@ export async function repairSOPDocuments() {
 
 export async function getSOPDocumentStatus() {
   try {
-    const stats = await db.prepare(`
+    const stats = await db.get(`
       SELECT
         COUNT(DISTINCT s.id) as total_sops,
         COUNT(DISTINCT CASE WHEN d.id IS NOT NULL THEN s.id END) as sops_with_docs,
@@ -101,7 +101,7 @@ export async function getSOPDocumentStatus() {
       FROM sops s
       LEFT JOIN documents d ON d.linked_id = s.id AND d.linked_type = 'sop' AND d.category = 'sop'
       WHERE s.sop_number LIKE 'KK-SOP-%'
-    `).get();
+    `, []);
     
     return {
       total_sops: stats.total_sops,

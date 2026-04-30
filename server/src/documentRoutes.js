@@ -72,7 +72,7 @@ router.get('/', requireAuth, async (req, res) => {
     const sortOrder = order === 'asc' ? 'ASC' : 'DESC';
     query += ` ORDER BY ${sortCol} ${sortOrder}`;
 
-    const documents = db.prepare(query).all(...params);
+    const documents = await db.all(query, [...params]);
 
     logAudit(req, 'view', 'documents', null, null, {
       count: documents.length,
@@ -89,7 +89,7 @@ router.get('/', requireAuth, async (req, res) => {
 // Get version history for a document (by base name + category)
 router.get('/:id/versions', requireAuth, async (req, res) => {
   try {
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    const doc = await db.get('SELECT * FROM documents WHERE id = ?', [req.params.id]);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -97,9 +97,9 @@ router.get('/:id/versions', requireAuth, async (req, res) => {
     const baseName = doc.original_name.replace(/(_v\d+\.\d+)?(\.[^.]+)$/, '');
     const fileExt = extname(doc.original_name);
 
-    const versions = db.prepare(
+    const versions = await db.all(
       `SELECT * FROM documents WHERE original_name LIKE ? AND category = ? ORDER BY version DESC`
-    ).all(`${baseName}%${fileExt}`, doc.category);
+    , [`${baseName}%${fileExt}`, doc.category]);
 
     res.json(versions);
   } catch (error) {
@@ -129,9 +129,9 @@ router.post('/upload', requireAuth, requireWriteAccess, upload.array('files', 10
       const baseName = file.originalname.replace(/(_v\d+\.\d+)?(\.[^.]+)$/, '');
       const fileExt = extname(file.originalname);
 
-      const existingDoc = db.prepare(
+      const existingDoc = await db.get(
         'SELECT * FROM documents WHERE original_name LIKE ? AND category = ? ORDER BY version DESC LIMIT 1'
-      ).get(`${baseName}%${fileExt}`, safeCategory);
+      , [`${baseName}%${fileExt}`, safeCategory]);
 
       // Calculate new version
       let newVersion = 1.0;
@@ -171,7 +171,7 @@ router.post('/upload', requireAuth, requireWriteAccess, upload.array('files', 10
         const sopMatch = upperName.match(/KK-(?:FRM|LOG|CHK|SUP)-(\d{5})/);
         if (sopMatch) {
           const parentSopNumber = `KK-SOP-${sopMatch[1]}`;
-          const parentSop = db.prepare('SELECT id FROM sops WHERE sop_number = ?').get(parentSopNumber);
+          const parentSop = await db.get('SELECT id FROM sops WHERE sop_number = ?', [parentSopNumber]);
           if (parentSop) sopId = parentSop.id;
         }
       }
@@ -190,10 +190,10 @@ router.post('/upload', requireAuth, requireWriteAccess, upload.array('files', 10
         linked_sop_id: sopId
       };
 
-      const result = db.prepare(`
+      const result = await db.run(`
         INSERT INTO documents (filename, original_name, file_type, file_size, category, description, uploaded_by, version, tags, document_type, linked_sop_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
+      `, [
         docData.filename,
         docData.original_name,
         docData.file_type,
@@ -205,7 +205,7 @@ router.post('/upload', requireAuth, requireWriteAccess, upload.array('files', 10
         docData.tags,
         docData.document_type,
         docData.linked_sop_id
-      );
+      ]);
 
       uploadedFiles.push({
         id: result.lastInsertRowid,
@@ -241,13 +241,13 @@ router.post('/upload', requireAuth, requireWriteAccess, upload.array('files', 10
 // Download document
 router.get('/:id/download', requireAuth, async (req, res) => {
   try {
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    const doc = await db.get('SELECT * FROM documents WHERE id = ?', [req.params.id]);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
     // Track download count
-    db.prepare('UPDATE documents SET download_count = download_count + 1 WHERE id = ?').run(doc.id);
+    await db.run('UPDATE documents SET download_count = download_count + 1 WHERE id = ?', [doc.id]);
 
     logAudit(req, 'download', 'document', doc.id, doc.filename);
 
@@ -265,7 +265,7 @@ router.get('/:id/download', requireAuth, async (req, res) => {
 // Preview document (inline — for PDF embed viewer)
 router.get('/:id/preview', requireAuth, async (req, res) => {
   try {
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    const doc = await db.get('SELECT * FROM documents WHERE id = ?', [req.params.id]);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -284,7 +284,7 @@ router.get('/:id/preview', requireAuth, async (req, res) => {
 // Delete document
 router.delete('/:id', requireAuth, requireWriteAccess, async (req, res) => {
   try {
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    const doc = await db.get('SELECT * FROM documents WHERE id = ?', [req.params.id]);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -301,7 +301,7 @@ router.delete('/:id', requireAuth, requireWriteAccess, async (req, res) => {
     }
 
     // Delete from database
-    db.prepare('DELETE FROM documents WHERE id = ?').run(req.params.id);
+    await db.run('DELETE FROM documents WHERE id = ?', [req.params.id]);
 
     logAudit(req, 'delete', 'document', doc.id, doc.original_name || doc.filename, {
       old_values: doc
