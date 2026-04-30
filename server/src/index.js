@@ -39,9 +39,11 @@ const app = express();
 const server = createServer(app);
 const PORT = process.env.PORT || 3002;
 
-// Session store
+// Session store — use /tmp on Cloud Run (ephemeral but sessions are short-lived)
 const SqliteStore = sqliteStoreFactory(session);
-const sessionDataDir = process.env.KKI_DATA_DIR || join(__dirname, '..', 'data');
+const sessionDataDir = process.env.KKI_DATA_DIR || '/tmp';
+const { existsSync, mkdirSync } = await import('fs');
+if (!existsSync(sessionDataDir)) { mkdirSync(sessionDataDir, { recursive: true }); }
 const sessionDb = new Database(join(sessionDataDir, 'sessions.db'));
 
 // Middleware
