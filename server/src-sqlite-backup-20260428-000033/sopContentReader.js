@@ -346,61 +346,6 @@ export async function readSOPContent(filePath, originalFilename) {
   }
 }
 
-
-export async function readSOPContentFromBuffer(buffer, originalFilename) {
-  try {
-    if (!buffer || buffer.length === 0) {
-      throw new Error("Empty buffer provided");
-    }
-
-    const [htmlResult, textResult] = await Promise.all([
-      mammoth.convertToHtml({ buffer }),
-      mammoth.extractRawText({ buffer }),
-    ]);
-
-    const html = htmlResult.value;
-    const text = textResult.value;
-
-    if (!text || text.trim().length < 100) {
-      throw new Error("Document appears to be empty or too short");
-    }
-
-    const sections = parseHtmlSections(html);
-
-    const extractedContent = {
-      raw_text: text.substring(0, 50000),
-      purpose: findField(sections, "purpose"),
-      scope: findField(sections, "scope"),
-      procedure: findField(sections, "procedure"),
-      responsibilities: findField(sections, "responsibilities"),
-      materials_equipment: findField(sections, "materials_equipment"),
-      references: findField(sections, "references"),
-      extracted_version: extractVersionFromHtml(html, originalFilename || ""),
-      extracted_author: extractAuthorFromHtml(html),
-      extraction_timestamp: new Date().toISOString(),
-      word_count: text.split(/\s+/).length,
-      warnings: [],
-    };
-
-    const required = ["purpose", "scope", "procedure"];
-    for (const s of required) {
-      if (!extractedContent[s]) {
-        extractedContent.warnings.push("Could not extract " + s + " section");
-      }
-    }
-
-    if (extractedContent.extracted_version && originalFilename) {
-      const fnVer = extractVersionFromFilename(originalFilename);
-      if (fnVer && fnVer !== extractedContent.extracted_version) {
-        extractedContent.warnings.push("Version mismatch: filename (" + fnVer + ") vs document (" + extractedContent.extracted_version + ")");
-      }
-    }
-
-    return { success: true, data: extractedContent };
-  } catch (error) {
-    return { success: false, error: error.message, data: null };
-  }
-}
 function extractVersionFromFilename(filename) {
   for (const pattern of VERSION_PATTERNS) {
     const m = filename.match(pattern);
