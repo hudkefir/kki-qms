@@ -3,7 +3,7 @@ import multer from 'multer';
 import { existsSync, mkdirSync, createReadStream, unlinkSync } from 'fs';
 import { dirname, join, extname } from 'path';
 import { fileURLToPath } from 'url';
-import db from './database.js';
+import db from './database-pg.js';
 import { requireAuth, requireWriteAccess } from './authMiddleware.js';
 import { logAudit } from './auditMiddleware.js';
 
