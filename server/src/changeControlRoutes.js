@@ -547,7 +547,7 @@ router.post('/deviations/:id/disposition', requireWriteAccess, (req, res) => {
 // ==================== CAPAs ====================
 
 // GET /api/capas
-router.get('/capas', (req, res) => {
+router.get('/capas', async (req, res) => {
   try {
     const { status, source_type, overdue, search } = req.query;
     let query = 'SELECT * FROM capas WHERE 1=1';
@@ -565,7 +565,7 @@ router.get('/capas', (req, res) => {
     }
 
     query += ' ORDER BY created_at DESC, id DESC';
-    const rows = db.prepare(query).all(...params);
+    const rows = await db.prepare(query).all(...params);
 
     // Enrich with source reference
     const enriched = rows.map(r => {
