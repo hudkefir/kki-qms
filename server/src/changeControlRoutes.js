@@ -695,7 +695,7 @@ router.put('/capas/:id', requireContentAccess, async (req, res) => { console.log
     ];
     // Admin-only fields
     const adminFields = [
-      'capa_id', 'source_type', 'source_id', 'responsible_person',
+      'source_type', 'source_id', 'responsible_person',
       'target_date', 'actual_completion_date', 'status', 'linked_change_request_id',
       'effectiveness_check_date', 'effectiveness_result',
       'title', 'classification', 'priority', 'initiated_by',
