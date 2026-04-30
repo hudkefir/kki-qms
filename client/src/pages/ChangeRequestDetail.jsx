@@ -512,6 +512,9 @@ export default function ChangeRequestDetail() {
               })}
             </div>
           )}
+
+          {/* Universal Cross-Linker */}
+          <RecordLinker sourceType="change_request" sourceId={id} />
         </div>
       )}
 

@@ -4,6 +4,8 @@ import { useFetch, apiPut, apiPost, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/LoadingSpinner';
 import FormattedText from '../components/FormattedText';
+import RecordLinker from '../components/RecordLinker';
+import { FieldHelp, RecordInfoTooltip, GMP_HELP } from '../components/GmpFieldHelp';
 import {
   ArrowLeft, Save, Printer, Shield, Clock, CheckCircle, XCircle,
   AlertTriangle, FileText, Plus, Send, CalendarDays,
@@ -871,6 +873,11 @@ export default function CAPADetail() {
                   {isAdmin && <Pencil className="w-3.5 h-3.5 inline ml-2 text-gray-300" />}
                 </h1>
               )}
+              <RecordInfoTooltip title={GMP_HELP.capa.info.title}>
+                <p><strong>What:</strong> {GMP_HELP.capa.info.what}</p>
+                <p><strong>When to create:</strong> {GMP_HELP.capa.info.when}</p>
+                <p><strong>What you need:</strong> {GMP_HELP.capa.info.need}</p>
+              </RecordInfoTooltip>
               {/* Overdue / Due Soon badges */}
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 {capa.target_date && capa.status !== 'closed' && new Date(capa.target_date) < new Date() && (
@@ -970,7 +977,7 @@ export default function CAPADetail() {
         {/* Responsible person — editable for admin */}
         <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
           <User className="w-4 h-4 text-gray-400" />
-          <span className="font-medium text-gray-500">Responsible:</span>
+          <span className="font-medium text-gray-500" title={GMP_HELP.capa.fields.responsible_person}>Responsible:</span>
           {editingField === 'responsible' ? (
             <div className="flex items-center gap-2">
               <input
@@ -1285,13 +1292,14 @@ export default function CAPADetail() {
             defaultOpen={capa.status === 'open'}
             badge={capa.description ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Filled</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">Empty</span>}
           >
+            <FieldHelp text={GMP_HELP.capa.fields.description} />
             <EditableCard
               icon={FileText}
               iconColor="text-blue-500"
               title="Description — What Happened"
               value={<FormattedText text={capa.description} />}
               rawValue={capa.description || ""}
-              placeholder="Describe what happened, when it was discovered, what the impact is, and who was involved..."
+              placeholder={GMP_HELP.capa.placeholders.description}
               isAdmin={canEditContent}
               onSave={saveTextCard('description')}
             />
@@ -1304,13 +1312,14 @@ export default function CAPADetail() {
             defaultOpen={capa.status === 'open' || capa.status === 'investigating'}
             badge={capa.containment_action ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Filled</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">Empty</span>}
           >
+            <FieldHelp text={GMP_HELP.capa.fields.containment_action} />
             <EditableCard
               icon={Shield}
               iconColor="text-orange-500"
               title="Containment / Immediate Action"
               value={<FormattedText text={capa.containment_action} />}
               rawValue={capa.containment_action || ""}
-              placeholder="What immediate actions were taken to contain the issue? (e.g. quarantine product, stop production line, isolate affected batch)"
+              placeholder={GMP_HELP.capa.placeholders.containment_action}
               isAdmin={canEditContent}
               onSave={saveTextCard('containment_action')}
             />
@@ -1324,7 +1333,8 @@ export default function CAPADetail() {
             badge={capa.root_cause_method ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">{capa.root_cause_method}</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">No method</span>}
           >
             <div className="mb-4">
-              <label className="text-sm font-medium text-gray-600 mb-1.5 block">Investigation Method</label>
+              <label className="text-sm font-medium text-gray-600 mb-0.5 block">Investigation Method</label>
+              <FieldHelp text={GMP_HELP.capa.fields.root_cause_method} />
               {canEditContent ? (
                 <select
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
@@ -1348,13 +1358,14 @@ export default function CAPADetail() {
                 <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">{capa.root_cause_method || "Not specified"}</p>
               )}
             </div>
+            <FieldHelp text={GMP_HELP.capa.fields.root_cause_analysis} />
             <EditableCard
               icon={FlaskConical}
               iconColor="text-amber-500"
               title="Root Cause Analysis"
               value={<FormattedText text={capa.root_cause_analysis} />}
               rawValue={capa.root_cause_analysis || ""}
-              placeholder="Document the root cause analysis findings here..."
+              placeholder={GMP_HELP.capa.placeholders.root_cause_analysis}
               isAdmin={canEditContent}
               onSave={saveTextCard('root_cause_analysis')}
             />
@@ -1367,13 +1378,14 @@ export default function CAPADetail() {
             defaultOpen={capa.status === 'action_defined' || capa.status === 'in_progress'}
             badge={capa.corrective_action ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Defined</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">Empty</span>}
           >
+            <FieldHelp text={GMP_HELP.capa.fields.corrective_action} />
             <EditableCard
               icon={Shield}
               iconColor="text-red-500"
               title="Corrective Action"
               value={<FormattedText text={capa.corrective_action} />}
               rawValue={capa.corrective_action || ""}
-              placeholder="What corrective actions will be taken to fix the root cause?"
+              placeholder={GMP_HELP.capa.placeholders.corrective_action}
               isAdmin={canEditContent}
               onSave={saveTextCard('corrective_action')}
             />
@@ -1386,13 +1398,14 @@ export default function CAPADetail() {
             defaultOpen={capa.status === 'action_defined' || capa.status === 'in_progress'}
             badge={capa.preventive_action ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Defined</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">Empty</span>}
           >
+            <FieldHelp text={GMP_HELP.capa.fields.preventive_action} />
             <EditableCard
               icon={AlertTriangle}
               iconColor="text-amber-500"
               title="Preventive Action"
               value={<FormattedText text={capa.preventive_action} />}
               rawValue={capa.preventive_action || ""}
-              placeholder="What preventive actions will prevent this from recurring?"
+              placeholder={GMP_HELP.capa.placeholders.preventive_action}
               isAdmin={canEditContent}
               onSave={saveTextCard('preventive_action')}
             />
@@ -1406,23 +1419,25 @@ export default function CAPADetail() {
             badge={capa.effectiveness_notes ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Verified</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">Pending</span>}
           >
             <div className="space-y-4">
+              <FieldHelp text={GMP_HELP.capa.fields.verification_method} />
               <EditableCard
                 icon={CheckCircle}
                 iconColor="text-purple-500"
                 title="Verification Method"
                 value={capa.verification_method || ""}
                 rawValue={capa.verification_method || ""}
-                placeholder="How will you verify effectiveness? (e.g. reduced complaint rate, re-test results, audit findings, monitoring data)"
+                placeholder={GMP_HELP.capa.placeholders.verification_method}
                 isAdmin={canEditContent}
                 onSave={saveTextCard('verification_method')}
               />
+              <FieldHelp text={GMP_HELP.capa.fields.effectiveness_notes} />
               <EditableCard
                 icon={Activity}
                 iconColor="text-green-500"
                 title="Effectiveness Notes"
                 value={<FormattedText text={capa.effectiveness_notes} />}
                 rawValue={capa.effectiveness_notes || ""}
-                placeholder="Were the corrective/preventive actions effective? Document the verification results here."
+                placeholder={GMP_HELP.capa.placeholders.effectiveness_notes}
                 isAdmin={canEditContent}
                 onSave={saveTextCard('effectiveness_notes')}
               />
@@ -1671,6 +1686,9 @@ export default function CAPADetail() {
               </div>
             )}
           </Card>
+
+          {/* Universal Cross-Linker */}
+          <RecordLinker sourceType="capa" sourceId={id} />
         </div>
       )}
 
