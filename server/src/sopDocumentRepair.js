@@ -55,7 +55,7 @@ export async function repairSOPDocuments() {
         const sopMatch = file.match(/KK-SOP-(\d+)/);
         if (sopMatch) {
           const sopNumber = 'KK-SOP-' + sopMatch[1];
-          const sop = await await db.get('SELECT id FROM sops WHERE sop_number = ?', [sopNumber]);
+          const sop = await db.get('SELECT id FROM sops WHERE sop_number = ?', [sopNumber]);
           
           if (sop) {
             const stats = statSync(join(sopDir, file));
@@ -65,7 +65,7 @@ export async function repairSOPDocuments() {
             `, [
               file,
               file,
-              file.endsWith('.pdf']) ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              file.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
               stats.size,
               'sop',
               'sop',
@@ -73,7 +73,7 @@ export async function repairSOPDocuments() {
               `Auto-linked SOP document for ${sopNumber}`,
               'System (Auto-repair)',
               1.0
-            );
+            ]);
             linked++;
           }
         }
