@@ -5,6 +5,8 @@ import {
   Shield, FileText, Users, AlertOctagon
 } from 'lucide-react';
 import { useFetch, apiPut, apiPost } from '../hooks/useApi';
+import RecordLinker from '../components/RecordLinker';
+import { FieldHelp, RecordInfoTooltip, GMP_HELP } from '../components/GmpFieldHelp';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Modal from '../components/Modal';
 import { DevStatusBadge, DevClassificationBadge, DEV_STATUS_OPTIONS, DEV_STATUS_LABELS, DEV_CATEGORY_LABELS } from './Deviations';
@@ -166,6 +168,11 @@ export default function DeviationDetail() {
           <div>
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-2xl font-bold text-gray-900">{dev.report_id}</h1>
+              <RecordInfoTooltip title={GMP_HELP.deviation.info.title}>
+                <p><strong>What:</strong> {GMP_HELP.deviation.info.what}</p>
+                <p><strong>When to create:</strong> {GMP_HELP.deviation.info.when}</p>
+                <p><strong>What you need:</strong> {GMP_HELP.deviation.info.need}</p>
+              </RecordInfoTooltip>
               <DevStatusBadge status={dev.status} />
               <DevClassificationBadge classification={dev.classification} />
               {dev.is_ccp_deviation === 1 && (
@@ -256,8 +263,9 @@ export default function DeviationDetail() {
             {editing ? (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                  <input type="text" value={formData.title || ''} onChange={e => setFormData({ ...formData, title: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Title</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.title} />
+                  <input type="text" value={formData.title || ''} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder={GMP_HELP.deviation.placeholders.title} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
@@ -266,17 +274,20 @@ export default function DeviationDetail() {
                   </select>
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                  <textarea rows={3} value={formData.description || ''} onChange={e => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Description</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.description} />
+                  <textarea rows={3} value={formData.description || ''} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder={GMP_HELP.deviation.placeholders.description} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Category</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.category} />
                   <select value={formData.category || ''} onChange={e => setFormData({ ...formData, category: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2">
                     {Object.entries(DEV_CATEGORY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Classification</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Classification</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.classification} />
                   <select value={formData.classification || ''} onChange={e => setFormData({ ...formData, classification: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2">
                     <option value="critical">Critical</option>
                     <option value="major">Major</option>
@@ -284,28 +295,34 @@ export default function DeviationDetail() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Discovered By</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Discovered By</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.discovered_by} />
                   <input type="text" value={formData.discovered_by || ''} onChange={e => setFormData({ ...formData, discovered_by: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Discovered At</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Discovered At</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.discovered_at} />
                   <input type="date" value={formData.discovered_at || ''} onChange={e => setFormData({ ...formData, discovered_at: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-                  <input type="text" value={formData.location || ''} onChange={e => setFormData({ ...formData, location: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Location</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.location} />
+                  <input type="text" value={formData.location || ''} onChange={e => setFormData({ ...formData, location: e.target.value })} placeholder={GMP_HELP.deviation.placeholders.location} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Investigation Due Date</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Investigation Due Date</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.investigation_due_date} />
                   <input type="date" value={formData.investigation_due_date || ''} onChange={e => setFormData({ ...formData, investigation_due_date: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Immediate Action Taken</label>
-                  <textarea rows={2} value={formData.immediate_action || ''} onChange={e => setFormData({ ...formData, immediate_action: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Immediate Action Taken</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.immediate_action} />
+                  <textarea rows={2} value={formData.immediate_action || ''} onChange={e => setFormData({ ...formData, immediate_action: e.target.value })} placeholder={GMP_HELP.deviation.placeholders.immediate_action} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Root Cause</label>
-                  <textarea rows={3} value={formData.root_cause || ''} onChange={e => setFormData({ ...formData, root_cause: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Root Cause</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.root_cause} />
+                  <textarea rows={3} value={formData.root_cause || ''} onChange={e => setFormData({ ...formData, root_cause: e.target.value })} placeholder={GMP_HELP.deviation.placeholders.root_cause} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Root Cause Method</label>
@@ -315,15 +332,17 @@ export default function DeviationDetail() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Product Disposition</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Product Disposition</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.product_disposition} />
                   <select value={formData.product_disposition || ''} onChange={e => setFormData({ ...formData, product_disposition: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2">
                     <option value="">Not set</option>
                     {Object.entries(DISPOSITION_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Scope Assessment</label>
-                  <textarea rows={2} value={formData.scope_assessment || ''} onChange={e => setFormData({ ...formData, scope_assessment: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Scope Assessment</label>
+                  <FieldHelp text={GMP_HELP.deviation.fields.scope_assessment} />
+                  <textarea rows={2} value={formData.scope_assessment || ''} onChange={e => setFormData({ ...formData, scope_assessment: e.target.value })} placeholder={GMP_HELP.deviation.placeholders.scope_assessment} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Disposition Rationale</label>
@@ -502,6 +521,9 @@ export default function DeviationDetail() {
               </div>
             )}
           </div>
+
+          {/* Cross-Linked Records (Universal) */}
+          <RecordLinker sourceType="deviation" sourceId={id} />
 
           {/* Linked Batch Tests */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

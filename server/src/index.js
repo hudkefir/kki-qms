@@ -25,6 +25,7 @@ import sosRoutes from './sosRoutes.js';
 import printRoutes from './printRoutes.js';
 import environmentalRoutes from './environmentalRoutes.js';
 import supplierRoutes from './supplierRoutes.js';
+import linkRoutes from './linkRoutes.js';
 import { setupWebSocket } from './websocket.js';
 import { requireAuth } from './authMiddleware.js';
 import { auditApiMiddleware } from './auditMiddleware.js';
@@ -81,12 +82,12 @@ app.use('/api', (req, res, next) => {
   // Extract path segments and check common ID patterns
   const segments = req.path.split('/').filter(Boolean);
   // Check segments that follow known resource names (sops, complaints, ccrs, users, documents, audit, files)
-  const resources = ['sops', 'complaints', 'ccrs', 'users', 'documents', 'audit', 'files', 'corrective-actions', 'batch-tests', 'daily-tasks', 'sop-forms', 'change-requests', 'deviations', 'capas', 'change-control', 'equipment', 'pm-schedules', 'work-orders', 'recalls', 'traceability-exercises', 'crisis-events', 'recall', 'suppliers'];
+  const resources = ['sops', 'complaints', 'ccrs', 'users', 'documents', 'audit', 'files', 'corrective-actions', 'batch-tests', 'daily-tasks', 'sop-forms', 'change-requests', 'deviations', 'capas', 'change-control', 'equipment', 'pm-schedules', 'work-orders', 'recalls', 'traceability-exercises', 'crisis-events', 'recall', 'suppliers', 'links'];
   for (let i = 0; i < segments.length - 1; i++) {
     if (resources.includes(segments[i])) {
       const idSegment = segments[i + 1];
       // Skip known sub-paths that aren't IDs
-      if (['analytics', 'upload', 'by-lot', 'bulk-read-content', 'status', 'admin', 'completions', 'templates', 'results', 'verify', 'bulk', 'summary', 'fields', 'entries', 'forms', 'operators', 'export', 'admin-override', 'unlock', 'load', 'classify', 'approve', 'reject', 'effectiveness', 'investigate', 'disposition', 'dashboard', 'overdue', 'upcoming', 'complete', 'hold', 'notify-cfia', 'notify-customers', 'distribution', 'close', 'resolve', 'parse-coa-multi', 'print', 'environmental', 'updates', 'link-batch', 'link-complaint', 'available-complaints', 'available-batches', 'audit-trail', 'suggest-links', 'import', 'reviews', 'checklist'].includes(idSegment)) continue;
+      if (['analytics', 'upload', 'by-lot', 'bulk-read-content', 'status', 'admin', 'completions', 'templates', 'results', 'verify', 'bulk', 'summary', 'fields', 'entries', 'forms', 'operators', 'export', 'admin-override', 'unlock', 'load', 'classify', 'approve', 'reject', 'effectiveness', 'investigate', 'disposition', 'dashboard', 'overdue', 'upcoming', 'complete', 'hold', 'notify-cfia', 'notify-customers', 'distribution', 'close', 'resolve', 'parse-coa-multi', 'print', 'environmental', 'updates', 'link-batch', 'link-complaint', 'available-complaints', 'available-batches', 'audit-trail', 'suggest-links', 'import', 'reviews', 'checklist', 'search', 'suggestions', 'capa', 'deviation', 'complaint', 'ccr', 'change_request', 'batch_test', 'sop'].includes(idSegment)) continue;
       if (!/^\d+$/.test(idSegment)) {
         return res.status(400).json({ error: `Invalid ID '${idSegment}': must be a numeric value` });
       }
@@ -144,6 +145,7 @@ app.use('/api', requireAuth, sosRoutes);
 app.use('/api', printRoutes);
 app.use('/api', requireAuth, environmentalRoutes);
 app.use('/api', requireAuth, supplierRoutes);
+app.use('/api', requireAuth, linkRoutes);
 
 // Global error handler — prevent stack trace leaks
 app.use((err, req, res, _next) => {

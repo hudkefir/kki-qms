@@ -6,6 +6,8 @@ import {
   History, GitCommit, ArrowRight, Mail
 } from 'lucide-react';
 import LinkedDocuments from '../components/LinkedDocuments';
+import RecordLinker from '../components/RecordLinker';
+import { FieldHelp, RecordInfoTooltip, GMP_HELP } from '../components/GmpFieldHelp';
 import { useFetch, apiPut, apiPost, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -170,18 +172,21 @@ export default function ComplaintDetail() {
     return events;
   })();
 
+  const helpTexts = GMP_HELP.complaint.fields;
+  const placeholders = GMP_HELP.complaint.placeholders;
+
   const infoFields = [
     { label: 'Complaint ID', value: complaint.complaint_number, mono: true },
-    { label: 'Date Received', value: complaint.date_received, editField: 'date_received', type: 'date' },
-    { label: 'Source', value: complaint.source, editField: 'source' },
-    { label: 'Reporter', value: complaint.reporter, editField: 'reporter' },
-    { label: 'Store/Location', value: complaint.store_location, editField: 'store_location' },
-    { label: 'Product', value: `${complaint.product_sku} ${complaint.product_name}`, editField: 'product_sku', type: 'product_select' },
-    { label: 'Lot Number', value: complaint.lot_number || '—', editField: 'lot_number', mono: true },
-    { label: 'Best Before', value: complaint.best_before || '—', editField: 'best_before', type: 'date' },
-    { label: 'Quantity Affected', value: complaint.quantity_affected || '—', editField: 'quantity_affected', type: 'number' },
-    { label: 'Issue Type', value: complaint.issue_type, editField: 'issue_type', type: 'issue_select' },
-    { label: 'Assigned To', value: complaint.assigned_to || '—', editField: 'assigned_to' },
+    { label: 'Date Received', value: complaint.date_received, editField: 'date_received', type: 'date', help: helpTexts.date_received },
+    { label: 'Source', value: complaint.source, editField: 'source', help: helpTexts.source, placeholder: placeholders.source },
+    { label: 'Reporter', value: complaint.reporter, editField: 'reporter', help: helpTexts.reporter, placeholder: placeholders.reporter },
+    { label: 'Store/Location', value: complaint.store_location, editField: 'store_location', help: helpTexts.store_location, placeholder: placeholders.store_location },
+    { label: 'Product', value: `${complaint.product_sku} ${complaint.product_name}`, editField: 'product_sku', type: 'product_select', help: helpTexts.product_sku },
+    { label: 'Lot Number', value: complaint.lot_number || '—', editField: 'lot_number', mono: true, help: helpTexts.lot_number, placeholder: placeholders.lot_number },
+    { label: 'Best Before', value: complaint.best_before || '—', editField: 'best_before', type: 'date', help: helpTexts.best_before },
+    { label: 'Quantity Affected', value: complaint.quantity_affected || '—', editField: 'quantity_affected', type: 'number', help: helpTexts.quantity_affected, placeholder: placeholders.quantity_affected },
+    { label: 'Issue Type', value: complaint.issue_type, editField: 'issue_type', type: 'issue_select', help: helpTexts.issue_type },
+    { label: 'Assigned To', value: complaint.assigned_to || '—', editField: 'assigned_to', help: helpTexts.assigned_to, placeholder: placeholders.assigned_to },
   ];
 
   const handleArchiveToggle = async () => {
@@ -210,6 +215,11 @@ export default function ComplaintDetail() {
           <div>
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-2xl font-bold text-gray-900">{complaint.complaint_number}</h1>
+              <RecordInfoTooltip title={GMP_HELP.complaint.info.title}>
+                <p><strong>What:</strong> {GMP_HELP.complaint.info.what}</p>
+                <p><strong>When to create:</strong> {GMP_HELP.complaint.info.when}</p>
+                <p><strong>What you need:</strong> {GMP_HELP.complaint.info.need}</p>
+              </RecordInfoTooltip>
               {complaint.archived ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-200 text-gray-500 border border-gray-300">Archived</span> : null}
               <SeverityBadge severity={complaint.severity} />
               <ComplaintStatusBadge status={complaint.status} />
@@ -259,7 +269,8 @@ export default function ComplaintDetail() {
             <div className="grid grid-cols-2 gap-4">
               {infoFields.map(field => (
                 <div key={field.label}>
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{field.label}</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">{field.label}</p>
+                  {editing && field.help && <FieldHelp text={field.help} />}
                   {editing && field.editField ? (
                     field.type === 'product_select' ? (
                       <select value={formData.product_sku || ''} onChange={e => setFormData({ ...formData, product_sku: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-1.5">
@@ -270,7 +281,7 @@ export default function ComplaintDetail() {
                         {ISSUE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     ) : (
-                      <input type={field.type || 'text'} value={formData[field.editField] || ''} onChange={e => setFormData({ ...formData, [field.editField]: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-1.5" />
+                      <input type={field.type || 'text'} value={formData[field.editField] || ''} onChange={e => setFormData({ ...formData, [field.editField]: e.target.value })} placeholder={field.placeholder || ''} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-1.5" />
                     )
                   ) : (
                     <p className={`text-sm text-gray-900 ${field.mono ? 'font-mono' : ''}`}>{field.value}</p>
@@ -286,7 +297,8 @@ export default function ComplaintDetail() {
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Status & Severity</h2>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Severity</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Severity</label>
+                  <FieldHelp text={helpTexts.severity} />
                   <select value={formData.severity || ''} onChange={e => setFormData({ ...formData, severity: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2">
                     {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
                   </select>
@@ -303,9 +315,10 @@ export default function ComplaintDetail() {
 
           {/* Description */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-3">Description</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Description</h2>
+            {editing && <FieldHelp text={helpTexts.description} />}
             {editing ? (
-              <textarea rows={4} value={formData.description || ''} onChange={e => setFormData({ ...formData, description: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+              <textarea rows={4} value={formData.description || ''} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder={placeholders.description} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
             ) : (
               <p className="text-sm text-gray-700 leading-relaxed">{complaint.description || 'No description provided.'}</p>
             )}
@@ -503,6 +516,9 @@ export default function ComplaintDetail() {
               <p className="text-xs text-gray-400 mt-1">Drag and drop or click to upload complaint photos</p>
             </div>
           </div>
+
+          {/* Cross-Linked Records */}
+          <RecordLinker sourceType="complaint" sourceId={id} />
 
           {/* Linked Documents */}
           <LinkedDocuments linkedType="complaint" linkedId={id} category="complaint" />

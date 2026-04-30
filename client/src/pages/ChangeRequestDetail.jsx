@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { useFetch, apiPut, apiPost } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
+import RecordLinker from '../components/RecordLinker';
+import { FieldHelp, RecordInfoTooltip, GMP_HELP } from '../components/GmpFieldHelp';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Modal from '../components/Modal';
 import { CCStatusBadge, ClassificationBadge, CC_STATUS_OPTIONS, CC_STATUS_LABELS, CATEGORY_LABELS } from './ChangeRequests';
@@ -126,6 +128,11 @@ export default function ChangeRequestDetail() {
           <div>
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-2xl font-bold text-gray-900">{cr.request_id}</h1>
+              <RecordInfoTooltip title={GMP_HELP.change_request.info.title}>
+                <p><strong>What:</strong> {GMP_HELP.change_request.info.what}</p>
+                <p><strong>When to create:</strong> {GMP_HELP.change_request.info.when}</p>
+                <p><strong>What you need:</strong> {GMP_HELP.change_request.info.need}</p>
+              </RecordInfoTooltip>
               <CCStatusBadge status={cr.status} />
               <ClassificationBadge classification={cr.classification} />
               {cr.is_emergency === 1 && (

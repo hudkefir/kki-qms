@@ -5,6 +5,8 @@ import {
   ExternalLink, Target, Users, FileText, Trash2
 } from 'lucide-react';
 import LinkedDocuments from '../components/LinkedDocuments';
+import RecordLinker from '../components/RecordLinker';
+import { FieldHelp, RecordInfoTooltip, GMP_HELP } from '../components/GmpFieldHelp';
 import { useFetch, apiPut, apiPost, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -102,6 +104,7 @@ export default function CCRDetail() {
     { id: 'overview', label: 'Overview' },
     { id: 'complaints', label: `Complaints (${(ccr.complaints || []).length})` },
     { id: 'actions', label: `Corrective Actions (${actions.length})` },
+    { id: 'linked', label: 'Linked Records' },
     { id: 'timeline', label: 'Timeline' },
   ];
 
@@ -117,6 +120,11 @@ export default function CCRDetail() {
           <div>
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-2xl font-bold text-gray-900">{ccr.ccr_number}</h1>
+              <RecordInfoTooltip title={GMP_HELP.ccr.info.title}>
+                <p><strong>What:</strong> {GMP_HELP.ccr.info.what}</p>
+                <p><strong>When to create:</strong> {GMP_HELP.ccr.info.when}</p>
+                <p><strong>What you need:</strong> {GMP_HELP.ccr.info.need}</p>
+              </RecordInfoTooltip>
               <CCRStatusBadge status={ccr.status} />
               {isOverdue && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200">
@@ -189,25 +197,30 @@ export default function CCRDetail() {
             {editing ? (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                  <input type="text" value={formData.title || ''} onChange={e => setFormData({ ...formData, title: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Title</label>
+                  <FieldHelp text={GMP_HELP.ccr.fields.title} />
+                  <input type="text" value={formData.title || ''} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder={GMP_HELP.ccr.placeholders.title} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Status</label>
+                  <FieldHelp text={GMP_HELP.ccr.fields.status} />
                   <select value={formData.status || ''} onChange={e => setFormData({ ...formData, status: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2">
                     {CCR_STATUS_OPTIONS.map(s => <option key={s} value={s}>{CCR_STATUS_LABELS[s]}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Recipient Company</label>
-                  <input type="text" value={formData.recipient_company || ''} onChange={e => setFormData({ ...formData, recipient_company: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Recipient Company</label>
+                  <FieldHelp text={GMP_HELP.ccr.fields.recipient_company} />
+                  <input type="text" value={formData.recipient_company || ''} onChange={e => setFormData({ ...formData, recipient_company: e.target.value })} placeholder={GMP_HELP.ccr.placeholders.recipient_company} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Recipient Contact</label>
-                  <input type="text" value={formData.recipient_contact || ''} onChange={e => setFormData({ ...formData, recipient_contact: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Recipient Contact</label>
+                  <FieldHelp text={GMP_HELP.ccr.fields.recipient_contact} />
+                  <input type="text" value={formData.recipient_contact || ''} onChange={e => setFormData({ ...formData, recipient_contact: e.target.value })} placeholder={GMP_HELP.ccr.placeholders.recipient_contact} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Target Resolution</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Target Resolution</label>
+                  <FieldHelp text={GMP_HELP.ccr.fields.target_resolution_date} />
                   <input type="date" value={formData.target_resolution_date || ''} onChange={e => setFormData({ ...formData, target_resolution_date: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div>
@@ -215,8 +228,9 @@ export default function CCRDetail() {
                   <input type="date" value={formData.actual_resolution_date || ''} onChange={e => setFormData({ ...formData, actual_resolution_date: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                  <textarea rows={3} value={formData.notes || ''} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Notes</label>
+                  <FieldHelp text={GMP_HELP.ccr.fields.notes} />
+                  <textarea rows={3} value={formData.notes || ''} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder={GMP_HELP.ccr.placeholders.notes} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
               </div>
             ) : (
@@ -561,6 +575,10 @@ export default function CCRDetail() {
             </form>
           </Modal>
         </div>
+      )}
+
+      {activeTab === 'linked' && (
+        <RecordLinker sourceType="ccr" sourceId={id} />
       )}
 
       {activeTab === 'timeline' && (
