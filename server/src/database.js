@@ -1495,14 +1495,14 @@ db.exec(`
 // ──── Universal Record Links table ────
 db.exec(`
   CREATE TABLE IF NOT EXISTS qms_record_links (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_type TEXT NOT NULL,
+    id SERIAL PRIMARY KEY,
+    source_type VARCHAR(50) NOT NULL,
     source_id INTEGER NOT NULL,
-    target_type TEXT NOT NULL,
+    target_type VARCHAR(50) NOT NULL,
     target_id INTEGER NOT NULL,
     link_reason TEXT,
-    created_by TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
+    created_by VARCHAR(100),
+    created_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(source_type, source_id, target_type, target_id)
   );
   CREATE INDEX IF NOT EXISTS idx_record_links_source ON qms_record_links(source_type, source_id);
