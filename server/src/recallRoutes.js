@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import db from './database.js';
+import db from './database-pg.js';
 import { broadcast } from './websocket.js';
 import { requireWriteAccess, requireRole } from './authMiddleware.js';
 import { logAudit } from './auditMiddleware.js';
@@ -8,44 +8,44 @@ import { sanitizeBody } from './sanitize.js';
 const router = Router();
 
 // ──── Sequence helpers ────
-function nextRecallId() {
+async function nextRecallId() {
   const year = new Date().getFullYear();
-  const row = db.prepare('SELECT next_number FROM recall_sequence WHERE year = ?').get(year);
+  const row = await db.prepare('SELECT next_number FROM recall_sequence WHERE year = ?').get(year);
   let num;
   if (row) {
     num = row.next_number;
-    db.prepare('UPDATE recall_sequence SET next_number = ? WHERE year = ?').run(num + 1, year);
+    await db.prepare('UPDATE recall_sequence SET next_number = ? WHERE year = ?').run(num + 1, year);
   } else {
     num = 1;
-    db.prepare('INSERT INTO recall_sequence (year, next_number) VALUES (?, ?)').run(year, 2);
+    await db.prepare('INSERT INTO recall_sequence (year, next_number) VALUES (?, ?)').run(year, 2);
   }
   return `RC-${year}-${String(num).padStart(3, '0')}`;
 }
 
-function nextExerciseId() {
+async function nextExerciseId() {
   const year = new Date().getFullYear();
-  const row = db.prepare('SELECT next_number FROM exercise_sequence WHERE year = ?').get(year);
+  const row = await db.prepare('SELECT next_number FROM exercise_sequence WHERE year = ?').get(year);
   let num;
   if (row) {
     num = row.next_number;
-    db.prepare('UPDATE exercise_sequence SET next_number = ? WHERE year = ?').run(num + 1, year);
+    await db.prepare('UPDATE exercise_sequence SET next_number = ? WHERE year = ?').run(num + 1, year);
   } else {
     num = 1;
-    db.prepare('INSERT INTO exercise_sequence (year, next_number) VALUES (?, ?)').run(year, 2);
+    await db.prepare('INSERT INTO exercise_sequence (year, next_number) VALUES (?, ?)').run(year, 2);
   }
   return `TE-${year}-${String(num).padStart(3, '0')}`;
 }
 
-function nextCrisisId() {
+async function nextCrisisId() {
   const year = new Date().getFullYear();
-  const row = db.prepare('SELECT next_number FROM crisis_sequence WHERE year = ?').get(year);
+  const row = await db.prepare('SELECT next_number FROM crisis_sequence WHERE year = ?').get(year);
   let num;
   if (row) {
     num = row.next_number;
-    db.prepare('UPDATE crisis_sequence SET next_number = ? WHERE year = ?').run(num + 1, year);
+    await db.prepare('UPDATE crisis_sequence SET next_number = ? WHERE year = ?').run(num + 1, year);
   } else {
     num = 1;
-    db.prepare('INSERT INTO crisis_sequence (year, next_number) VALUES (?, ?)').run(year, 2);
+    await db.prepare('INSERT INTO crisis_sequence (year, next_number) VALUES (?, ?)').run(year, 2);
   }
   return `CE-${year}-${String(num).padStart(3, '0')}`;
 }
@@ -53,7 +53,7 @@ function nextCrisisId() {
 // ==================== RECALLS ====================
 
 // GET /api/recalls
-router.get('/recalls', (req, res) => {
+router.get('/recalls', async (req, res) => {
   try {
     const { status, classification, type, search } = req.query;
     let query = 'SELECT * FROM recalls WHERE 1=1';
@@ -69,12 +69,13 @@ router.get('/recalls', (req, res) => {
     }
 
     query += ' ORDER BY created_at DESC, id DESC';
-    const rows = db.prepare(query).all(...params);
+    const rows = await db.prepare(query).all(...params);
 
-    const enriched = rows.map(r => {
-      const distCount = db.prepare('SELECT COUNT(*) as count FROM recall_distribution WHERE recall_id = ?').get(r.id).count;
-      return { ...r, distCount };
-    });
+    const enriched = [];
+    for (const r of rows) {
+      const distRow = await db.prepare('SELECT COUNT(*) as count FROM recall_distribution WHERE recall_id = ?').get(r.id);
+      enriched.push({ ...r, distCount: distRow.count });
+    }
 
     res.json(enriched);
   } catch (err) {
@@ -83,12 +84,12 @@ router.get('/recalls', (req, res) => {
 });
 
 // GET /api/recalls/:id
-router.get('/recalls/:id', (req, res) => {
+router.get('/recalls/:id', async (req, res) => {
   try {
-    const recall = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const recall = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
-    const distribution = db.prepare('SELECT * FROM recall_distribution WHERE recall_id = ? ORDER BY id').all(recall.id);
+    const distribution = await db.prepare('SELECT * FROM recall_distribution WHERE recall_id = ? ORDER BY id').all(recall.id);
 
     res.json({
       ...recall,
@@ -103,7 +104,7 @@ router.get('/recalls/:id', (req, res) => {
 });
 
 // POST /api/recalls
-router.post('/recalls', requireWriteAccess, (req, res) => {
+router.post('/recalls', requireWriteAccess, async (req, res) => {
   try {
     const sanitized = sanitizeBody(req.body);
     const {
@@ -116,14 +117,14 @@ router.post('/recalls', requireWriteAccess, (req, res) => {
       return res.status(400).json({ error: 'title, type, trigger_type, trigger_description, and initiated_by are required' });
     }
 
-    const recall_id = nextRecallId();
+    const recall_id = await nextRecallId();
 
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO recalls (recall_id, title, type, classification, trigger_type, trigger_description, affected_products, affected_lot_codes, affected_batch_ids, risk_assessment, initiated_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(recall_id, title, type, classification, trigger_type, trigger_description, JSON.stringify(affected_products), JSON.stringify(affected_lot_codes), JSON.stringify(affected_batch_ids), risk_assessment, initiated_by);
 
-    const created = db.prepare('SELECT * FROM recalls WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(info.lastInsertRowid);
     logAudit(req, 'create_recall', 'recalls', created.id, recall_id, { new_values: { recall_id, title, type, trigger_type, initiated_by } });
     broadcast('recall_created', created);
     res.status(201).json(created);
@@ -133,9 +134,9 @@ router.post('/recalls', requireWriteAccess, (req, res) => {
 });
 
 // PUT /api/recalls/:id
-router.put('/recalls/:id', requireWriteAccess, (req, res) => {
+router.put('/recalls/:id', requireWriteAccess, async (req, res) => {
   try {
-    const recall = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const recall = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -168,9 +169,9 @@ router.put('/recalls/:id', requireWriteAccess, (req, res) => {
     if (updates.length === 1) return res.json(recall);
 
     params.push(req.params.id);
-    db.prepare(`UPDATE recalls SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE recalls SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
-    const updated = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     logAudit(req, 'update_recall', 'recalls', req.params.id, recall.recall_id, { old_values: {}, new_values: sanitized });
     broadcast('recall_updated', updated);
     res.json(updated);
@@ -180,15 +181,15 @@ router.put('/recalls/:id', requireWriteAccess, (req, res) => {
 });
 
 // POST /api/recalls/:id/hold
-router.post('/recalls/:id/hold', requireWriteAccess, (req, res) => {
+router.post('/recalls/:id/hold', requireWriteAccess, async (req, res) => {
   try {
-    const recall = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const recall = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
-    db.prepare(`UPDATE recalls SET status = 'hold_segregate', updated_at = datetime('now') WHERE id = ?`)
+    await db.prepare(`UPDATE recalls SET status = 'hold_segregate', updated_at = datetime('now') WHERE id = ?`)
       .run(req.params.id);
 
-    const updated = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     logAudit(req, 'hold_recall', 'recalls', req.params.id, recall.recall_id, { new_values: { status: 'hold_segregate' } });
     broadcast('recall_updated', updated);
     res.json(updated);
@@ -198,17 +199,17 @@ router.post('/recalls/:id/hold', requireWriteAccess, (req, res) => {
 });
 
 // POST /api/recalls/:id/notify-cfia
-router.post('/recalls/:id/notify-cfia', requireWriteAccess, (req, res) => {
+router.post('/recalls/:id/notify-cfia', requireWriteAccess, async (req, res) => {
   try {
-    const recall = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const recall = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
     const { cfia_contact_name, cfia_reference_number } = req.body;
 
-    db.prepare(`UPDATE recalls SET status = 'cfia_notified', cfia_notified = 1, cfia_notified_at = datetime('now'), cfia_contact_name = ?, cfia_reference_number = ?, updated_at = datetime('now') WHERE id = ?`)
+    await db.prepare(`UPDATE recalls SET status = 'cfia_notified', cfia_notified = 1, cfia_notified_at = datetime('now'), cfia_contact_name = ?, cfia_reference_number = ?, updated_at = datetime('now') WHERE id = ?`)
       .run(cfia_contact_name || '', cfia_reference_number || '', req.params.id);
 
-    const updated = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     logAudit(req, 'notify_cfia_recall', 'recalls', req.params.id, recall.recall_id, { new_values: { cfia_contact_name, cfia_reference_number } });
     broadcast('recall_updated', updated);
     res.json(updated);
@@ -218,15 +219,15 @@ router.post('/recalls/:id/notify-cfia', requireWriteAccess, (req, res) => {
 });
 
 // POST /api/recalls/:id/notify-customers
-router.post('/recalls/:id/notify-customers', requireWriteAccess, (req, res) => {
+router.post('/recalls/:id/notify-customers', requireWriteAccess, async (req, res) => {
   try {
-    const recall = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const recall = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
-    db.prepare(`UPDATE recalls SET status = 'customers_notified', customers_notified = 1, recall_notice_sent = 1, updated_at = datetime('now') WHERE id = ?`)
+    await db.prepare(`UPDATE recalls SET status = 'customers_notified', customers_notified = 1, recall_notice_sent = 1, updated_at = datetime('now') WHERE id = ?`)
       .run(req.params.id);
 
-    const updated = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     logAudit(req, 'notify_customers_recall', 'recalls', req.params.id, recall.recall_id, { new_values: { customers_notified: 1 } });
     broadcast('recall_updated', updated);
     res.json(updated);
@@ -236,17 +237,17 @@ router.post('/recalls/:id/notify-customers', requireWriteAccess, (req, res) => {
 });
 
 // POST /api/recalls/:id/effectiveness
-router.post('/recalls/:id/effectiveness', requireWriteAccess, (req, res) => {
+router.post('/recalls/:id/effectiveness', requireWriteAccess, async (req, res) => {
   try {
-    const recall = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const recall = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
     const { total_quantity_accounted } = req.body;
 
-    db.prepare(`UPDATE recalls SET status = 'effectiveness_check', total_quantity_accounted = ?, updated_at = datetime('now') WHERE id = ?`)
+    await db.prepare(`UPDATE recalls SET status = 'effectiveness_check', total_quantity_accounted = ?, updated_at = datetime('now') WHERE id = ?`)
       .run(total_quantity_accounted || 0, req.params.id);
 
-    const updated = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     logAudit(req, 'effectiveness_recall', 'recalls', req.params.id, recall.recall_id, { new_values: { total_quantity_accounted } });
     broadcast('recall_updated', updated);
     res.json(updated);
@@ -256,18 +257,18 @@ router.post('/recalls/:id/effectiveness', requireWriteAccess, (req, res) => {
 });
 
 // POST /api/recalls/:id/disposition
-router.post('/recalls/:id/disposition', requireWriteAccess, (req, res) => {
+router.post('/recalls/:id/disposition', requireWriteAccess, async (req, res) => {
   try {
-    const recall = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const recall = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
     const { product_disposition, disposition_witnessed_by } = req.body;
     if (!product_disposition) return res.status(400).json({ error: 'product_disposition is required' });
 
-    db.prepare(`UPDATE recalls SET product_disposition = ?, disposition_date = datetime('now'), disposition_witnessed_by = ?, updated_at = datetime('now') WHERE id = ?`)
+    await db.prepare(`UPDATE recalls SET product_disposition = ?, disposition_date = datetime('now'), disposition_witnessed_by = ?, updated_at = datetime('now') WHERE id = ?`)
       .run(product_disposition, disposition_witnessed_by || '', req.params.id);
 
-    const updated = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     logAudit(req, 'disposition_recall', 'recalls', req.params.id, recall.recall_id, { new_values: { product_disposition } });
     broadcast('recall_updated', updated);
     res.json(updated);
@@ -277,15 +278,15 @@ router.post('/recalls/:id/disposition', requireWriteAccess, (req, res) => {
 });
 
 // POST /api/recalls/:id/close
-router.post('/recalls/:id/close', requireWriteAccess, (req, res) => {
+router.post('/recalls/:id/close', requireWriteAccess, async (req, res) => {
   try {
-    const recall = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const recall = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
-    db.prepare(`UPDATE recalls SET status = 'closed', closed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
+    await db.prepare(`UPDATE recalls SET status = 'closed', closed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
       .run(req.params.id);
 
-    const updated = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     logAudit(req, 'close_recall', 'recalls', req.params.id, recall.recall_id, { new_values: { status: 'closed' } });
     broadcast('recall_updated', updated);
     res.json(updated);
@@ -297,12 +298,12 @@ router.post('/recalls/:id/close', requireWriteAccess, (req, res) => {
 // ==================== RECALL DISTRIBUTION ====================
 
 // GET /api/recalls/:id/distribution
-router.get('/recalls/:id/distribution', (req, res) => {
+router.get('/recalls/:id/distribution', async (req, res) => {
   try {
-    const recall = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const recall = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
-    const rows = db.prepare('SELECT * FROM recall_distribution WHERE recall_id = ? ORDER BY id').all(req.params.id);
+    const rows = await db.prepare('SELECT * FROM recall_distribution WHERE recall_id = ? ORDER BY id').all(req.params.id);
     res.json(rows);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -310,9 +311,9 @@ router.get('/recalls/:id/distribution', (req, res) => {
 });
 
 // POST /api/recalls/:id/distribution
-router.post('/recalls/:id/distribution', requireWriteAccess, (req, res) => {
+router.post('/recalls/:id/distribution', requireWriteAccess, async (req, res) => {
   try {
-    const recall = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const recall = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -324,12 +325,12 @@ router.post('/recalls/:id/distribution', requireWriteAccess, (req, res) => {
 
     if (!customer_name) return res.status(400).json({ error: 'customer_name is required' });
 
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO recall_distribution (recall_id, customer_name, customer_address, contact_name, contact_phone, contact_email, customer_type, lot_codes_shipped, quantity_shipped, notes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(req.params.id, customer_name, customer_address, contact_name, contact_phone, contact_email, customer_type, JSON.stringify(lot_codes_shipped), quantity_shipped, notes);
 
-    const created = db.prepare('SELECT * FROM recall_distribution WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.prepare('SELECT * FROM recall_distribution WHERE id = ?').get(info.lastInsertRowid);
     logAudit(req, 'add_recall_distribution', 'recall_distribution', created.id, recall.recall_id, { new_values: { customer_name, quantity_shipped } });
     broadcast('recall_updated', { id: recall.id });
     res.status(201).json(created);
@@ -339,12 +340,12 @@ router.post('/recalls/:id/distribution', requireWriteAccess, (req, res) => {
 });
 
 // PUT /api/recalls/:id/distribution/:distId
-router.put('/recalls/:id/distribution/:distId', requireWriteAccess, (req, res) => {
+router.put('/recalls/:id/distribution/:distId', requireWriteAccess, async (req, res) => {
   try {
-    const recall = db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
+    const recall = await db.prepare('SELECT * FROM recalls WHERE id = ?').get(req.params.id);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
-    const dist = db.prepare('SELECT * FROM recall_distribution WHERE id = ? AND recall_id = ?').get(req.params.distId, req.params.id);
+    const dist = await db.prepare('SELECT * FROM recall_distribution WHERE id = ? AND recall_id = ?').get(req.params.distId, req.params.id);
     if (!dist) return res.status(404).json({ error: 'Distribution record not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -372,9 +373,9 @@ router.put('/recalls/:id/distribution/:distId', requireWriteAccess, (req, res) =
     if (updates.length === 0) return res.json(dist);
 
     params.push(req.params.distId);
-    db.prepare(`UPDATE recall_distribution SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE recall_distribution SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
-    const updated = db.prepare('SELECT * FROM recall_distribution WHERE id = ?').get(req.params.distId);
+    const updated = await db.prepare('SELECT * FROM recall_distribution WHERE id = ?').get(req.params.distId);
     logAudit(req, 'update_recall_distribution', 'recall_distribution', req.params.distId, recall.recall_id, { old_values: {}, new_values: sanitized });
     broadcast('recall_updated', { id: recall.id });
     res.json(updated);
@@ -386,7 +387,7 @@ router.put('/recalls/:id/distribution/:distId', requireWriteAccess, (req, res) =
 // ==================== TRACEABILITY EXERCISES ====================
 
 // GET /api/traceability-exercises
-router.get('/traceability-exercises', (req, res) => {
+router.get('/traceability-exercises', async (req, res) => {
   try {
     const { status, type, search } = req.query;
     let query = 'SELECT * FROM traceability_exercises WHERE 1=1';
@@ -401,7 +402,7 @@ router.get('/traceability-exercises', (req, res) => {
     }
 
     query += ' ORDER BY created_at DESC, id DESC';
-    const rows = db.prepare(query).all(...params);
+    const rows = await db.prepare(query).all(...params);
     res.json(rows);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -409,9 +410,9 @@ router.get('/traceability-exercises', (req, res) => {
 });
 
 // GET /api/traceability-exercises/:id
-router.get('/traceability-exercises/:id', (req, res) => {
+router.get('/traceability-exercises/:id', async (req, res) => {
   try {
-    const exercise = db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(req.params.id);
+    const exercise = await db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(req.params.id);
     if (!exercise) return res.status(404).json({ error: 'Traceability exercise not found' });
 
     res.json({
@@ -425,7 +426,7 @@ router.get('/traceability-exercises/:id', (req, res) => {
 });
 
 // POST /api/traceability-exercises
-router.post('/traceability-exercises', requireWriteAccess, (req, res) => {
+router.post('/traceability-exercises', requireWriteAccess, async (req, res) => {
   try {
     const sanitized = sanitizeBody(req.body);
     const {
@@ -437,14 +438,14 @@ router.post('/traceability-exercises', requireWriteAccess, (req, res) => {
       return res.status(400).json({ error: 'type, target_lot, and conducted_by are required' });
     }
 
-    const exercise_id = nextExerciseId();
+    const exercise_id = await nextExerciseId();
 
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO traceability_exercises (exercise_id, type, target_lot, target_description, conducted_by, start_time)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(exercise_id, type, target_lot, target_description, conducted_by, start_time);
 
-    const created = db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(info.lastInsertRowid);
     logAudit(req, 'create_traceability_exercise', 'traceability_exercises', created.id, exercise_id, { new_values: { exercise_id, type, target_lot, conducted_by } });
     broadcast('traceability_exercise_created', created);
     res.status(201).json(created);

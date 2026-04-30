@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import db from './database.js';
+import db from './database-pg.js';
 import { broadcast } from './websocket.js';
 import { requireWriteAccess, requireRole } from './authMiddleware.js';
 import { logAudit } from './auditMiddleware.js';
@@ -8,7 +8,7 @@ import { sanitizeBody } from './sanitize.js';
 const router = Router();
 
 // Ensure status history table exists
-db.exec(`
+await db.exec(`
   CREATE TABLE IF NOT EXISTS complaint_status_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     complaint_id INTEGER NOT NULL,
@@ -24,7 +24,7 @@ db.exec(`
 // ==================== COMPLAINTS ====================
 
 // GET /api/complaints
-router.get('/complaints', (req, res) => {
+router.get('/complaints', async (req, res) => {
   try {
     const { status, severity, product_sku, source, lot_number, search, date_from, date_to, issue_type, include_archived } = req.query;
     let query = 'SELECT * FROM complaints WHERE 1=1';
@@ -46,7 +46,7 @@ router.get('/complaints', (req, res) => {
     }
 
     query += ' ORDER BY date_received DESC, id DESC';
-    const complaints = db.prepare(query).all(...params);
+    const complaints = await db.prepare(query).all(...params);
     res.json(complaints);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -54,49 +54,52 @@ router.get('/complaints', (req, res) => {
 });
 
 // GET /api/complaints/analytics
-router.get('/complaints/analytics', (req, res) => {
+router.get('/complaints/analytics', async (req, res) => {
   try {
-    const byProduct = db.prepare(`
+    const byProduct = await db.prepare(`
       SELECT product_name, product_sku, COUNT(*) as count
       FROM complaints GROUP BY product_sku ORDER BY count DESC
     `).all();
 
-    const byIssueType = db.prepare(`
+    const byIssueType = await db.prepare(`
       SELECT issue_type, COUNT(*) as count
       FROM complaints GROUP BY issue_type ORDER BY count DESC
     `).all();
 
-    const bySource = db.prepare(`
+    const bySource = await db.prepare(`
       SELECT source, COUNT(*) as count
       FROM complaints GROUP BY source ORDER BY count DESC
     `).all();
 
-    const bySeverity = db.prepare(`
+    const bySeverity = await db.prepare(`
       SELECT severity, COUNT(*) as count
       FROM complaints GROUP BY severity ORDER BY count DESC
     `).all();
 
-    const byStatus = db.prepare(`
+    const byStatus = await db.prepare(`
       SELECT status, COUNT(*) as count
       FROM complaints GROUP BY status ORDER BY count DESC
     `).all();
 
-    const byMonth = db.prepare(`
+    const byMonth = await db.prepare(`
       SELECT strftime('%Y-%m', date_received) as month, COUNT(*) as count
       FROM complaints GROUP BY month ORDER BY month
     `).all();
 
-    const byLot = db.prepare(`
+    const byLot = await db.prepare(`
       SELECT lot_number, product_name, product_sku, COUNT(*) as count, GROUP_CONCAT(complaint_number) as complaint_numbers
       FROM complaints WHERE lot_number != '' GROUP BY lot_number ORDER BY count DESC
     `).all();
 
-    const totalOpen = db.prepare("SELECT COUNT(*) as count FROM complaints WHERE status NOT IN ('resolved','closed')").get().count;
-    const totalAll = db.prepare('SELECT COUNT(*) as count FROM complaints').get().count;
-    const totalResolved = db.prepare("SELECT COUNT(*) as count FROM complaints WHERE status IN ('resolved','closed')").get().count;
+    const totalOpenRow = await db.prepare("SELECT COUNT(*) as count FROM complaints WHERE status NOT IN ('resolved','closed')").get();
+    const totalOpen = totalOpenRow.count;
+    const totalAllRow = await db.prepare('SELECT COUNT(*) as count FROM complaints').get();
+    const totalAll = totalAllRow.count;
+    const totalResolvedRow = await db.prepare("SELECT COUNT(*) as count FROM complaints WHERE status IN ('resolved','closed')").get();
+    const totalResolved = totalResolvedRow.count;
 
     // Average resolution time (for resolved/closed complaints)
-    const avgResolution = db.prepare(`
+    const avgResolution = await db.prepare(`
       SELECT AVG(julianday(updated_at) - julianday(date_received)) as avg_days
       FROM complaints WHERE status IN ('resolved','closed')
     `).get();
@@ -112,9 +115,9 @@ router.get('/complaints/analytics', (req, res) => {
 });
 
 // GET /api/complaints/by-lot/:lot
-router.get('/complaints/by-lot/:lot', (req, res) => {
+router.get('/complaints/by-lot/:lot', async (req, res) => {
   try {
-    const complaints = db.prepare('SELECT * FROM complaints WHERE lot_number = ? ORDER BY date_received DESC').all(req.params.lot);
+    const complaints = await db.prepare('SELECT * FROM complaints WHERE lot_number = ? ORDER BY date_received DESC').all(req.params.lot);
     res.json(complaints);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -122,19 +125,19 @@ router.get('/complaints/by-lot/:lot', (req, res) => {
 });
 
 // GET /api/complaints/:id
-router.get('/complaints/:id', (req, res) => {
+router.get('/complaints/:id', async (req, res) => {
   try {
-    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    const complaint = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
     if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
 
     // Get linked CCR info if exists
     let linkedCCR = null;
     if (complaint.linked_ccr_id) {
-      linkedCCR = db.prepare('SELECT id, ccr_number, title, status FROM ccrs WHERE id = ?').get(complaint.linked_ccr_id);
+      linkedCCR = await db.prepare('SELECT id, ccr_number, title, status FROM ccrs WHERE id = ?').get(complaint.linked_ccr_id);
     }
 
     // Get comments
-    const comments = db.prepare('SELECT * FROM complaint_comments WHERE complaint_id = ? ORDER BY created_at ASC').all(req.params.id);
+    const comments = await db.prepare('SELECT * FROM complaint_comments WHERE complaint_id = ? ORDER BY created_at ASC').all(req.params.id);
 
     res.json({ ...complaint, linkedCCR, comments });
   } catch (err) {
@@ -143,7 +146,7 @@ router.get('/complaints/:id', (req, res) => {
 });
 
 // POST /api/complaints
-router.post('/complaints', requireWriteAccess, (req, res) => {
+router.post('/complaints', requireWriteAccess, async (req, res) => {
   try {
     const sanitized = sanitizeBody(req.body);
     const {
@@ -162,7 +165,7 @@ router.post('/complaints', requireWriteAccess, (req, res) => {
 
     // Generate complaint number
     const year = new Date(date_received).getFullYear();
-    const lastInYear = db.prepare(
+    const lastInYear = await db.prepare(
       "SELECT complaint_number FROM complaints WHERE complaint_number LIKE ? ORDER BY complaint_number DESC LIMIT 1"
     ).get(`KK-CMP-${year}-%`);
 
@@ -176,12 +179,12 @@ router.post('/complaints', requireWriteAccess, (req, res) => {
     const sessionUser = req.session?.user;
     const createdBy = sessionUser?.display_name || sessionUser?.username || '';
 
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO complaints (complaint_number, date_received, source, reporter, store_location, product_sku, product_name, lot_number, best_before, quantity_affected, issue_type, severity, description, status, assigned_to, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(complaint_number, date_received, source, reporter, store_location, product_sku, product_name, lot_number, best_before, quantity_affected, issue_type, severity, description, status, assigned_to, createdBy);
 
-    const created = db.prepare('SELECT * FROM complaints WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(info.lastInsertRowid);
     logAudit(req, 'create_complaints', 'complaints', created.id, complaint_number, { new_values: { complaint_number, date_received, source, reporter, product_name, lot_number, severity, status, assigned_to } });
     broadcast('complaint_created', created);
     res.status(201).json(created);
@@ -191,9 +194,9 @@ router.post('/complaints', requireWriteAccess, (req, res) => {
 });
 
 // PUT /api/complaints/:id
-router.put('/complaints/:id', requireWriteAccess, (req, res) => {
+router.put('/complaints/:id', requireWriteAccess, async (req, res) => {
   try {
-    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    const complaint = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
     if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -222,9 +225,9 @@ router.put('/complaints/:id', requireWriteAccess, (req, res) => {
     if (updates.length === 2) return res.json(complaint); // only updated_by + updated_at = no real change
 
     params.push(req.params.id);
-    db.prepare(`UPDATE complaints SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE complaints SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
-    const updated = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
 
     // Audit log with old/new values
     const oldVals = {};
@@ -241,7 +244,7 @@ router.put('/complaints/:id', requireWriteAccess, (req, res) => {
 
     // If status changed via edit form, record in status history
     if (sanitized.status !== undefined && sanitized.status !== complaint.status) {
-      db.prepare(`INSERT INTO complaint_status_history (complaint_id, old_status, new_status, changed_by, reason) VALUES (?, ?, ?, ?, ?)`)
+      await db.prepare(`INSERT INTO complaint_status_history (complaint_id, old_status, new_status, changed_by, reason) VALUES (?, ?, ?, ?, ?)`)
         .run(req.params.id, complaint.status, sanitized.status, sessionUser?.display_name || sessionUser?.username || '', 'Updated via edit form');
     }
 
@@ -255,16 +258,16 @@ router.put('/complaints/:id', requireWriteAccess, (req, res) => {
 // DELETE /api/complaints/:id (admin only)
 
 // PATCH /api/complaints/:id/archive
-router.patch('/complaints/:id/archive', requireWriteAccess, (req, res) => {
+router.patch('/complaints/:id/archive', requireWriteAccess, async (req, res) => {
   try {
-    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    const complaint = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
     if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
     if (complaint.archived === 1) return res.json({ message: 'Already archived', complaint });
 
     const sessionUser = req.session?.user;
     const updatedBy = sessionUser?.display_name || sessionUser?.username || '';
-    db.prepare("UPDATE complaints SET archived = 1, updated_by = ?, updated_at = datetime('now') WHERE id = ?").run(updatedBy, req.params.id);
-    const updated = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    await db.prepare("UPDATE complaints SET archived = 1, updated_by = ?, updated_at = datetime('now') WHERE id = ?").run(updatedBy, req.params.id);
+    const updated = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
 
     logAudit(req, 'archive_complaint', 'complaints', updated.id, updated.complaint_number, { old_values: { archived: 0 }, new_values: { archived: 1 } });
     broadcast({ type: 'complaint_archived', complaint: updated });
@@ -275,16 +278,16 @@ router.patch('/complaints/:id/archive', requireWriteAccess, (req, res) => {
 });
 
 // PATCH /api/complaints/:id/unarchive
-router.patch('/complaints/:id/unarchive', requireWriteAccess, (req, res) => {
+router.patch('/complaints/:id/unarchive', requireWriteAccess, async (req, res) => {
   try {
-    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    const complaint = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
     if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
     if (!complaint.archived) return res.json({ message: 'Not archived', complaint });
 
     const sessionUser = req.session?.user;
     const updatedBy = sessionUser?.display_name || sessionUser?.username || '';
-    db.prepare("UPDATE complaints SET archived = 0, updated_by = ?, updated_at = datetime('now') WHERE id = ?").run(updatedBy, req.params.id);
-    const updated = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    await db.prepare("UPDATE complaints SET archived = 0, updated_by = ?, updated_at = datetime('now') WHERE id = ?").run(updatedBy, req.params.id);
+    const updated = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
 
     logAudit(req, 'unarchive_complaint', 'complaints', updated.id, updated.complaint_number, { old_values: { archived: 1 }, new_values: { archived: 0 } });
     broadcast({ type: 'complaint_unarchived', complaint: updated });
@@ -293,13 +296,13 @@ router.patch('/complaints/:id/unarchive', requireWriteAccess, (req, res) => {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
 });
-router.delete('/complaints/:id', requireRole('admin'), (req, res) => {
+router.delete('/complaints/:id', requireRole('admin'), async (req, res) => {
   try {
-    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    const complaint = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
     if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
 
-    db.prepare('DELETE FROM ccr_complaints WHERE complaint_id = ?').run(req.params.id);
-    db.prepare('DELETE FROM complaints WHERE id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM ccr_complaints WHERE complaint_id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM complaints WHERE id = ?').run(req.params.id);
     logAudit(req, 'delete_complaints', 'complaints', req.params.id, complaint.complaint_number, { old_values: complaint });
     res.json({ success: true });
   } catch (err) {
@@ -311,12 +314,12 @@ router.delete('/complaints/:id', requireRole('admin'), (req, res) => {
 // ==================== COMPLAINT COMMENTS ====================
 
 // GET /api/complaints/:id/comments
-router.get('/complaints/:id/comments', (req, res) => {
+router.get('/complaints/:id/comments', async (req, res) => {
   try {
-    const complaint = db.prepare('SELECT id FROM complaints WHERE id = ?').get(req.params.id);
+    const complaint = await db.prepare('SELECT id FROM complaints WHERE id = ?').get(req.params.id);
     if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
 
-    const comments = db.prepare('SELECT * FROM complaint_comments WHERE complaint_id = ? ORDER BY created_at ASC').all(req.params.id);
+    const comments = await db.prepare('SELECT * FROM complaint_comments WHERE complaint_id = ? ORDER BY created_at ASC').all(req.params.id);
     res.json(comments);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -324,9 +327,9 @@ router.get('/complaints/:id/comments', (req, res) => {
 });
 
 // POST /api/complaints/:id/comments
-router.post('/complaints/:id/comments', requireWriteAccess, (req, res) => {
+router.post('/complaints/:id/comments', requireWriteAccess, async (req, res) => {
   try {
-    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    const complaint = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
     if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -336,14 +339,14 @@ router.post('/complaints/:id/comments', requireWriteAccess, (req, res) => {
     const sessionUser = req.session?.user;
     const author = sessionUser?.display_name || sessionUser?.username || '';
 
-    const info = db.prepare(
+    const info = await db.prepare(
       "INSERT INTO complaint_comments (complaint_id, author, comment, attachment_path, email_ref) VALUES (?, ?, ?, ?, ?)"
     ).run(req.params.id, author, comment.trim(), attachment_path, email_ref);
 
-    const created = db.prepare('SELECT * FROM complaint_comments WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.prepare('SELECT * FROM complaint_comments WHERE id = ?').get(info.lastInsertRowid);
 
     // Update complaint updated_at
-    db.prepare("UPDATE complaints SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    await db.prepare("UPDATE complaints SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
 
     logAudit(req, 'add_comment', 'complaints', req.params.id, complaint.complaint_number, { new_values: { comment: comment.trim(), author } });
     broadcast('complaint_comment_added', { complaint_id: req.params.id, complaint_number: complaint.complaint_number, comment: created });
@@ -354,14 +357,14 @@ router.post('/complaints/:id/comments', requireWriteAccess, (req, res) => {
 });
 
 // DELETE /api/complaints/:id/comments/:commentId (admin only)
-router.delete('/complaints/:id/comments/:commentId', requireRole('admin'), (req, res) => {
+router.delete('/complaints/:id/comments/:commentId', requireRole('admin'), async (req, res) => {
   try {
-    const comment = db.prepare('SELECT * FROM complaint_comments WHERE id = ? AND complaint_id = ?').get(req.params.commentId, req.params.id);
+    const comment = await db.prepare('SELECT * FROM complaint_comments WHERE id = ? AND complaint_id = ?').get(req.params.commentId, req.params.id);
     if (!comment) return res.status(404).json({ error: 'Comment not found' });
 
-    db.prepare('DELETE FROM complaint_comments WHERE id = ?').run(req.params.commentId);
+    await db.prepare('DELETE FROM complaint_comments WHERE id = ?').run(req.params.commentId);
 
-    const complaint = db.prepare('SELECT complaint_number FROM complaints WHERE id = ?').get(req.params.id);
+    const complaint = await db.prepare('SELECT complaint_number FROM complaints WHERE id = ?').get(req.params.id);
     logAudit(req, 'delete_comment', 'complaints', req.params.id, complaint?.complaint_number, { old_values: { comment: comment.comment, author: comment.author } });
     res.json({ success: true });
   } catch (err) {
@@ -372,11 +375,11 @@ router.delete('/complaints/:id/comments/:commentId', requireRole('admin'), (req,
 // ==================== COMPLAINT STATUS HISTORY ====================
 
 // GET /api/complaints/:id/status-history
-router.get('/complaints/:id/status-history', (req, res) => {
+router.get('/complaints/:id/status-history', async (req, res) => {
   try {
-    const complaint = db.prepare('SELECT id FROM complaints WHERE id = ?').get(req.params.id);
+    const complaint = await db.prepare('SELECT id FROM complaints WHERE id = ?').get(req.params.id);
     if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
-    const history = db.prepare('SELECT * FROM complaint_status_history WHERE complaint_id = ? ORDER BY created_at ASC').all(req.params.id);
+    const history = await db.prepare('SELECT * FROM complaint_status_history WHERE complaint_id = ? ORDER BY created_at ASC').all(req.params.id);
     res.json(history);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -385,22 +388,25 @@ router.get('/complaints/:id/status-history', (req, res) => {
 
 
 // GET /api/complaints/:id/timeline
-router.get('/complaints/:id/timeline', (req, res) => {
+router.get('/complaints/:id/timeline', async (req, res) => {
   try {
-    const complaint = db.prepare('SELECT id FROM complaints WHERE id = ?').get(req.params.id);
+    const complaint = await db.prepare('SELECT id FROM complaints WHERE id = ?').get(req.params.id);
     if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
 
-    const statusChanges = db.prepare(
+    const statusChangesRaw = await db.prepare(
       'SELECT id, "status_change" as type, old_status, new_status, changed_by as actor, reason, created_at FROM complaint_status_history WHERE complaint_id = ? ORDER BY created_at ASC'
-    ).all(req.params.id).map(r => ({ ...r, type: 'status_change' }));
+    ).all(req.params.id);
+    const statusChanges = statusChangesRaw.map(r => ({ ...r, type: 'status_change' }));
 
-    const comments = db.prepare(
+    const commentsRaw = await db.prepare(
       'SELECT id, "comment" as type, author as actor, comment, created_at FROM complaint_comments WHERE complaint_id = ? ORDER BY created_at ASC'
-    ).all(req.params.id).map(r => ({ ...r, type: 'comment' }));
+    ).all(req.params.id);
+    const comments = commentsRaw.map(r => ({ ...r, type: 'comment' }));
 
-    const fieldEdits = db.prepare(
+    const fieldEditsRaw = await db.prepare(
       "SELECT id, 'field_edit' as type, username as actor, old_values, new_values, timestamp as created_at FROM audit_logs WHERE resource_type = 'complaints' AND resource_id = ? AND action = 'update_complaints' ORDER BY timestamp ASC"
-    ).all(String(req.params.id)).map(r => ({ ...r, type: 'field_edit' }));
+    ).all(String(req.params.id));
+    const fieldEdits = fieldEditsRaw.map(r => ({ ...r, type: 'field_edit' }));
 
     const timeline = [...statusChanges, ...comments, ...fieldEdits].sort((a, b) => {
       return new Date(a.created_at) - new Date(b.created_at);
@@ -413,9 +419,9 @@ router.get('/complaints/:id/timeline', (req, res) => {
 });
 
 // POST /api/complaints/:id/status
-router.post('/complaints/:id/status', requireWriteAccess, (req, res) => {
+router.post('/complaints/:id/status', requireWriteAccess, async (req, res) => {
   try {
-    const complaint = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    const complaint = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
     if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -430,13 +436,13 @@ router.post('/complaints/:id/status', requireWriteAccess, (req, res) => {
     const changedBy = sessionUser?.display_name || sessionUser?.username || '';
     const oldStatus = complaint.status;
 
-    db.prepare("UPDATE complaints SET status = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?")
+    await db.prepare("UPDATE complaints SET status = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?")
       .run(status, changedBy, req.params.id);
 
-    db.prepare(`INSERT INTO complaint_status_history (complaint_id, old_status, new_status, changed_by, reason) VALUES (?, ?, ?, ?, ?)`)
+    await db.prepare(`INSERT INTO complaint_status_history (complaint_id, old_status, new_status, changed_by, reason) VALUES (?, ?, ?, ?, ?)`)
       .run(req.params.id, oldStatus, status, changedBy, reason);
 
-    const updated = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
 
     logAudit(req, 'status_change', 'complaints', req.params.id, complaint.complaint_number, {
       old_values: { status: oldStatus },
@@ -452,7 +458,7 @@ router.post('/complaints/:id/status', requireWriteAccess, (req, res) => {
 // ==================== CCRs ====================
 
 // GET /api/ccrs
-router.get('/ccrs', (req, res) => {
+router.get('/ccrs', async (req, res) => {
   try {
     const { status, search } = req.query;
     let query = 'SELECT * FROM ccrs WHERE 1=1';
@@ -466,18 +472,20 @@ router.get('/ccrs', (req, res) => {
     }
 
     query += ' ORDER BY date_created DESC';
-    const ccrs = db.prepare(query).all(...params);
+    const ccrs = await db.prepare(query).all(...params);
 
     // Enrich with complaint count and action stats
-    const enriched = ccrs.map(ccr => {
-      const complaintCount = db.prepare('SELECT COUNT(*) as count FROM ccr_complaints WHERE ccr_id = ?').get(ccr.id).count;
-      const actions = db.prepare('SELECT * FROM corrective_actions WHERE ccr_id = ?').all(ccr.id);
+    const enriched = [];
+    for (const ccr of ccrs) {
+      const complaintCountRow = await db.prepare('SELECT COUNT(*) as count FROM ccr_complaints WHERE ccr_id = ?').get(ccr.id);
+      const complaintCount = complaintCountRow.count;
+      const actions = await db.prepare('SELECT * FROM corrective_actions WHERE ccr_id = ?').all(ccr.id);
       const totalActions = actions.length;
       const completedActions = actions.filter(a => a.status === 'completed').length;
       const overdueActions = actions.filter(a => a.status === 'overdue' || (a.target_date && a.status !== 'completed' && new Date(a.target_date) < new Date())).length;
 
-      return { ...ccr, complaintCount, totalActions, completedActions, overdueActions };
-    });
+      enriched.push({ ...ccr, complaintCount, totalActions, completedActions, overdueActions });
+    }
 
     res.json(enriched);
   } catch (err) {
