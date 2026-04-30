@@ -65,7 +65,7 @@ export async function repairSOPDocuments() {
             `, [
               file,
               file,
-              file.endsWith('.pdf']) ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              file.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
               stats.size,
               'sop',
               'sop',
