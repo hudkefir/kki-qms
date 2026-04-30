@@ -3,7 +3,7 @@ import multer from 'multer';
 import { existsSync, mkdirSync, createReadStream, readFileSync } from 'fs';
 import { join, extname, basename } from 'path';
 import mammoth from 'mammoth';
-import db from './database.js';
+import db from './database-pg.js';
 import { requireAuth, requireWriteAccess } from './authMiddleware.js';
 import { logAudit } from './auditMiddleware.js';
 import { sanitizeFilename } from './sanitize.js';
@@ -57,7 +57,7 @@ const upload = multer({
 });
 
 // Get all documents with optional filters
-router.get('/documents', requireAuth, (req, res) => {
+router.get('/documents', requireAuth, async (req, res) => {
   try {
     const { category, search, linked_type, linked_id } = req.query;
     let query = 'SELECT * FROM documents WHERE 1=1';
@@ -85,7 +85,7 @@ router.get('/documents', requireAuth, (req, res) => {
 
     query += ' ORDER BY upload_date DESC';
 
-    const documents = db.prepare(query).all(...params);
+    const documents = await db.prepare(query).all(...params);
     try { logAudit(req, 'view', 'documents', null, null, { count: documents.length, filters: { category, search, linked_type, linked_id } }); } catch(e) {}
     res.json(documents);
   } catch (error) {
@@ -135,7 +135,7 @@ function generateSOPDescription(filename, sopNumber, title) {
 }
 
 // Upload documents
-router.post('/documents/upload', requireAuth, requireWriteAccess, upload.array('files', 10), (req, res) => {
+router.post('/documents/upload', requireAuth, requireWriteAccess, upload.array('files', 10), async (req, res) => {
   try {
     // Bug fix: validate that files were actually uploaded
     if (!req.files || req.files.length === 0) {
@@ -184,7 +184,7 @@ router.post('/documents/upload', requireAuth, requireWriteAccess, upload.array('
           const versionMatch = file.originalname.match(/v(\d+(?:\.\d+)*)/i);
           if (versionMatch && linked_id) {
             const version = versionMatch[1];
-            db.prepare('UPDATE sops SET version = ?, owner = ? WHERE id = ?').run(
+            await db.prepare('UPDATE sops SET version = ?, owner = ? WHERE id = ?').run(
               version, user.display_name || user.username || 'System', linked_id
             );
           }
@@ -192,7 +192,7 @@ router.post('/documents/upload', requireAuth, requireWriteAccess, upload.array('
       }
 
       // Insert into database
-      const result = db.prepare(`
+      const result = await db.prepare(`
         INSERT INTO documents (filename, original_name, file_type, file_size, category, linked_type, linked_id, description, uploaded_by, version, created_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
@@ -240,9 +240,9 @@ router.post('/documents/upload', requireAuth, requireWriteAccess, upload.array('
 });
 
 // Download document
-router.get('/documents/:id/download', requireAuth, (req, res) => {
+router.get('/documents/:id/download', requireAuth, async (req, res) => {
   try {
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -254,7 +254,7 @@ router.get('/documents/:id/download', requireAuth, (req, res) => {
     }
 
     // Track download count
-    db.prepare('UPDATE documents SET download_count = COALESCE(download_count, 0) + 1 WHERE id = ?').run(doc.id);
+    await db.prepare('UPDATE documents SET download_count = COALESCE(download_count, 0) + 1 WHERE id = ?').run(doc.id);
 
     try { logAudit(req, 'download', 'document', doc.id, doc.filename); } catch(e) {}
 
@@ -270,9 +270,9 @@ router.get('/documents/:id/download', requireAuth, (req, res) => {
 });
 
 // Preview document (inline — for PDF embed viewer)
-router.get('/documents/:id/preview', requireAuth, (req, res) => {
+router.get('/documents/:id/preview', requireAuth, async (req, res) => {
   try {
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -297,7 +297,7 @@ router.get('/documents/:id/preview', requireAuth, (req, res) => {
 // Preview DOCX as rendered HTML (for in-browser reading)
 router.get('/documents/:id/preview-html', requireAuth, async (req, res) => {
   try {
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -337,9 +337,9 @@ router.get('/documents/:id/preview-html', requireAuth, async (req, res) => {
 });
 
 // Get version history for a document
-router.get('/documents/:id/versions', requireAuth, (req, res) => {
+router.get('/documents/:id/versions', requireAuth, async (req, res) => {
   try {
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -347,7 +347,7 @@ router.get('/documents/:id/versions', requireAuth, (req, res) => {
     const baseName = doc.original_name.replace(/(_v\d+(\.\d+)?)?(\.[^.]+)$/, '');
     const fileExt = extname(doc.original_name);
 
-    const versions = db.prepare(
+    const versions = await db.prepare(
       'SELECT * FROM documents WHERE original_name LIKE ? AND category = ? ORDER BY version DESC'
     ).all(`${baseName}%${fileExt}`, doc.category);
 
@@ -359,10 +359,10 @@ router.get('/documents/:id/versions', requireAuth, (req, res) => {
 });
 
 // Delete documents
-router.delete('/documents/:id', requireAuth, requireWriteAccess, (req, res) => {
+router.delete('/documents/:id', requireAuth, requireWriteAccess, async (req, res) => {
   try {
     const { id } = req.params;
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(id);
+    const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(id);
     
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
@@ -386,7 +386,7 @@ router.delete('/documents/:id', requireAuth, requireWriteAccess, (req, res) => {
     }
 
     // Delete from database
-    db.prepare('DELETE FROM documents WHERE id = ?').run(id);
+    await db.prepare('DELETE FROM documents WHERE id = ?').run(id);
 
     try {
       logAudit(req, 'delete', 'document', id, doc.original_name, {

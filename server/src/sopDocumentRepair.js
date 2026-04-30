@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import db from './database.js';
+import db from './database-pg.js';
 
 /**
  * Comprehensive SOP document repair system
@@ -18,7 +18,7 @@ export async function repairSOPDocuments() {
       return;
     }
 
-    const allSopDocs = db.prepare('SELECT * FROM documents WHERE category = ?').all('sop');
+    const allSopDocs = await db.prepare('SELECT * FROM documents WHERE category = ?').all('sop');
     const actualFiles = readdirSync(sopDir).filter(f => f.endsWith('.docx') || f.endsWith('.pdf'));
     
     let fixed = 0;
@@ -35,7 +35,7 @@ export async function repairSOPDocuments() {
         const matchingFile = actualFiles.find(f => f === baseName || f.startsWith(baseName.replace(/\.(docx|pdf)$/, '')));
         
         if (matchingFile) {
-          db.prepare('UPDATE documents SET filename = ? WHERE id = ?').run(matchingFile, doc.id);
+          await db.prepare('UPDATE documents SET filename = ? WHERE id = ?').run(matchingFile, doc.id);
           fixed++;
         } else {
           // DISABLED: Don't delete document records automatically
@@ -55,11 +55,11 @@ export async function repairSOPDocuments() {
         const sopMatch = file.match(/KK-SOP-(\d+)/);
         if (sopMatch) {
           const sopNumber = 'KK-SOP-' + sopMatch[1];
-          const sop = db.prepare('SELECT id FROM sops WHERE sop_number = ?').get(sopNumber);
+          const sop = await db.prepare('SELECT id FROM sops WHERE sop_number = ?').get(sopNumber);
           
           if (sop) {
             const stats = statSync(join(sopDir, file));
-            db.prepare(`
+            await db.prepare(`
               INSERT INTO documents (filename, original_name, file_type, file_size, category, linked_type, linked_id, description, uploaded_by, version)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
@@ -91,14 +91,14 @@ export async function repairSOPDocuments() {
   }
 }
 
-export function getSOPDocumentStatus() {
+export async function getSOPDocumentStatus() {
   try {
-    const stats = db.prepare(`
-      SELECT 
+    const stats = await db.prepare(`
+      SELECT
         COUNT(DISTINCT s.id) as total_sops,
         COUNT(DISTINCT CASE WHEN d.id IS NOT NULL THEN s.id END) as sops_with_docs,
         COUNT(d.id) as total_documents
-      FROM sops s 
+      FROM sops s
       LEFT JOIN documents d ON d.linked_id = s.id AND d.linked_type = 'sop' AND d.category = 'sop'
       WHERE s.sop_number LIKE 'KK-SOP-%'
     `).get();

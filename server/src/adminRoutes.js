@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import db from './database.js';
+import db from './database-pg.js';
 import { requireRole } from './authMiddleware.js';
 import { logAudit } from './auditMiddleware.js';
 import { broadcast } from './websocket.js';
@@ -11,8 +11,8 @@ const router = Router();
 router.use(requireRole('admin'));
 
 // Helper: capture old values, perform action, log audit with old/new
-function auditedUpdate(req, table, id, allowedFields, identifierField) {
-  const old = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+async function auditedUpdate(req, table, id, allowedFields, identifierField) {
+  const old = await db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
   if (!old) return null;
 
   const sanitized = sanitizeBody(req.body);
@@ -34,9 +34,9 @@ function auditedUpdate(req, table, id, allowedFields, identifierField) {
 
   updates.push("updated_at = datetime('now')");
   params.push(id);
-  db.prepare(`UPDATE ${table} SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  await db.prepare(`UPDATE ${table} SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
-  const updated = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+  const updated = await db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
 
   logAudit(req, `admin_update_${table}`, table, id, old[identifierField] || '', {
     old_values: oldValues,
@@ -46,14 +46,14 @@ function auditedUpdate(req, table, id, allowedFields, identifierField) {
   return updated;
 }
 
-function auditedDelete(req, table, id, identifierField, cascades = []) {
-  const old = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+async function auditedDelete(req, table, id, identifierField, cascades = []) {
+  const old = await db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
   if (!old) return null;
 
   for (const { table: cTable, column } of cascades) {
-    db.prepare(`DELETE FROM ${cTable} WHERE ${column} = ?`).run(id);
+    await db.prepare(`DELETE FROM ${cTable} WHERE ${column} = ?`).run(id);
   }
-  db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
+  await db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
 
   logAudit(req, `admin_delete_${table}`, table, id, old[identifierField] || '', {
     old_values: old,
@@ -64,7 +64,7 @@ function auditedDelete(req, table, id, identifierField, cascades = []) {
 
 // ==================== ADMIN SOP MANAGEMENT ====================
 
-router.put('/admin/sops/:id', (req, res) => {
+router.put('/admin/sops/:id', async (req, res) => {
   try {
     const fields = [
       'sop_number', 'title', 'category_code', 'category_name', 'version',
@@ -72,7 +72,7 @@ router.put('/admin/sops/:id', (req, res) => {
       'effective_date', 'next_review_date', 'description', 'notes',
       'scope', 'procedure_text', 'responsibilities', 'materials_equipment', 'sop_references'
     ];
-    const updated = auditedUpdate(req, 'sops', req.params.id, fields, 'sop_number');
+    const updated = await auditedUpdate(req, 'sops', req.params.id, fields, 'sop_number');
     if (!updated) return res.status(404).json({ error: 'SOP not found' });
     broadcast('sop_updated', updated);
     res.json(updated);
@@ -82,9 +82,9 @@ router.put('/admin/sops/:id', (req, res) => {
   }
 });
 
-router.delete('/admin/sops/:id', (req, res) => {
+router.delete('/admin/sops/:id', async (req, res) => {
   try {
-    const deleted = auditedDelete(req, 'sops', req.params.id, 'sop_number', [
+    const deleted = await auditedDelete(req, 'sops', req.params.id, 'sop_number', [
       { table: 'sop_revisions', column: 'sop_id' },
       { table: 'sop_attachments', column: 'sop_id' },
       { table: 'sop_comments', column: 'sop_id' },
@@ -102,14 +102,14 @@ router.delete('/admin/sops/:id', (req, res) => {
 
 // ==================== ADMIN COMPLAINT MANAGEMENT ====================
 
-router.put('/admin/complaints/:id', (req, res) => {
+router.put('/admin/complaints/:id', async (req, res) => {
   try {
     const fields = [
       'date_received', 'source', 'reporter', 'store_location', 'product_sku',
       'product_name', 'lot_number', 'best_before', 'quantity_affected',
       'issue_type', 'severity', 'description', 'status', 'linked_ccr_id'
     ];
-    const updated = auditedUpdate(req, 'complaints', req.params.id, fields, 'complaint_number');
+    const updated = await auditedUpdate(req, 'complaints', req.params.id, fields, 'complaint_number');
     if (!updated) return res.status(404).json({ error: 'Complaint not found' });
     broadcast('complaint_updated', updated);
     res.json(updated);
@@ -119,9 +119,9 @@ router.put('/admin/complaints/:id', (req, res) => {
   }
 });
 
-router.delete('/admin/complaints/:id', (req, res) => {
+router.delete('/admin/complaints/:id', async (req, res) => {
   try {
-    const deleted = auditedDelete(req, 'complaints', req.params.id, 'complaint_number', [
+    const deleted = await auditedDelete(req, 'complaints', req.params.id, 'complaint_number', [
       { table: 'ccr_complaints', column: 'complaint_id' },
     ]);
     if (!deleted) return res.status(404).json({ error: 'Complaint not found' });
@@ -134,14 +134,14 @@ router.delete('/admin/complaints/:id', (req, res) => {
 
 // ==================== ADMIN CCR MANAGEMENT ====================
 
-router.put('/admin/ccrs/:id', (req, res) => {
+router.put('/admin/ccrs/:id', async (req, res) => {
   try {
     const fields = [
       'title', 'status', 'recipient_company', 'recipient_contact', 'recipient_email',
       'root_causes', 'preventive_measures', 'target_resolution_date',
       'actual_resolution_date', 'notes'
     ];
-    const updated = auditedUpdate(req, 'ccrs', req.params.id, fields, 'ccr_number');
+    const updated = await auditedUpdate(req, 'ccrs', req.params.id, fields, 'ccr_number');
     if (!updated) return res.status(404).json({ error: 'CCR not found' });
     res.json(updated);
   } catch (err) {
@@ -150,9 +150,9 @@ router.put('/admin/ccrs/:id', (req, res) => {
   }
 });
 
-router.delete('/admin/ccrs/:id', (req, res) => {
+router.delete('/admin/ccrs/:id', async (req, res) => {
   try {
-    const deleted = auditedDelete(req, 'ccrs', req.params.id, 'ccr_number', [
+    const deleted = await auditedDelete(req, 'ccrs', req.params.id, 'ccr_number', [
       { table: 'ccr_complaints', column: 'ccr_id' },
       { table: 'corrective_actions', column: 'ccr_id' },
     ]);
@@ -166,10 +166,10 @@ router.delete('/admin/ccrs/:id', (req, res) => {
 
 // ==================== ADMIN DOCUMENT MANAGEMENT ====================
 
-router.put('/admin/documents/:id', (req, res) => {
+router.put('/admin/documents/:id', async (req, res) => {
   try {
     const fields = ['original_name', 'description', 'category', 'tags', 'version'];
-    const updated = auditedUpdate(req, 'documents', req.params.id, fields, 'original_name');
+    const updated = await auditedUpdate(req, 'documents', req.params.id, fields, 'original_name');
     if (!updated) return res.status(404).json({ error: 'Document not found' });
     res.json(updated);
   } catch (err) {
@@ -178,9 +178,9 @@ router.put('/admin/documents/:id', (req, res) => {
   }
 });
 
-router.delete('/admin/documents/:id', (req, res) => {
+router.delete('/admin/documents/:id', async (req, res) => {
   try {
-    const deleted = auditedDelete(req, 'documents', req.params.id, 'original_name', []);
+    const deleted = await auditedDelete(req, 'documents', req.params.id, 'original_name', []);
     if (!deleted) return res.status(404).json({ error: 'Document not found' });
     res.json({ success: true, message: `Document ${deleted.original_name} deleted by admin` });
   } catch (err) {
@@ -191,10 +191,10 @@ router.delete('/admin/documents/:id', (req, res) => {
 
 // ==================== ADMIN AUDIT CHECKLIST MANAGEMENT ====================
 
-router.put('/admin/audit-checklist/:id', (req, res) => {
+router.put('/admin/audit-checklist/:id', async (req, res) => {
   try {
     const fields = ['requirement', 'category', 'status', 'notes', 'evidence_ref', 'checked_by'];
-    const old = db.prepare('SELECT * FROM audit_checklist WHERE id = ?').get(req.params.id);
+    const old = await db.prepare('SELECT * FROM audit_checklist WHERE id = ?').get(req.params.id);
     if (!old) return res.status(404).json({ error: 'Audit checklist item not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -215,9 +215,9 @@ router.put('/admin/audit-checklist/:id', (req, res) => {
 
     updates.push("checked_at = datetime('now')");
     params.push(req.params.id);
-    db.prepare(`UPDATE audit_checklist SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE audit_checklist SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
-    const updated = db.prepare('SELECT * FROM audit_checklist WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM audit_checklist WHERE id = ?').get(req.params.id);
     logAudit(req, 'admin_update_audit_checklist', 'audit_checklist', req.params.id, old.requirement || '', {
       old_values: oldValues,
       new_values: newValues,
@@ -229,9 +229,9 @@ router.put('/admin/audit-checklist/:id', (req, res) => {
   }
 });
 
-router.delete('/admin/audit-checklist/:id', (req, res) => {
+router.delete('/admin/audit-checklist/:id', async (req, res) => {
   try {
-    const deleted = auditedDelete(req, 'audit_checklist', req.params.id, 'requirement', []);
+    const deleted = await auditedDelete(req, 'audit_checklist', req.params.id, 'requirement', []);
     if (!deleted) return res.status(404).json({ error: 'Audit checklist item not found' });
     res.json({ success: true, message: 'Audit checklist item deleted by admin' });
   } catch (err) {
@@ -242,10 +242,10 @@ router.delete('/admin/audit-checklist/:id', (req, res) => {
 
 // ==================== ADMIN CORRECTIVE ACTION MANAGEMENT ====================
 
-router.put('/admin/corrective-actions/:id', (req, res) => {
+router.put('/admin/corrective-actions/:id', async (req, res) => {
   try {
     const fields = ['description', 'responsible', 'target_date', 'completion_date', 'status', 'notes'];
-    const updated = auditedUpdate(req, 'corrective_actions', req.params.id, fields, 'description');
+    const updated = await auditedUpdate(req, 'corrective_actions', req.params.id, fields, 'description');
     if (!updated) return res.status(404).json({ error: 'Corrective action not found' });
     broadcast('action_updated', updated);
     res.json(updated);
@@ -255,9 +255,9 @@ router.put('/admin/corrective-actions/:id', (req, res) => {
   }
 });
 
-router.delete('/admin/corrective-actions/:id', (req, res) => {
+router.delete('/admin/corrective-actions/:id', async (req, res) => {
   try {
-    const deleted = auditedDelete(req, 'corrective_actions', req.params.id, 'description', []);
+    const deleted = await auditedDelete(req, 'corrective_actions', req.params.id, 'description', []);
     if (!deleted) return res.status(404).json({ error: 'Corrective action not found' });
     res.json({ success: true, message: 'Corrective action deleted by admin' });
   } catch (err) {
@@ -268,10 +268,10 @@ router.delete('/admin/corrective-actions/:id', (req, res) => {
 
 // ==================== ADMIN USER MANAGEMENT (enhanced with audit) ====================
 
-router.put('/admin/users/:id', (req, res) => {
+router.put('/admin/users/:id', async (req, res) => {
   try {
     const fields = ['display_name', 'role', 'active'];
-    const old = db.prepare('SELECT id, username, display_name, role, active, created_at FROM users WHERE id = ?').get(req.params.id);
+    const old = await db.prepare('SELECT id, username, display_name, role, active, created_at FROM users WHERE id = ?').get(req.params.id);
     if (!old) return res.status(404).json({ error: 'User not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -292,9 +292,9 @@ router.put('/admin/users/:id', (req, res) => {
 
     updates.push("updated_at = datetime('now')");
     params.push(req.params.id);
-    db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
-    const updated = db.prepare('SELECT id, username, display_name, role, active, created_at FROM users WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT id, username, display_name, role, active, created_at FROM users WHERE id = ?').get(req.params.id);
     logAudit(req, 'admin_update_users', 'users', req.params.id, old.username, {
       old_values: oldValues,
       new_values: newValues,
@@ -306,13 +306,13 @@ router.put('/admin/users/:id', (req, res) => {
   }
 });
 
-router.delete('/admin/users/:id', (req, res) => {
+router.delete('/admin/users/:id', async (req, res) => {
   try {
-    const user = db.prepare('SELECT id, username, display_name, role FROM users WHERE id = ?').get(req.params.id);
+    const user = await db.prepare('SELECT id, username, display_name, role FROM users WHERE id = ?').get(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     // Soft delete - deactivate
-    db.prepare("UPDATE users SET active = 0, updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    await db.prepare("UPDATE users SET active = 0, updated_at = datetime('now') WHERE id = ?").run(req.params.id);
 
     logAudit(req, 'admin_delete_users', 'users', req.params.id, user.username, {
       old_values: { active: 1 },

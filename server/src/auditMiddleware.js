@@ -1,12 +1,12 @@
-import db from './database.js';
+import db from './database-pg.js';
 
 // Log an audit event
-export function logAudit(req, action, resourceType, resourceId, resourceName, details = {}) {
+export async function logAudit(req, action, resourceType, resourceId, resourceName, details = {}) {
   try {
     const user = req.session?.user;
     const oldValues = details.old_values || {};
     const newValues = details.new_values || {};
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO audit_logs (user_id, username, action, resource_type, resource_id, resource_name, details, old_values, new_values, ip_address, user_agent, session_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
