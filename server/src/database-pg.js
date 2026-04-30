@@ -482,6 +482,13 @@ async function initTables() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS taskboard_backups (
+      id SERIAL PRIMARY KEY,
+      data TEXT NOT NULL,
+      reason TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS taskboard_template_items (
       id SERIAL PRIMARY KEY,
       template_id INTEGER NOT NULL REFERENCES taskboard_templates(id),

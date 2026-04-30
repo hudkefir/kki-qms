@@ -92,6 +92,7 @@ router.post('/tasks', async (req, res) => {
       return res.status(409).json({ error: 'Blocked: cannot replace ' + existingCount.c + ' tasks with empty set' });
     }
 
+    await autoBackupTasks('POST /tasks full replace (' + tasks.length + ' new tasks)');
     const save = db.transaction(async () => {
       await db.run('DELETE FROM taskboard_tasks');
       for (const t of tasks) {
@@ -783,5 +784,89 @@ router.put('/v2/daily-message/:date', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── AUTO-BACKUP: snapshot before destructive ops ──
+async function autoBackupTasks(reason) {
+  try {
+    const tasks = await db.all('SELECT * FROM taskboard_tasks ORDER BY board_date, sort_order');
+    const operators = await db.all('SELECT * FROM taskboard_operators ORDER BY sort_order');
+    const sections = await db.all('SELECT * FROM taskboard_sections ORDER BY sort_order');
+    if (tasks.length === 0 && operators.length === 0) return; // nothing to backup
+    const snapshot = JSON.stringify({ tasks, operators, sections, reason, timestamp: new Date().toISOString() });
+    await db.run(
+      'INSERT INTO taskboard_backups (data, reason, created_at) VALUES (?, ?, NOW())',
+      [snapshot, reason]
+    );
+    // Keep only last 20 backups
+    const old = await db.all('SELECT id FROM taskboard_backups ORDER BY id DESC OFFSET 20');
+    for (const row of old) {
+      await db.run('DELETE FROM taskboard_backups WHERE id = ?', [row.id]);
+    }
+    console.log('[TASKBOARD BACKUP] Auto-backup saved: ' + reason + ' (' + tasks.length + ' tasks, ' + operators.length + ' operators)');
+  } catch (err) {
+    console.error('[TASKBOARD BACKUP] Failed:', err.message);
+  }
+}
+
+// GET /api/taskboard/auto-backups — list auto-backups
+router.get('/auto-backups', async (req, res) => {
+  try {
+    const backups = await db.all('SELECT id, reason, created_at, length(data) as size FROM taskboard_backups ORDER BY id DESC LIMIT 20');
+    res.json(backups);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list backups' });
+  }
+});
+
+// POST /api/taskboard/auto-backups/:id/restore — restore from auto-backup
+router.post('/auto-backups/:id/restore', async (req, res) => {
+  try {
+    const backup = await db.get('SELECT * FROM taskboard_backups WHERE id = ?', [req.params.id]);
+    if (!backup) return res.status(404).json({ error: 'Backup not found' });
+
+    const snapshot = JSON.parse(backup.data);
+    
+    // Save current state as backup before restoring
+    await autoBackupTasks('Pre-restore backup (restoring from backup ' + req.params.id + ')');
+
+    // Restore tasks
+    if (snapshot.tasks && snapshot.tasks.length > 0) {
+      await db.run('DELETE FROM taskboard_tasks');
+      for (const t of snapshot.tasks) {
+        await db.run(
+          'INSERT INTO taskboard_tasks (task, operator, section, zone, backup, notes, status, num, sort_order, completed_at, completed_by, progress_note, board_date, data, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [t.task||'', t.operator||'', t.section||'', t.zone||'', t.backup||'', t.notes||'', t.status||'todo', t.num, t.sort_order||0, t.completed_at, t.completed_by, t.progress_note, t.board_date, t.data, t.version||1]
+        );
+      }
+    }
+
+    // Restore operators
+    if (snapshot.operators && snapshot.operators.length > 0) {
+      await db.run('DELETE FROM taskboard_operators');
+      for (const o of snapshot.operators) {
+        await db.run(
+          'INSERT INTO taskboard_operators (name, role, color, sort_order) VALUES (?, ?, ?, ?)',
+          [o.name||'', o.role||'', o.color||'', o.sort_order||0]
+        );
+      }
+    }
+
+    // Restore sections
+    if (snapshot.sections && snapshot.sections.length > 0) {
+      await db.run('DELETE FROM taskboard_sections');
+      for (const s of snapshot.sections) {
+        await db.run(
+          'INSERT INTO taskboard_sections (name, color, sort_order) VALUES (?, ?, ?)',
+          [s.name||'', s.color||'', s.sort_order||0]
+        );
+      }
+    }
+
+    res.json({ ok: true, restored: { tasks: snapshot.tasks?.length || 0, operators: snapshot.operators?.length || 0, sections: snapshot.sections?.length || 0 } });
+  } catch (err) {
+    console.error('Restore error:', err);
+    res.status(500).json({ error: 'Restore failed' });
   }
 });
