@@ -10,7 +10,7 @@ const router = Router();
 // Ensure status history table exists
 await db.exec(`
   CREATE TABLE IF NOT EXISTS complaint_status_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     complaint_id INTEGER NOT NULL,
     old_status TEXT,
     new_status TEXT NOT NULL,

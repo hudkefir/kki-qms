@@ -14,7 +14,7 @@ const router = Router();
 // ── DB Schema (auto-create tables) ─────────────────────────────────────────
 const initSQL = `
 CREATE TABLE IF NOT EXISTS env_sample_points (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   location TEXT DEFAULT '',
   description TEXT DEFAULT '',
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS env_sample_points (
 );
 
 CREATE TABLE IF NOT EXISTS env_test_records (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   record_number TEXT UNIQUE NOT NULL,
   sample_point_id INTEGER NOT NULL,
   test_date TEXT NOT NULL,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS env_test_records (
 );
 
 CREATE TABLE IF NOT EXISTS env_test_results (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   record_id INTEGER NOT NULL,
   test_type TEXT NOT NULL DEFAULT 'microbiological',
   test_name TEXT NOT NULL,

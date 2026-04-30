@@ -40,7 +40,7 @@ const router = Router();
 
 // ── Ensure capa_attachments table exists ──
 await db.exec(`CREATE TABLE IF NOT EXISTS capa_attachments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   capa_id INTEGER NOT NULL,
   filename TEXT NOT NULL,
   original_name TEXT NOT NULL,

@@ -11,7 +11,7 @@ const router = Router();
 try {
   db.exec(`
     CREATE TABLE IF NOT EXISTS suppliers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       contact_name TEXT DEFAULT '',
       contact_email TEXT DEFAULT '',
@@ -31,7 +31,7 @@ try {
     );
 
     CREATE TABLE IF NOT EXISTS supplier_documents (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
       document_type TEXT DEFAULT 'other',
       filename TEXT NOT NULL,
@@ -43,7 +43,7 @@ try {
     );
 
     CREATE TABLE IF NOT EXISTS supplier_reviews (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
       review_date TEXT NOT NULL,
       reviewer TEXT DEFAULT '',

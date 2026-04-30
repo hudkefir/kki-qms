@@ -31,6 +31,8 @@ function convertSql(sql) {
   let s = convertPlaceholders(sql);
   // datetime('now') → CURRENT_TIMESTAMP
   s = s.replace(/datetime\('now'\)/gi, 'CURRENT_TIMESTAMP');
+  // INTEGER PRIMARY KEY AUTOINCREMENT → SERIAL PRIMARY KEY
+  s = s.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
   return s;
 }
 
@@ -302,7 +304,7 @@ async function initTables() {
     CREATE TABLE IF NOT EXISTS sessions (
       sid TEXT PRIMARY KEY,
       sess TEXT NOT NULL,
-      expired INTEGER NOT NULL
+      expire TIMESTAMP NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS audit_logs (
@@ -1011,7 +1013,7 @@ async function initTables() {
     CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
     CREATE INDEX IF NOT EXISTS idx_sop_files_sop_id ON sop_files(sop_id);
-    CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired);
+    CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expire);
     CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category);
     CREATE INDEX IF NOT EXISTS idx_documents_linked ON documents(linked_type, linked_id);
     CREATE INDEX IF NOT EXISTS idx_batch_tests_date ON batch_tests(test_date);
