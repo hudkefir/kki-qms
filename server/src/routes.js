@@ -13,42 +13,42 @@ const router = Router();
 // GET /api/dashboard
 router.get('/dashboard', async (req, res) => {
   try {
-    const totalSops = (await db.prepare('SELECT COUNT(*) as count FROM sops').get()).count;
-    const cleanCount = (await db.prepare("SELECT COUNT(*) as count FROM sops WHERE costco_cleanup_status = 'clean'").get()).count;
-    const needsCostcoStripCount = (await db.prepare("SELECT COUNT(*) as count FROM sops WHERE costco_cleanup_status = 'needs_costco_strip'").get()).count;
-    const notYetBuiltCount = (await db.prepare("SELECT COUNT(*) as count FROM sops WHERE costco_cleanup_status = 'not_yet_built'").get()).count;
+    const totalSops = (await db.get('SELECT COUNT(*) as count FROM sops')).count;
+    const cleanCount = (await db.get("SELECT COUNT(*) as count FROM sops WHERE costco_cleanup_status = 'clean'")).count;
+    const needsCostcoStripCount = (await db.get("SELECT COUNT(*) as count FROM sops WHERE costco_cleanup_status = 'needs_costco_strip'")).count;
+    const notYetBuiltCount = (await db.get("SELECT COUNT(*) as count FROM sops WHERE costco_cleanup_status = 'not_yet_built'")).count;
     const auditReadinessPercent = totalSops > 0 ? Math.round((cleanCount / totalSops) * 100) : 0;
 
-    const categoryCounts = await db.prepare(`
+    const categoryCounts = await db.all(`
       SELECT category_name,
         COUNT(*) as count,
         SUM(CASE WHEN costco_cleanup_status = 'clean' THEN 1 ELSE 0 END) as cleanCount
       FROM sops
       GROUP BY category_name
       ORDER BY category_name
-    `).all();
+    `);
 
-    const recentActivity = await db.prepare(`
+    const recentActivity = await db.all(`
       SELECT r.*, s.sop_number, s.title
       FROM sop_revisions r
       JOIN sops s ON r.sop_id = s.id
       ORDER BY r.created_at DESC
       LIMIT 10
-    `).all();
+    `);
 
     // QMS module counts
-    const complaintCount = (await db.prepare('SELECT COUNT(*) as c FROM complaints').get()).c;
-    const openComplaints = (await db.prepare("SELECT COUNT(*) as c FROM complaints WHERE status NOT IN ('closed','resolved')").get()).c;
-    const ccrCount = (await db.prepare('SELECT COUNT(*) as c FROM ccrs').get()).c;
-    const openCcrs = (await db.prepare("SELECT COUNT(*) as c FROM ccrs WHERE status NOT IN ('closed','sent')").get()).c;
-    const capaCount = (await db.prepare('SELECT COUNT(*) as c FROM capas').get()).c;
-    const openCapas = (await db.prepare("SELECT COUNT(*) as c FROM capas WHERE status NOT IN ('closed','completed')").get()).c;
-    const deviationCount = (await db.prepare('SELECT COUNT(*) as c FROM deviation_reports').get()).c;
-    const openDeviations = (await db.prepare("SELECT COUNT(*) as c FROM deviation_reports WHERE status != 'closed'").get()).c;
-    const crCount = (await db.prepare('SELECT COUNT(*) as c FROM change_requests').get()).c;
-    const openCrs = (await db.prepare("SELECT COUNT(*) as c FROM change_requests WHERE status NOT IN ('closed','completed','rejected')").get()).c;
-    const supplierCount = (await db.prepare('SELECT COUNT(*) as c FROM suppliers').get()).c;
-    const approvedSuppliers = (await db.prepare("SELECT COUNT(*) as c FROM suppliers WHERE status = 'approved'").get()).c;
+    const complaintCount = (await db.get('SELECT COUNT(*) as c FROM complaints')).c;
+    const openComplaints = (await db.get("SELECT COUNT(*) as c FROM complaints WHERE status NOT IN ('closed','resolved')")).c;
+    const ccrCount = (await db.get('SELECT COUNT(*) as c FROM ccrs')).c;
+    const openCcrs = (await db.get("SELECT COUNT(*) as c FROM ccrs WHERE status NOT IN ('closed','sent')")).c;
+    const capaCount = (await db.get('SELECT COUNT(*) as c FROM capas')).c;
+    const openCapas = (await db.get("SELECT COUNT(*) as c FROM capas WHERE status NOT IN ('closed','completed')")).c;
+    const deviationCount = (await db.get('SELECT COUNT(*) as c FROM deviation_reports')).c;
+    const openDeviations = (await db.get("SELECT COUNT(*) as c FROM deviation_reports WHERE status != 'closed'")).c;
+    const crCount = (await db.get('SELECT COUNT(*) as c FROM change_requests')).c;
+    const openCrs = (await db.get("SELECT COUNT(*) as c FROM change_requests WHERE status NOT IN ('closed','completed','rejected')")).c;
+    const supplierCount = (await db.get('SELECT COUNT(*) as c FROM suppliers')).c;
+    const approvedSuppliers = (await db.get("SELECT COUNT(*) as c FROM suppliers WHERE status = 'approved'")).c;
 
     res.json({
       totalSops,
@@ -66,7 +66,7 @@ router.get('/dashboard', async (req, res) => {
         changeRequests: { total: crCount, open: openCrs },
         suppliers: { total: supplierCount, approved: approvedSuppliers },
       },
-      deadlines: await db.prepare(`
+      deadlines: await db.all(`
         SELECT 'CAPA' as type, capa_id as ref_id, ('CAPA: ' || capa_id) as title, target_date as deadline, status
         FROM capas WHERE status NOT IN ('closed','completed') AND target_date IS NOT NULL
         UNION ALL
@@ -76,7 +76,7 @@ router.get('/dashboard', async (req, res) => {
         SELECT 'DEV', report_id, title, investigation_due_date, status
         FROM deviation_reports WHERE status != 'closed' AND investigation_due_date IS NOT NULL
         ORDER BY deadline ASC LIMIT 10
-      `).all(),
+      `),
     });
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -109,7 +109,7 @@ router.get('/sops', async (req, res) => {
 
     query += ' ORDER BY sop_number';
 
-    const sops = await db.prepare(query).all(...params);
+    const sops = await db.all(query, params);
     res.json(sops);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -119,15 +119,15 @@ router.get('/sops', async (req, res) => {
 // GET /api/sops/:id
 router.get('/sops/:id', async (req, res) => {
   try {
-    const sop = await db.prepare('SELECT * FROM sops WHERE id = ?').get(req.params.id);
+    const sop = await db.get('SELECT * FROM sops WHERE id = ?', [req.params.id]);
     if (!sop) {
       return res.status(404).json({ error: 'SOP not found' });
     }
 
-    const revisions = await db.prepare('SELECT * FROM sop_revisions WHERE sop_id = ? ORDER BY created_at DESC').all(req.params.id);
-    const comments = await db.prepare('SELECT * FROM sop_comments WHERE sop_id = ? ORDER BY created_at DESC').all(req.params.id);
-    const attachments = await db.prepare('SELECT * FROM sop_attachments WHERE sop_id = ? ORDER BY uploaded_at DESC').all(req.params.id);
-    const auditChecklist = await db.prepare('SELECT * FROM audit_checklist WHERE sop_id = ?').all(req.params.id);
+    const revisions = await db.all('SELECT * FROM sop_revisions WHERE sop_id = ? ORDER BY created_at DESC', [req.params.id]);
+    const comments = await db.all('SELECT * FROM sop_comments WHERE sop_id = ? ORDER BY created_at DESC', [req.params.id]);
+    const attachments = await db.all('SELECT * FROM sop_attachments WHERE sop_id = ? ORDER BY uploaded_at DESC', [req.params.id]);
+    const auditChecklist = await db.all('SELECT * FROM audit_checklist WHERE sop_id = ?', [req.params.id]);
 
     res.json({
       ...sop,
@@ -144,7 +144,7 @@ router.get('/sops/:id', async (req, res) => {
 // PUT /api/sops/:id
 router.put('/sops/:id', requireWriteAccess, async (req, res) => {
   try {
-    const sop = await db.prepare('SELECT * FROM sops WHERE id = ?').get(req.params.id);
+    const sop = await db.get('SELECT * FROM sops WHERE id = ?', [req.params.id]);
     if (!sop) {
       return res.status(404).json({ error: 'SOP not found' });
     }
@@ -181,9 +181,9 @@ router.put('/sops/:id', requireWriteAccess, async (req, res) => {
     }
 
     params.push(req.params.id);
-    await db.prepare(`UPDATE sops SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.run(`UPDATE sops SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    const updated = await db.prepare('SELECT * FROM sops WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM sops WHERE id = ?', [req.params.id]);
 
     // Auto-create revision record for tracked changes
     const trackedFields = ['title', 'version', 'status', 'owner', 'reviewer', 'approver', 'description', 'notes'];
@@ -197,10 +197,10 @@ router.put('/sops/:id', requireWriteAccess, async (req, res) => {
       const changeDesc = changedFields.map(f => `${f}: "${sop[f] || ''}" → "${sanitized[f]}"`).join('; ');
       const sessionUser = req.session?.user;
       const changedBy = sessionUser?.display_name || sessionUser?.username || sanitized.owner || sop.owner || 'System';
-      await db.prepare(`
+      await db.run(`
         INSERT INTO sop_revisions (sop_id, version, changed_by, change_description, reason)
         VALUES (?, ?, ?, ?, ?)
-      `).run(req.params.id, updated.version || sop.version || '1.0', changedBy, changeDesc, 'Manual edit');
+      `, [req.params.id, updated.version || sop.version || '1.0', changedBy, changeDesc, 'Manual edit']);
     }
 
     // Audit log with old/new values
@@ -244,12 +244,12 @@ router.post('/sops', requireWriteAccess, async (req, res) => {
     const sessionUser = req.session?.user;
     const createdBy = sessionUser?.display_name || sessionUser?.username || '';
 
-    const info = await db.prepare(`
+    const info = await db.run(`
       INSERT INTO sops (sop_number, title, category_code, category_name, version, status, costco_cleanup_status, owner, reviewer, approver, effective_date, next_review_date, last_updated, description, notes, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(sop_number, title, category_code, category_name, version, status, costco_cleanup_status, owner, reviewer, approver, effective_date, next_review_date, now, description, notes, createdBy);
+    `, [sop_number, title, category_code, category_name, version, status, costco_cleanup_status, owner, reviewer, approver, effective_date, next_review_date, now, description, notes, createdBy]);
 
-    const created = await db.prepare('SELECT * FROM sops WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.get('SELECT * FROM sops WHERE id = ?', [info.lastInsertRowid]);
 
     logAudit(req, 'create_sops', 'sops', created.id, sop_number, { new_values: { sop_number, title, category_code, category_name, version, status, costco_cleanup_status } });
     broadcast('sop_created', created);
@@ -262,18 +262,18 @@ router.post('/sops', requireWriteAccess, async (req, res) => {
 // DELETE /api/sops/:id (admin only)
 router.delete('/sops/:id', requireRole('admin'), async (req, res) => {
   try {
-    const sop = await db.prepare('SELECT * FROM sops WHERE id = ?').get(req.params.id);
+    const sop = await db.get('SELECT * FROM sops WHERE id = ?', [req.params.id]);
     if (!sop) {
       return res.status(404).json({ error: 'SOP not found' });
     }
 
     // Delete related records first (foreign key constraints)
-    await db.prepare('DELETE FROM sop_revisions WHERE sop_id = ?').run(req.params.id);
-    await db.prepare('DELETE FROM sop_attachments WHERE sop_id = ?').run(req.params.id);
-    await db.prepare('DELETE FROM sop_comments WHERE sop_id = ?').run(req.params.id);
-    await db.prepare('DELETE FROM audit_checklist WHERE sop_id = ?').run(req.params.id);
-    await db.prepare('DELETE FROM sop_files WHERE sop_id = ?').run(req.params.id);
-    await db.prepare('DELETE FROM sops WHERE id = ?').run(req.params.id);
+    await db.run('DELETE FROM sop_revisions WHERE sop_id = ?', [req.params.id]);
+    await db.run('DELETE FROM sop_attachments WHERE sop_id = ?', [req.params.id]);
+    await db.run('DELETE FROM sop_comments WHERE sop_id = ?', [req.params.id]);
+    await db.run('DELETE FROM audit_checklist WHERE sop_id = ?', [req.params.id]);
+    await db.run('DELETE FROM sop_files WHERE sop_id = ?', [req.params.id]);
+    await db.run('DELETE FROM sops WHERE id = ?', [req.params.id]);
 
     logAudit(req, 'delete_sops', 'sops', req.params.id, sop.sop_number, { old_values: sop });
     broadcast('sop_deleted', { id: parseInt(req.params.id), sop_number: sop.sop_number });
@@ -286,7 +286,7 @@ router.delete('/sops/:id', requireRole('admin'), async (req, res) => {
 // POST /api/sops/:id/revisions
 router.post('/sops/:id/revisions', requireWriteAccess, async (req, res) => {
   try {
-    const sop = await db.prepare('SELECT * FROM sops WHERE id = ?').get(req.params.id);
+    const sop = await db.get('SELECT * FROM sops WHERE id = ?', [req.params.id]);
     if (!sop) {
       return res.status(404).json({ error: 'SOP not found' });
     }
@@ -299,12 +299,12 @@ router.post('/sops/:id/revisions', requireWriteAccess, async (req, res) => {
       return res.status(400).json({ error: 'version is required' });
     }
 
-    const info = await db.prepare(`
+    const info = await db.run(`
       INSERT INTO sop_revisions (sop_id, version, changed_by, change_description, reason)
       VALUES (?, ?, ?, ?, ?)
-    `).run(req.params.id, version, finalChangedBy, finalDescription, reason);
+    `, [req.params.id, version, finalChangedBy, finalDescription, reason]);
 
-    const created = await db.prepare('SELECT * FROM sop_revisions WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.get('SELECT * FROM sop_revisions WHERE id = ?', [info.lastInsertRowid]);
 
     logAudit(req, 'create_revision', 'sop_revisions', created.id, sop.sop_number, { new_values: { sop_id: req.params.id, version, changed_by: finalChangedBy, change_description: finalDescription } });
     broadcast('revision_created', { ...created, sop_number: sop.sop_number });
@@ -317,7 +317,7 @@ router.post('/sops/:id/revisions', requireWriteAccess, async (req, res) => {
 // POST /api/sops/:id/comments
 router.post('/sops/:id/comments', requireWriteAccess, async (req, res) => {
   try {
-    const sop = await db.prepare('SELECT * FROM sops WHERE id = ?').get(req.params.id);
+    const sop = await db.get('SELECT * FROM sops WHERE id = ?', [req.params.id]);
     if (!sop) {
       return res.status(404).json({ error: 'SOP not found' });
     }
@@ -331,12 +331,12 @@ router.post('/sops/:id/comments', requireWriteAccess, async (req, res) => {
     const sessionUser = req.session?.user;
     const author = sessionUser?.display_name || sessionUser?.username || 'Anonymous';
 
-    const info = await db.prepare(`
+    const info = await db.run(`
       INSERT INTO sop_comments (sop_id, author, comment)
       VALUES (?, ?, ?)
-    `).run(req.params.id, author, comment);
+    `, [req.params.id, author, comment]);
 
-    const created = await db.prepare('SELECT * FROM sop_comments WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.get('SELECT * FROM sop_comments WHERE id = ?', [info.lastInsertRowid]);
 
     logAudit(req, 'create_comment', 'sop_comments', created.id, sop.sop_number, { new_values: { sop_id: req.params.id, author, comment } });
     broadcast('comment_created', { ...created, sop_number: sop.sop_number });
@@ -349,12 +349,12 @@ router.post('/sops/:id/comments', requireWriteAccess, async (req, res) => {
 // DELETE /api/sops/:id/comments/:commentId (admin only)
 router.delete('/sops/:id/comments/:commentId', requireRole('admin'), async (req, res) => {
   try {
-    const comment = await db.prepare('SELECT * FROM sop_comments WHERE id = ? AND sop_id = ?').get(req.params.commentId, req.params.id);
+    const comment = await db.get('SELECT * FROM sop_comments WHERE id = ? AND sop_id = ?', [req.params.commentId, req.params.id]);
     if (!comment) {
       return res.status(404).json({ error: 'Comment not found' });
     }
 
-    await db.prepare('DELETE FROM sop_comments WHERE id = ?').run(req.params.commentId);
+    await db.run('DELETE FROM sop_comments WHERE id = ?', [req.params.commentId]);
     logAudit(req, 'delete_comment', 'sop_comments', req.params.commentId, comment.author, { old_values: comment });
     res.json({ success: true, message: 'Comment deleted' });
   } catch (err) {
@@ -380,7 +380,7 @@ router.get('/audit', async (req, res) => {
 
     query += ' ORDER BY s.sop_number, ac.id';
 
-    const items = await db.prepare(query).all(...params);
+    const items = await db.all(query, params);
     res.json(items);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -390,7 +390,7 @@ router.get('/audit', async (req, res) => {
 // PUT /api/audit/:id
 router.put('/audit/:id', requireWriteAccess, async (req, res) => {
   try {
-    const item = await db.prepare('SELECT * FROM audit_checklist WHERE id = ?').get(req.params.id);
+    const item = await db.get('SELECT * FROM audit_checklist WHERE id = ?', [req.params.id]);
     if (!item) {
       return res.status(404).json({ error: 'Audit checklist item not found' });
     }
@@ -426,14 +426,14 @@ router.put('/audit/:id', requireWriteAccess, async (req, res) => {
     }
 
     params.push(req.params.id);
-    await db.prepare(`UPDATE audit_checklist SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.run(`UPDATE audit_checklist SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    const updated = await db.prepare(`
+    const updated = await db.get(`
       SELECT ac.*, s.sop_number, s.title, s.category_name, s.costco_cleanup_status
       FROM audit_checklist ac
       JOIN sops s ON ac.sop_id = s.id
       WHERE ac.id = ?
-    `).get(req.params.id);
+    `, [req.params.id]);
 
     // Audit log with old/new values
     const auditOld = {};
@@ -455,7 +455,7 @@ router.put('/audit/:id', requireWriteAccess, async (req, res) => {
 // GET /api/categories
 router.get('/categories', async (req, res) => {
   try {
-    const categories = await db.prepare(`
+    const categories = await db.all(`
       SELECT
         category_code as code,
         category_name as name,
@@ -466,7 +466,7 @@ router.get('/categories', async (req, res) => {
       FROM sops
       GROUP BY category_code, category_name
       ORDER BY category_code
-    `).all();
+    `);
 
     res.json(categories);
   } catch (err) {
@@ -480,7 +480,7 @@ router.get('/categories', async (req, res) => {
 router.post('/sops/:id/read-content', requireWriteAccess, async (req, res) => {
   try {
     const { id } = req.params;
-    const sop = await db.prepare('SELECT * FROM sops WHERE id = ?').get(id);
+    const sop = await db.get('SELECT * FROM sops WHERE id = ?', [id]);
 
     if (!sop) {
       return res.status(404).json({ error: 'SOP not found' });
@@ -490,13 +490,15 @@ router.post('/sops/:id/read-content', requireWriteAccess, async (req, res) => {
     // Check both documents and sop_files tables, pick the newest file
     let document = null;
 
-    const docRecord = await db.prepare(
-      'SELECT * FROM documents WHERE linked_type = ? AND linked_id = ? AND category = ? ORDER BY upload_date DESC LIMIT 1'
-    ).get('sop', id, 'sop');
+    const docRecord = await db.get(
+      'SELECT * FROM documents WHERE linked_type = ? AND linked_id = ? AND category = ? ORDER BY upload_date DESC LIMIT 1',
+      ['sop', id, 'sop']
+    );
 
-    const sopFile = await db.prepare(
-      'SELECT * FROM sop_files WHERE sop_id = ? ORDER BY id DESC LIMIT 1'
-    ).get(id);
+    const sopFile = await db.get(
+      'SELECT * FROM sop_files WHERE sop_id = ? ORDER BY id DESC LIMIT 1',
+      [id]
+    );
 
     let sopFileDoc = null;
     if (sopFile) {
@@ -538,10 +540,10 @@ router.post('/sops/:id/read-content', requireWriteAccess, async (req, res) => {
         if (matchingFile) {
           // Auto-create document record
           const stats = statSync(join(sopDir, matchingFile));
-          const result = await db.prepare(`
+          const result = await db.run(`
             INSERT INTO documents (filename, original_name, file_type, file_size, category, linked_type, linked_id, description, uploaded_by, version)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
+          `, [
             matchingFile,
             matchingFile,
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -552,9 +554,9 @@ router.post('/sops/:id/read-content', requireWriteAccess, async (req, res) => {
             `Auto-linked document for ${sop.sop_number}`,
             'System (Auto-repair)',
             1.0
-          );
+          ]);
 
-          document = await db.prepare('SELECT * FROM documents WHERE id = ?').get(result.lastInsertRowid);
+          document = await db.get('SELECT * FROM documents WHERE id = ?', [result.lastInsertRowid]);
           console.log(`✅ Auto-repaired: Linked ${matchingFile} to ${sop.sop_number}`);
         }
       } catch (err) {
@@ -590,7 +592,7 @@ router.post('/sops/:id/read-content', requireWriteAccess, async (req, res) => {
         const matchingFile = files.find(f => f === baseName || f.startsWith(baseName.replace('.docx', '')));
         
         if (matchingFile) {
-          await db.prepare('UPDATE documents SET filename = ? WHERE id = ?').run(matchingFile, document.id);
+          await db.run('UPDATE documents SET filename = ? WHERE id = ?', [matchingFile, document.id]);
           document.filename = matchingFile;
           console.log(`✅ Auto-repaired: Fixed filename ${document.id} → ${matchingFile}`);
         }
@@ -635,7 +637,7 @@ router.post('/sops/:id/apply-content', requireWriteAccess, async (req, res) => {
       return res.status(400).json({ error: 'Updates object is required' });
     }
 
-    const sop = await db.prepare('SELECT * FROM sops WHERE id = ?').get(id);
+    const sop = await db.get('SELECT * FROM sops WHERE id = ?', [id]);
     if (!sop) {
       return res.status(404).json({ error: 'SOP not found' });
     }
@@ -668,10 +670,10 @@ router.post('/sops/:id/apply-content', requireWriteAccess, async (req, res) => {
 
     // Execute update
     const query = `UPDATE sops SET ${updateFields.join(', ')} WHERE id = ?`;
-    await db.prepare(query).run(...updateValues);
+    await db.run(query, updateValues);
 
     // Get updated SOP
-    const updated = await db.prepare('SELECT * FROM sops WHERE id = ?').get(id);
+    const updated = await db.get('SELECT * FROM sops WHERE id = ?', [id]);
 
     // Auto-create revision record for apply-content changes
     const appliedFields = Object.keys(updates).filter(f => allowedFields.includes(f) && updates[f].proposed !== undefined);
@@ -683,10 +685,10 @@ router.post('/sops/:id/apply-content', requireWriteAccess, async (req, res) => {
       }).join('; ');
       const applyUser = req.session?.user;
       const applyChangedBy = applyUser?.display_name || applyUser?.username || 'Read & Update';
-      await db.prepare(`
+      await db.run(`
         INSERT INTO sop_revisions (sop_id, version, changed_by, change_description, reason)
         VALUES (?, ?, ?, ?, ?)
-      `).run(id, updated.version || sop.version || '1.0', applyChangedBy, changeDesc, 'Content applied from linked document');
+      `, [id, updated.version || sop.version || '1.0', applyChangedBy, changeDesc, 'Content applied from linked document']);
     }
 
     // Audit log for apply-content
@@ -730,15 +732,16 @@ router.post('/sops/bulk-read-content', requireWriteAccess, async (req, res) => {
     
     for (const sopId of sop_ids) {
       try {
-        const sop = await db.prepare('SELECT * FROM sops WHERE id = ?').get(sopId);
+        const sop = await db.get('SELECT * FROM sops WHERE id = ?', [sopId]);
         if (!sop) {
           results.push({ sop_id: sopId, error: 'SOP not found' });
           continue;
         }
 
-        const document = await db.prepare(
-          'SELECT * FROM documents WHERE linked_type = ? AND linked_id = ? AND category = ? ORDER BY upload_date DESC LIMIT 1'
-        ).get('sop', sopId, 'sop');
+        const document = await db.get(
+          'SELECT * FROM documents WHERE linked_type = ? AND linked_id = ? AND category = ? ORDER BY upload_date DESC LIMIT 1',
+          ['sop', sopId, 'sop']
+        );
 
         if (!document) {
           results.push({ sop_id: sopId, error: 'No document linked' });

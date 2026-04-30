@@ -166,7 +166,7 @@ app.use('/uploads', express.static(uploadsDir));
 // Serve static files in production
 const clientDist = join(__dirname, '..', '..', 'client', 'dist');
 app.use(express.static(clientDist));
-app.get('*', async (req, res) => {
+app.get('*', (req, res) => {
   if (!req.path.startsWith('/api')) {
     res.sendFile(join(clientDist, 'index.html'));
   }

@@ -15,7 +15,7 @@ router.post('/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Username and password are required' });
     }
 
-    const user = await db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    const user = await await db.get('SELECT * FROM users WHERE username = ?', [username]);
     if (!user) {
       await logAudit(req, 'login_failed', 'auth', '', username, { reason: 'User not found' });
       return res.status(401).json({ error: 'Invalid username or password' });
@@ -75,7 +75,7 @@ router.get(['/auth/me', '/auth/status'], async (req, res) => {
     return res.status(401).json({ error: 'Not authenticated' });
   }
   // Re-check user is still active from DB
-  const user = await db.prepare('SELECT id, username, display_name, role, active FROM users WHERE id = ?').get(req.session.user.id);
+  const user = await await db.get('SELECT id, username, display_name, role, active FROM users WHERE id = ?', [req.session.user.id]);
   if (!user || !user.active) {
     req.session.destroy();
     return res.status(401).json({ error: 'Account disabled' });
@@ -90,7 +90,7 @@ router.get(['/auth/me', '/auth/status'], async (req, res) => {
 // GET /api/users
 router.get('/users', requireAuth, requireRole('admin'), async (req, res) => {
   try {
-    const users = await db.prepare('SELECT id, username, display_name, role, active, created_at, updated_at FROM users ORDER BY username').all();
+    const users = await await db.all('SELECT id, username, display_name, role, active, created_at, updated_at FROM users ORDER BY username', []);
     await logAudit(req, 'view_users', 'users', '', '', {});
     res.json(users);
   } catch (err) {
@@ -109,17 +109,17 @@ router.post('/users', requireAuth, requireRole('admin'), async (req, res) => {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
-    const existing = await db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    const existing = await await db.get('SELECT id FROM users WHERE username = ?', [username]);
     if (existing) {
       return res.status(400).json({ error: 'Username already exists' });
     }
 
     const hash = bcrypt.hashSync(password, 10);
-    const info = await db.prepare(`
+    const info = await db.run(`
       INSERT INTO users (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)
-    `).run(username, hash, display_name || username, role);
+    `, [username, hash, display_name || username, role]);
 
-    const created = await db.prepare('SELECT id, username, display_name, role, active, created_at FROM users WHERE id = ?').get(info.lastInsertRowid);
+    const created = await await db.get('SELECT id, username, display_name, role, active, created_at FROM users WHERE id = ?', [info.lastInsertRowid]);
     await logAudit(req, 'create_user', 'users', created.id, username, { new_values: { username, display_name: display_name || username, role } });
     res.status(201).json(created);
   } catch (err) {
@@ -130,7 +130,7 @@ router.post('/users', requireAuth, requireRole('admin'), async (req, res) => {
 // PUT /api/users/:id
 router.put('/users/:id', requireAuth, requireRole('admin'), async (req, res) => {
   try {
-    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    const user = await await db.get('SELECT * FROM users WHERE id = ?', [req.params.id]);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const { display_name, role, active } = req.body;
@@ -161,9 +161,9 @@ router.put('/users/:id', requireAuth, requireRole('admin'), async (req, res) => 
 
     updates.push("updated_at = datetime('now')");
     params.push(req.params.id);
-    await db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    const updated = await db.prepare('SELECT id, username, display_name, role, active, created_at, updated_at FROM users WHERE id = ?').get(req.params.id);
+    const updated = await await db.get('SELECT id, username, display_name, role, active, created_at, updated_at FROM users WHERE id = ?', [req.params.id]);
     const oldValues = {};
     const newValues = {};
     if (display_name !== undefined && display_name !== user.display_name) { oldValues.display_name = user.display_name; newValues.display_name = display_name; }
@@ -179,7 +179,7 @@ router.put('/users/:id', requireAuth, requireRole('admin'), async (req, res) => 
 // DELETE /api/users/:id
 router.delete('/users/:id', requireAuth, requireRole('admin'), async (req, res) => {
   try {
-    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    const user = await await db.get('SELECT * FROM users WHERE id = ?', [req.params.id]);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     // Prevent deleting yourself
@@ -188,7 +188,7 @@ router.delete('/users/:id', requireAuth, requireRole('admin'), async (req, res) 
     }
 
     // Soft-delete: deactivate instead of hard delete to preserve audit trail
-    await db.prepare("UPDATE users SET active = 0, updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    await db.run("UPDATE users SET active = 0, updated_at = datetime('now') WHERE id = ?", [req.params.id]);
     await logAudit(req, 'delete_user', 'users', user.id, user.username, { old_values: { active: 1 }, new_values: { active: 0 } });
 
     // Destroy any active sessions for this user
@@ -203,7 +203,7 @@ router.delete('/users/:id', requireAuth, requireRole('admin'), async (req, res) 
 // POST /api/users/:id/reset-password
 router.post('/users/:id/reset-password', requireAuth, requireRole('admin'), async (req, res) => {
   try {
-    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    const user = await await db.get('SELECT * FROM users WHERE id = ?', [req.params.id]);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const { password } = req.body;
@@ -212,7 +212,7 @@ router.post('/users/:id/reset-password', requireAuth, requireRole('admin'), asyn
     }
 
     const hash = bcrypt.hashSync(password, 10);
-    await db.prepare("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?").run(hash, req.params.id);
+    await db.run("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?", [hash, req.params.id]);
 
     await logAudit(req, 'reset_password', 'users', user.id, user.username, {});
     res.json({ success: true });

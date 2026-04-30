@@ -12,7 +12,7 @@ router.use(requireRole('admin'));
 
 // Helper: capture old values, perform action, log audit with old/new
 async function auditedUpdate(req, table, id, allowedFields, identifierField) {
-  const old = await db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+  const old = await await db.get(`SELECT * FROM ${table} WHERE id = ?`, [id]);
   if (!old) return null;
 
   const sanitized = sanitizeBody(req.body);
@@ -34,9 +34,9 @@ async function auditedUpdate(req, table, id, allowedFields, identifierField) {
 
   updates.push("updated_at = datetime('now')");
   params.push(id);
-  await db.prepare(`UPDATE ${table} SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  await db.run(`UPDATE ${table} SET ${updates.join(', ')} WHERE id = ?`, params);
 
-  const updated = await db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+  const updated = await await db.get(`SELECT * FROM ${table} WHERE id = ?`, [id]);
 
   logAudit(req, `admin_update_${table}`, table, id, old[identifierField] || '', {
     old_values: oldValues,
@@ -47,13 +47,13 @@ async function auditedUpdate(req, table, id, allowedFields, identifierField) {
 }
 
 async function auditedDelete(req, table, id, identifierField, cascades = []) {
-  const old = await db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+  const old = await await db.get(`SELECT * FROM ${table} WHERE id = ?`, [id]);
   if (!old) return null;
 
   for (const { table: cTable, column } of cascades) {
-    await db.prepare(`DELETE FROM ${cTable} WHERE ${column} = ?`).run(id);
+    await await db.run(`DELETE FROM ${cTable} WHERE ${column} = ?`, [id]);
   }
-  await db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
+  await await db.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
 
   logAudit(req, `admin_delete_${table}`, table, id, old[identifierField] || '', {
     old_values: old,
@@ -194,7 +194,7 @@ router.delete('/admin/documents/:id', async (req, res) => {
 router.put('/admin/audit-checklist/:id', async (req, res) => {
   try {
     const fields = ['requirement', 'category', 'status', 'notes', 'evidence_ref', 'checked_by'];
-    const old = await db.prepare('SELECT * FROM audit_checklist WHERE id = ?').get(req.params.id);
+    const old = await await db.get('SELECT * FROM audit_checklist WHERE id = ?', [req.params.id]);
     if (!old) return res.status(404).json({ error: 'Audit checklist item not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -215,9 +215,9 @@ router.put('/admin/audit-checklist/:id', async (req, res) => {
 
     updates.push("checked_at = datetime('now')");
     params.push(req.params.id);
-    await db.prepare(`UPDATE audit_checklist SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.run(`UPDATE audit_checklist SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    const updated = await db.prepare('SELECT * FROM audit_checklist WHERE id = ?').get(req.params.id);
+    const updated = await await db.get('SELECT * FROM audit_checklist WHERE id = ?', [req.params.id]);
     logAudit(req, 'admin_update_audit_checklist', 'audit_checklist', req.params.id, old.requirement || '', {
       old_values: oldValues,
       new_values: newValues,
@@ -271,7 +271,7 @@ router.delete('/admin/corrective-actions/:id', async (req, res) => {
 router.put('/admin/users/:id', async (req, res) => {
   try {
     const fields = ['display_name', 'role', 'active'];
-    const old = await db.prepare('SELECT id, username, display_name, role, active, created_at FROM users WHERE id = ?').get(req.params.id);
+    const old = await await db.get('SELECT id, username, display_name, role, active, created_at FROM users WHERE id = ?', [req.params.id]);
     if (!old) return res.status(404).json({ error: 'User not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -292,9 +292,9 @@ router.put('/admin/users/:id', async (req, res) => {
 
     updates.push("updated_at = datetime('now')");
     params.push(req.params.id);
-    await db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    const updated = await db.prepare('SELECT id, username, display_name, role, active, created_at FROM users WHERE id = ?').get(req.params.id);
+    const updated = await await db.get('SELECT id, username, display_name, role, active, created_at FROM users WHERE id = ?', [req.params.id]);
     logAudit(req, 'admin_update_users', 'users', req.params.id, old.username, {
       old_values: oldValues,
       new_values: newValues,
@@ -308,11 +308,11 @@ router.put('/admin/users/:id', async (req, res) => {
 
 router.delete('/admin/users/:id', async (req, res) => {
   try {
-    const user = await db.prepare('SELECT id, username, display_name, role FROM users WHERE id = ?').get(req.params.id);
+    const user = await await db.get('SELECT id, username, display_name, role FROM users WHERE id = ?', [req.params.id]);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     // Soft delete - deactivate
-    await db.prepare("UPDATE users SET active = 0, updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    await db.run("UPDATE users SET active = 0, updated_at = datetime('now') WHERE id = ?", [req.params.id]);
 
     logAudit(req, 'admin_delete_users', 'users', req.params.id, user.username, {
       old_values: { active: 1 },

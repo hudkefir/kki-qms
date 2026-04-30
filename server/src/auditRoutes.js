@@ -52,13 +52,13 @@ router.get('/audit-logs', requireAuth, requireRole('admin'), async (req, res) =>
       countParams.push(s, s, s, s);
     }
 
-    const total = (await db.prepare(countQuery).get(...countParams)).count;
+    const total = (await db.get(countQuery, countParams)).count;
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
     query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), offset);
 
-    const logs = await db.prepare(query).all(...params);
+    const logs = await db.all(query, params);
 
     // Parse JSON fields
     const parsed = logs.map(log => ({
@@ -95,7 +95,7 @@ router.get('/audit-logs/export', requireAuth, requireRole('admin'), async (req, 
     if (date_to) { query += ' AND timestamp <= ?'; params.push(date_to + ' 23:59:59'); }
 
     query += ' ORDER BY timestamp DESC';
-    const logs = await db.prepare(query).all(...params);
+    const logs = await db.all(query, params);
 
     const header = 'ID,Timestamp,User,Action,Resource Type,Resource ID,Resource Name,IP Address,User Agent,Session ID,Details\n';
     const rows = logs.map(l => {
@@ -117,28 +117,28 @@ router.get('/audit-logs/export', requireAuth, requireRole('admin'), async (req, 
 router.get('/audit-logs/stats', requireAuth, async (req, res) => {
   try {
     // Recent activity (last 20 actions)
-    const recentActivity = await db.prepare(`
+    const recentActivity = await db.all(`
       SELECT id, timestamp, username, action, resource_type, resource_name
       FROM audit_logs
       ORDER BY timestamp DESC
       LIMIT 20
-    `).all();
+    `);
 
     // Active users (last 24 hours)
-    const activeUsers = await db.prepare(`
+    const activeUsers = await db.all(`
       SELECT DISTINCT username, MAX(timestamp) as last_active
       FROM audit_logs
       WHERE timestamp >= datetime('now', '-24 hours') AND username != 'anonymous'
       GROUP BY username
       ORDER BY last_active DESC
-    `).all();
+    `);
 
     // Failed logins (last 24 hours)
-    const failedLogins = (await db.prepare(`
+    const failedLogins = (await db.all(`
       SELECT * FROM audit_logs
       WHERE action = 'login_failed' AND timestamp >= datetime('now', '-24 hours')
       ORDER BY timestamp DESC
-    `).all()).map(l => ({
+    `)).map(l => ({
       ...l,
       details: (() => { try { return JSON.parse(l.details); } catch { return {}; } })(),
     }));
@@ -152,9 +152,9 @@ router.get('/audit-logs/stats', requireAuth, async (req, res) => {
 // GET /api/audit-logs/filters - get unique values for filter dropdowns
 router.get('/audit-logs/filters', requireAuth, requireRole('admin'), async (req, res) => {
   try {
-    const users = (await db.prepare("SELECT DISTINCT username FROM audit_logs WHERE username != '' ORDER BY username").all()).map(r => r.username);
-    const actions = (await db.prepare('SELECT DISTINCT action FROM audit_logs ORDER BY action').all()).map(r => r.action);
-    const resourceTypes = (await db.prepare("SELECT DISTINCT resource_type FROM audit_logs WHERE resource_type != '' ORDER BY resource_type").all()).map(r => r.resource_type);
+    const users = (await db.all("SELECT DISTINCT username FROM audit_logs WHERE username != '' ORDER BY username")).map(r => r.username);
+    const actions = (await db.all('SELECT DISTINCT action FROM audit_logs ORDER BY action')).map(r => r.action);
+    const resourceTypes = (await db.all("SELECT DISTINCT resource_type FROM audit_logs WHERE resource_type != '' ORDER BY resource_type")).map(r => r.resource_type);
 
     res.json({ users, actions, resourceTypes });
   } catch (err) {
@@ -167,9 +167,10 @@ router.get('/audit-logs/filters', requireAuth, requireRole('admin'), async (req,
 router.get('/audit-trail/:resourceType/:resourceId', requireAuth, async (req, res) => {
   try {
     const { resourceType, resourceId } = req.params;
-    const logs = await db.prepare(
-      'SELECT * FROM audit_logs WHERE (resource_type = ? OR resource_type = ?) AND resource_id = ? ORDER BY timestamp DESC LIMIT 100'
-    ).all(resourceType, resourceType + 's', resourceId);
+    const logs = await db.all(
+      'SELECT * FROM audit_logs WHERE (resource_type = ? OR resource_type = ?) AND resource_id = ? ORDER BY timestamp DESC LIMIT 100',
+      [resourceType, resourceType + 's', resourceId]
+    );
     res.json(logs);
   } catch (err) {
     console.error('Audit trail error:', err);

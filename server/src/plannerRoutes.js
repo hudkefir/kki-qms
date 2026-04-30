@@ -6,7 +6,7 @@ const router = Router();
 // GET /api/planner/state — return full planner JSON blob
 router.get('/state', async (req, res) => {
   try {
-    const row = await db.prepare('SELECT data FROM planner_state WHERE id = 1').get();
+    const row = await await db.get('SELECT data FROM planner_state WHERE id = 1', []);
     if (row && row.data) {
       res.json(JSON.parse(row.data));
     } else {
@@ -23,9 +23,10 @@ router.post('/state', async (req, res) => {
   try {
     const data = JSON.stringify(req.body);
     const now = new Date().toISOString();
-    await db.prepare(
-      'INSERT INTO planner_state (id, data, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at'
-    ).run(data, now);
+    await db.run(
+      'INSERT INTO planner_state (id, data, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at',
+      [data, now]
+    );
     res.json({ ok: true, updated_at: now });
   } catch (err) {
     console.error('Planner save state error:', err);

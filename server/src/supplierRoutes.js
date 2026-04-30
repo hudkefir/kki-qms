@@ -73,7 +73,7 @@ router.get('/suppliers', async (req, res) => {
     }
 
     query += ' ORDER BY name';
-    const suppliers = await db.prepare(query).all(...params);
+    const suppliers = await db.all(query, params);
     res.json(suppliers);
   } catch (err) {
     console.error('Get suppliers error:', err); res.status(500).json({ error: 'Internal server error' });
@@ -83,12 +83,12 @@ router.get('/suppliers', async (req, res) => {
 // GET /api/suppliers/summary
 router.get('/suppliers/summary', async (req, res) => {
   try {
-    const total = (await db.prepare('SELECT COUNT(*) as count FROM suppliers').get()).count;
-    const approved = (await db.prepare("SELECT COUNT(*) as count FROM suppliers WHERE status = 'approved'").get()).count;
-    const conditional = (await db.prepare("SELECT COUNT(*) as count FROM suppliers WHERE status = 'conditional'").get()).count;
-    const suspended = (await db.prepare("SELECT COUNT(*) as count FROM suppliers WHERE status = 'suspended'").get()).count;
-    const pending = (await db.prepare("SELECT COUNT(*) as count FROM suppliers WHERE status = 'pending'").get()).count;
-    const overdue = (await db.prepare("SELECT COUNT(*) as count FROM suppliers WHERE next_review_date < date('now') AND status != 'suspended'").get()).count;
+    const total = (await db.get('SELECT COUNT(*) as count FROM suppliers')).count;
+    const approved = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE status = 'approved'")).count;
+    const conditional = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE status = 'conditional'")).count;
+    const suspended = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE status = 'suspended'")).count;
+    const pending = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE status = 'pending'")).count;
+    const overdue = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE next_review_date < date('now') AND status != 'suspended'")).count;
     res.json({ total, approved, conditional, suspended, pending, overdue });
   } catch (err) {
     console.error('Supplier summary error:', err); res.status(500).json({ error: 'Internal server error' });
@@ -100,12 +100,12 @@ router.get('/suppliers/summary', async (req, res) => {
 // GET /api/suppliers/checklist/summary
 router.get("/suppliers/checklist/summary", async (req, res) => {
   try {
-    const suppliers = await db.prepare("SELECT id, name, status FROM suppliers ORDER BY name").all();
+    const suppliers = await db.all("SELECT id, name, status FROM suppliers ORDER BY name");
     const summary = [];
     for (const s of suppliers) {
-      const total = (await db.prepare("SELECT COUNT(*) as c FROM supplier_checklist WHERE supplier_id = ? AND required = 1").get(s.id)).c;
-      const done = (await db.prepare("SELECT COUNT(*) as c FROM supplier_checklist WHERE supplier_id = ? AND required = 1 AND completed = 1").get(s.id)).c;
-      const missingRows = await db.prepare("SELECT item_name FROM supplier_checklist WHERE supplier_id = ? AND required = 1 AND completed = 0 ORDER BY item_name").all(s.id);
+      const total = (await db.get("SELECT COUNT(*) as c FROM supplier_checklist WHERE supplier_id = ? AND required = 1", [s.id])).c;
+      const done = (await db.get("SELECT COUNT(*) as c FROM supplier_checklist WHERE supplier_id = ? AND required = 1 AND completed = 1", [s.id])).c;
+      const missingRows = await db.all("SELECT item_name FROM supplier_checklist WHERE supplier_id = ? AND required = 1 AND completed = 0 ORDER BY item_name", [s.id]);
       const missing = missingRows.map(r => r.item_name);
       summary.push({ ...s, total_required: total, completed: done, percentage: total > 0 ? Math.round(done / total * 100) : 0, missing });
     }
@@ -115,11 +115,11 @@ router.get("/suppliers/checklist/summary", async (req, res) => {
 
 router.get('/suppliers/:id', async (req, res) => {
   try {
-    const supplier = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    const supplier = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
     if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
 
-    const documents = await db.prepare('SELECT * FROM supplier_documents WHERE supplier_id = ? ORDER BY uploaded_at DESC').all(req.params.id);
-    const reviews = await db.prepare('SELECT * FROM supplier_reviews WHERE supplier_id = ? ORDER BY review_date DESC').all(req.params.id);
+    const documents = await db.all('SELECT * FROM supplier_documents WHERE supplier_id = ? ORDER BY uploaded_at DESC', [req.params.id]);
+    const reviews = await db.all('SELECT * FROM supplier_reviews WHERE supplier_id = ? ORDER BY review_date DESC', [req.params.id]);
 
     res.json({ ...supplier, documents, reviews });
   } catch (err) {
@@ -137,9 +137,9 @@ router.post('/suppliers', requireWriteAccess, async (req, res) => {
     const user = req.session?.user;
     const created_by = user?.display_name || user?.username || '';
 
-    const info = await db.prepare('INSERT INTO suppliers (name, contact_name, contact_email, contact_phone, address, products_supplied, status, approval_date, next_review_date, risk_level, certification, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(name, contact_name, contact_email, contact_phone, address, products_supplied, status, approval_date, next_review_date, risk_level, certification, notes, created_by);
+    const info = await db.run('INSERT INTO suppliers (name, contact_name, contact_email, contact_phone, address, products_supplied, status, approval_date, next_review_date, risk_level, certification, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [name, contact_name, contact_email, contact_phone, address, products_supplied, status, approval_date, next_review_date, risk_level, certification, notes, created_by]);
 
-    const created = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.get('SELECT * FROM suppliers WHERE id = ?', [info.lastInsertRowid]);
     logAudit(req, 'create_supplier', 'suppliers', created.id, name, { new_values: sanitized });
     broadcast('supplier_created', created);
     res.status(201).json(created);
@@ -151,7 +151,7 @@ router.post('/suppliers', requireWriteAccess, async (req, res) => {
 // PUT /api/suppliers/:id
 router.put('/suppliers/:id', requireWriteAccess, async (req, res) => {
   try {
-    const supplier = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    const supplier = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
     if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -171,8 +171,8 @@ router.put('/suppliers/:id', requireWriteAccess, async (req, res) => {
     if (updates.length <= 2) return res.json(supplier);
 
     params.push(req.params.id);
-    await db.prepare('UPDATE suppliers SET ' + updates.join(', ') + ' WHERE id = ?').run(...params);
-    const updated = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    await db.run('UPDATE suppliers SET ' + updates.join(', ') + ' WHERE id = ?', params);
+    const updated = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
 
     if (Object.keys(oldValues).length > 0) logAudit(req, 'update_supplier', 'suppliers', req.params.id, supplier.name, { old_values: oldValues, new_values: newValues });
     broadcast('supplier_updated', updated);
@@ -185,7 +185,7 @@ router.put('/suppliers/:id', requireWriteAccess, async (req, res) => {
 // PATCH /api/suppliers/:id/status (admin only)
 router.patch('/suppliers/:id/status', requireRole('admin'), async (req, res) => {
   try {
-    const supplier = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    const supplier = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
     if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
 
     const { status } = req.body;
@@ -193,10 +193,10 @@ router.patch('/suppliers/:id/status', requireRole('admin'), async (req, res) => 
     if (!valid.includes(status)) return res.status(400).json({ error: 'Invalid status. Must be one of: ' + valid.join(', ') });
 
     const user = req.session?.user;
-    await db.prepare("UPDATE suppliers SET status = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?").run(status, user?.display_name || user?.username || '', req.params.id);
-    if (status === 'approved' && !supplier.approval_date) await db.prepare("UPDATE suppliers SET approval_date = date('now') WHERE id = ?").run(req.params.id);
+    await db.run("UPDATE suppliers SET status = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?", [status, user?.display_name || user?.username || '', req.params.id]);
+    if (status === 'approved' && !supplier.approval_date) await db.run("UPDATE suppliers SET approval_date = date('now') WHERE id = ?", [req.params.id]);
 
-    const updated = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
     logAudit(req, 'update_supplier_status', 'suppliers', req.params.id, supplier.name, { old_values: { status: supplier.status }, new_values: { status } });
     broadcast('supplier_updated', updated);
     res.json(updated);
@@ -208,12 +208,12 @@ router.patch('/suppliers/:id/status', requireRole('admin'), async (req, res) => 
 // DELETE /api/suppliers/:id (admin only)
 router.delete('/suppliers/:id', requireRole('admin'), async (req, res) => {
   try {
-    const supplier = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    const supplier = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
     if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
 
-    await db.prepare('DELETE FROM supplier_documents WHERE supplier_id = ?').run(req.params.id);
-    await db.prepare('DELETE FROM supplier_reviews WHERE supplier_id = ?').run(req.params.id);
-    await db.prepare('DELETE FROM suppliers WHERE id = ?').run(req.params.id);
+    await db.run('DELETE FROM supplier_documents WHERE supplier_id = ?', [req.params.id]);
+    await db.run('DELETE FROM supplier_reviews WHERE supplier_id = ?', [req.params.id]);
+    await db.run('DELETE FROM suppliers WHERE id = ?', [req.params.id]);
 
     logAudit(req, 'delete_supplier', 'suppliers', req.params.id, supplier.name, { old_values: supplier });
     broadcast('supplier_deleted', { id: parseInt(req.params.id), name: supplier.name });
@@ -226,7 +226,7 @@ router.delete('/suppliers/:id', requireRole('admin'), async (req, res) => {
 // POST /api/suppliers/:id/reviews
 router.post('/suppliers/:id/reviews', requireWriteAccess, async (req, res) => {
   try {
-    const supplier = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    const supplier = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
     if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
 
     const { review_date, outcome = 'approved', findings = '', corrective_actions = '', next_review = '' } = req.body;
@@ -235,16 +235,16 @@ router.post('/suppliers/:id/reviews', requireWriteAccess, async (req, res) => {
     const user = req.session?.user;
     const reviewer = user?.display_name || user?.username || '';
 
-    const info = await db.prepare('INSERT INTO supplier_reviews (supplier_id, review_date, reviewer, outcome, findings, corrective_actions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)').run(req.params.id, review_date, reviewer, outcome, findings, corrective_actions, next_review);
+    const info = await db.run('INSERT INTO supplier_reviews (supplier_id, review_date, reviewer, outcome, findings, corrective_actions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)', [req.params.id, review_date, reviewer, outcome, findings, corrective_actions, next_review]);
 
     // Update supplier status based on review
     const updateFields = ["status = ?", "updated_at = datetime('now')"];
     const updateParams = [outcome];
     if (next_review) { updateFields.push('next_review_date = ?'); updateParams.push(next_review); }
     updateParams.push(req.params.id);
-    await db.prepare('UPDATE suppliers SET ' + updateFields.join(', ') + ' WHERE id = ?').run(...updateParams);
+    await db.run('UPDATE suppliers SET ' + updateFields.join(', ') + ' WHERE id = ?', updateParams);
 
-    const created = await db.prepare('SELECT * FROM supplier_reviews WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.get('SELECT * FROM supplier_reviews WHERE id = ?', [info.lastInsertRowid]);
     logAudit(req, 'create_supplier_review', 'supplier_reviews', created.id, supplier.name, { new_values: { review_date, outcome, findings } });
     res.status(201).json(created);
   } catch (err) {
@@ -274,7 +274,7 @@ const supplierUpload = multer({
 
 router.post("/suppliers/:id/documents", requireWriteAccess, supplierUpload.single("file"), async (req, res) => {
   try {
-    const supplier = await db.prepare("SELECT * FROM suppliers WHERE id = ?").get(req.params.id);
+    const supplier = await db.get("SELECT * FROM suppliers WHERE id = ?", [req.params.id]);
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
@@ -282,11 +282,12 @@ router.post("/suppliers/:id/documents", requireWriteAccess, supplierUpload.singl
     const user = req.session?.user;
     const uploaded_by = user?.display_name || user?.username || "";
 
-    const info = await db.prepare(
-      "INSERT INTO supplier_documents (supplier_id, filename, original_name, document_type, notes, file_size, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ).run(req.params.id, req.file.filename, req.file.originalname, document_type, description || notes || "", req.file.size, uploaded_by);
+    const info = await db.run(
+      "INSERT INTO supplier_documents (supplier_id, filename, original_name, document_type, notes, file_size, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [req.params.id, req.file.filename, req.file.originalname, document_type, description || notes || "", req.file.size, uploaded_by]
+    );
 
-    const doc = await db.prepare("SELECT * FROM supplier_documents WHERE id = ?").get(info.lastInsertRowid);
+    const doc = await db.get("SELECT * FROM supplier_documents WHERE id = ?", [info.lastInsertRowid]);
     logAudit(req, "upload_supplier_doc", "supplier_documents", doc.id, supplier.name, { document_type, original_name: req.file.originalname });
     res.status(201).json(doc);
   } catch (err) {
@@ -297,7 +298,7 @@ router.post("/suppliers/:id/documents", requireWriteAccess, supplierUpload.singl
 
 router.get("/suppliers/:id/documents/:docId/download", async (req, res) => {
   try {
-    const doc = await db.prepare("SELECT * FROM supplier_documents WHERE id = ? AND supplier_id = ?").get(req.params.docId, req.params.id);
+    const doc = await db.get("SELECT * FROM supplier_documents WHERE id = ? AND supplier_id = ?", [req.params.docId, req.params.id]);
     if (!doc) return res.status(404).json({ error: "Document not found" });
     res.download(join(supplierDocsDir, doc.filename), doc.original_name);
   } catch (err) {
@@ -308,16 +309,16 @@ router.get("/suppliers/:id/documents/:docId/download", async (req, res) => {
 // DELETE /api/suppliers/:id/documents/:docId (admin only)
 router.delete("/suppliers/:id/documents/:docId", requireRole("admin"), async (req, res) => {
   try {
-    const doc = await db.prepare("SELECT * FROM supplier_documents WHERE id = ? AND supplier_id = ?").get(req.params.docId, req.params.id);
+    const doc = await db.get("SELECT * FROM supplier_documents WHERE id = ? AND supplier_id = ?", [req.params.docId, req.params.id]);
     if (!doc) return res.status(404).json({ error: "Document not found" });
 
     // Remove file from disk
     const filePath = join(supplierDocsDir, doc.filename);
     try { unlinkSync(filePath); } catch (e) { /* file may already be gone */ }
 
-    await db.prepare("DELETE FROM supplier_documents WHERE id = ?").run(doc.id);
+    await db.run("DELETE FROM supplier_documents WHERE id = ?", [doc.id]);
 
-    const supplier = await db.prepare("SELECT name FROM suppliers WHERE id = ?").get(req.params.id);
+    const supplier = await db.get("SELECT name FROM suppliers WHERE id = ?", [req.params.id]);
     logAudit(req, "delete_supplier_doc", "supplier_documents", doc.id, supplier?.name || "", { old_values: { original_name: doc.original_name, document_type: doc.document_type } });
     res.json({ success: true, message: "Document deleted" });
   } catch (err) {
@@ -330,9 +331,9 @@ router.delete("/suppliers/:id/documents/:docId", requireRole("admin"), async (re
 // GET /api/suppliers/:id/checklist
 router.get("/suppliers/:id/checklist", async (req, res) => {
   try {
-    const supplier = await db.prepare("SELECT * FROM suppliers WHERE id = ?").get(req.params.id);
+    const supplier = await db.get("SELECT * FROM suppliers WHERE id = ?", [req.params.id]);
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
-    const items = await db.prepare("SELECT * FROM supplier_checklist WHERE supplier_id = ? ORDER BY required DESC, completed ASC, item_name ASC").all(req.params.id);
+    const items = await db.all("SELECT * FROM supplier_checklist WHERE supplier_id = ? ORDER BY required DESC, completed ASC, item_name ASC", [req.params.id]);
     const total = items.filter(i => i.required).length;
     const done = items.filter(i => i.required && i.completed).length;
     res.json({ supplier_id: supplier.id, supplier_name: supplier.name, total_required: total, completed: done, percentage: total > 0 ? Math.round(done / total * 100) : 0, items });
@@ -342,7 +343,7 @@ router.get("/suppliers/:id/checklist", async (req, res) => {
 // PATCH /api/suppliers/:id/checklist/:itemId
 router.patch("/suppliers/:id/checklist/:itemId", requireWriteAccess, async (req, res) => {
   try {
-    const item = await db.prepare("SELECT * FROM supplier_checklist WHERE id = ? AND supplier_id = ?").get(req.params.itemId, req.params.id);
+    const item = await db.get("SELECT * FROM supplier_checklist WHERE id = ? AND supplier_id = ?", [req.params.itemId, req.params.id]);
     if (!item) return res.status(404).json({ error: "Checklist item not found" });
     const { completed, notes, required } = req.body;
     const updates = []; const params = [];
@@ -350,8 +351,8 @@ router.patch("/suppliers/:id/checklist/:itemId", requireWriteAccess, async (req,
     if (notes !== undefined) { updates.push("notes = ?"); params.push(notes); }
     if (required !== undefined) { updates.push("required = ?"); params.push(required ? 1 : 0); }
     updates.push("updated_at = datetime('now')"); params.push(req.params.itemId);
-    await db.prepare("UPDATE supplier_checklist SET " + updates.join(", ") + " WHERE id = ?").run(...params);
-    res.json(await db.prepare("SELECT * FROM supplier_checklist WHERE id = ?").get(req.params.itemId));
+    await db.run("UPDATE supplier_checklist SET " + updates.join(", ") + " WHERE id = ?", params);
+    res.json(await db.get("SELECT * FROM supplier_checklist WHERE id = ?", [req.params.itemId]));
   } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
