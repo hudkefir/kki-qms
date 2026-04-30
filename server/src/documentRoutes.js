@@ -1,50 +1,13 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { existsSync, mkdirSync, createReadStream, unlinkSync } from 'fs';
-import { dirname, join, extname } from 'path';
-import { fileURLToPath } from 'url';
+import { extname } from 'path';
 import db from './database-pg.js';
 import { requireAuth, requireWriteAccess } from './authMiddleware.js';
 import { logAudit } from './auditMiddleware.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const documentsBaseDir = process.env.KKI_DOCS_DIR ? dirname(process.env.KKI_DOCS_DIR) : join(__dirname, '..', '..', 'documents');
-
-// Ensure all category directories exist
-const categoryDirs = {
-  sop: process.env.KKI_DOCS_DIR || join(documentsBaseDir, 'SOPs'),
-  ccr: join(documentsBaseDir, 'CCRs'),
-  complaint: join(documentsBaseDir, 'Complaints', '2026'),
-  audit: join(documentsBaseDir, 'Audit'),
-  general: join(documentsBaseDir, 'General')
-};
-
-Object.values(categoryDirs).forEach(dir => {
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-});
-
-// Upload to temp dir first, then move after body is parsed (multer destination fires before req.body.category is available)
-import { renameSync } from 'fs';
-const tmpUploadDir = join(documentsBaseDir, '.tmp-uploads');
-if (!existsSync(tmpUploadDir)) {
-  mkdirSync(tmpUploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, tmpUploadDir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
-});
+import { uploadFile, downloadFile, deleteFile } from './supabase.js';
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['.pdf', '.docx', '.xlsx', '.jpg', '.jpeg', '.png'];
@@ -97,7 +60,6 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     if (tags) {
-      // Support comma-separated tag search
       const tagList = tags.split(',').map(t => t.trim()).filter(Boolean);
       for (const tag of tagList) {
         query += ' AND tags LIKE ?';
@@ -105,7 +67,6 @@ router.get('/', requireAuth, async (req, res) => {
       }
     }
 
-    // Sorting
     const validSorts = { name: 'original_name', date: 'upload_date', size: 'file_size', downloads: 'download_count', version: 'version' };
     const sortCol = validSorts[sort] || 'upload_date';
     const sortOrder = order === 'asc' ? 'ASC' : 'DESC';
@@ -133,7 +94,6 @@ router.get('/:id/versions', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // Find all versions of this document by matching the base name pattern
     const baseName = doc.original_name.replace(/(_v\d+\.\d+)?(\.[^.]+)$/, '');
     const fileExt = extname(doc.original_name);
 
@@ -151,29 +111,24 @@ router.get('/:id/versions', requireAuth, async (req, res) => {
 // Upload documents
 router.post('/upload', requireAuth, requireWriteAccess, upload.array('files', 10), async (req, res) => {
   try {
-    // Validate files were uploaded
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: 'No files uploaded. Please select at least one file.' });
     }
 
     const { category = 'general', versionType = 'major', description = '', versionNotes = '', document_type = 'other', linked_sop_id } = req.body;
 
-    // Validate category
-    const validCategories = Object.keys(categoryDirs);
+    const validCategories = ['sop', 'ccr', 'complaint', 'audit', 'general'];
     const safeCategory = validCategories.includes(category) ? category : 'general';
 
     const uploadedFiles = [];
 
     for (const file of req.files) {
-      // Validate file is not empty
-      if (file.size === 0) {
-        try { unlinkSync(file.path); } catch (e) {}
-        continue;
-      }
+      if (file.size === 0) continue;
+
       // Check if this document already exists (for versioning)
       const baseName = file.originalname.replace(/(_v\d+\.\d+)?(\.[^.]+)$/, '');
       const fileExt = extname(file.originalname);
-      
+
       const existingDoc = db.prepare(
         'SELECT * FROM documents WHERE original_name LIKE ? AND category = ? ORDER BY version DESC LIMIT 1'
       ).get(`${baseName}%${fileExt}`, safeCategory);
@@ -187,17 +142,16 @@ router.post('/upload', requireAuth, requireWriteAccess, upload.array('files', 10
         } else {
           newVersion = Math.floor(currentVersion) + 1.0;
         }
-        // Round to 1 decimal place
         newVersion = Math.round(newVersion * 10) / 10;
       }
 
-      // Create new filename with version and move from temp to correct category dir
       const versionedName = `${baseName}_v${newVersion.toFixed(1)}${fileExt}`;
-      const newPath = join(categoryDirs[safeCategory], versionedName);
-      
-      renameSync(file.path, newPath);
+      const storagePath = `documents/${safeCategory}/${versionedName}`;
 
-      // Auto-detect document type from filename if not specified
+      // Upload to Supabase Storage
+      await uploadFile(storagePath, file.buffer, file.mimetype);
+
+      // Auto-detect document type from filename
       let docType = document_type || 'other';
       const upperName = file.originalname.toUpperCase();
       if (docType === 'other') {
@@ -211,7 +165,7 @@ router.post('/upload', requireAuth, requireWriteAccess, upload.array('files', 10
         else if (upperName.includes('-REC-')) docType = 'record';
       }
 
-      // Auto-link to parent SOP if filename matches pattern (e.g. KK-FRM-00302-A -> KK-SOP-00302)
+      // Auto-link to parent SOP
       let sopId = linked_sop_id || null;
       if (!sopId) {
         const sopMatch = upperName.match(/KK-(?:FRM|LOG|CHK|SUP)-(\d{5})/);
@@ -222,9 +176,8 @@ router.post('/upload', requireAuth, requireWriteAccess, upload.array('files', 10
         }
       }
 
-      // Insert into database
       const docData = {
-        filename: versionedName,
+        filename: storagePath,
         original_name: file.originalname,
         file_type: file.mimetype,
         file_size: file.size,
@@ -281,12 +234,6 @@ router.post('/upload', requireAuth, requireWriteAccess, upload.array('files', 10
 
   } catch (error) {
     console.error('Upload error:', error);
-    // Clean up uploaded files on error
-    if (req.files) {
-      req.files.forEach(file => {
-        try { unlinkSync(file.path); } catch (e) {}
-      });
-    }
     res.status(500).json({ error: error.message });
   }
 });
@@ -299,21 +246,15 @@ router.get('/:id/download', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    const filePath = join(categoryDirs[doc.category], doc.filename);
-    if (!existsSync(filePath)) {
-      return res.status(404).json({ error: 'File not found on disk' });
-    }
-
     // Track download count
     db.prepare('UPDATE documents SET download_count = download_count + 1 WHERE id = ?').run(doc.id);
 
     logAudit(req, 'download', 'document', doc.id, doc.filename);
 
+    const buffer = await downloadFile(doc.filename);
     res.setHeader('Content-Disposition', `attachment; filename="${doc.original_name}"`);
     res.setHeader('Content-Type', doc.file_type);
-    
-    const fileStream = createReadStream(filePath);
-    fileStream.pipe(res);
+    res.send(buffer);
 
   } catch (error) {
     console.error('Download error:', error);
@@ -329,16 +270,10 @@ router.get('/:id/preview', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    const filePath = join(categoryDirs[doc.category], doc.filename);
-    if (!existsSync(filePath)) {
-      return res.status(404).json({ error: 'File not found on disk' });
-    }
-
+    const buffer = await downloadFile(doc.filename);
     res.setHeader('Content-Disposition', `inline; filename="${doc.original_name}"`);
     res.setHeader('Content-Type', doc.file_type);
-
-    const fileStream = createReadStream(filePath);
-    fileStream.pipe(res);
+    res.send(buffer);
 
   } catch (error) {
     console.error('Preview error:', error);
@@ -354,20 +289,19 @@ router.delete('/:id', requireAuth, requireWriteAccess, async (req, res) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // Only admin can delete documents
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Only administrators can delete documents' });
     }
 
-    const filePath = join(categoryDirs[doc.category], doc.filename);
-    
-    // Delete from database first
-    db.prepare('DELETE FROM documents WHERE id = ?').run(req.params.id);
-    
-    // Delete file from disk (if it exists)
-    if (existsSync(filePath)) {
-      unlinkSync(filePath);
+    // Delete from Supabase Storage
+    try {
+      await deleteFile(doc.filename);
+    } catch (e) {
+      console.warn('Storage delete warning:', e.message);
     }
+
+    // Delete from database
+    db.prepare('DELETE FROM documents WHERE id = ?').run(req.params.id);
 
     logAudit(req, 'delete', 'document', doc.id, doc.original_name || doc.filename, {
       old_values: doc

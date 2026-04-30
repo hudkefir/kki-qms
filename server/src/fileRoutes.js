@@ -1,40 +1,14 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { existsSync, mkdirSync, createReadStream, unlinkSync } from 'fs';
-import { dirname, join, extname, basename } from 'path';
-import { fileURLToPath } from 'url';
+import { extname, basename } from 'path';
 import db from './database-pg.js';
 import { requireAuth, requireWriteAccess, requireRole } from './authMiddleware.js';
 import { logAudit } from './auditMiddleware.js';
 import { sanitizeFilename } from './sanitize.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const documentsDir = process.env.KKI_DOCS_DIR || join(__dirname, '..', '..', 'documents');
-if (!existsSync(documentsDir)) {
-  mkdirSync(documentsDir, { recursive: true });
-}
-
-// Configure multer — save SOP files directly to the SOPs directory (not nested sop-{id}/)
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    if (!existsSync(documentsDir)) {
-      mkdirSync(documentsDir, { recursive: true });
-    }
-    cb(null, documentsDir);
-  },
-  filename: (req, file, cb) => {
-    // Sanitize filename to prevent path traversal
-    // Prefix with timestamp to prevent version overwrites on disk
-    const ext = extname(file.originalname).toLowerCase();
-    const base = basename(sanitizeFilename(file.originalname), ext);
-    cb(null, `${base}_${Date.now()}${ext}`);
-  },
-});
+import { uploadFile, downloadFile, deleteFile } from './supabase.js';
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (req, file, cb) => {
     const allowed = ['.pdf', '.docx', '.doc'];
@@ -50,9 +24,8 @@ const upload = multer({
 const router = Router();
 
 // POST /api/sops/:id/upload
-router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('file'), (req, res) => {
+router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('file'), async (req, res) => {
   try {
-    // Validate ID is numeric (prevent injection)
     if (!/^\d+$/.test(req.params.id)) {
       return res.status(400).json({ error: 'Invalid SOP ID' });
     }
@@ -62,13 +35,11 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
 
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    // Validate file is not empty
     if (req.file.size === 0) {
-      try { unlinkSync(req.file.path); } catch (e) {}
       return res.status(400).json({ error: 'Uploaded file is empty' });
     }
 
-    // Determine version (increment from last upload of same original name)
+    // Determine version
     const lastFile = db.prepare(
       'SELECT MAX(version) as maxVersion FROM sop_files WHERE sop_id = ? AND original_name = ?'
     ).get(req.params.id, req.file.originalname);
@@ -77,12 +48,20 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
     const ext = extname(req.file.originalname).toLowerCase();
     const fileType = ext === '.pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
+    // Build storage filename and path
+    const base = basename(sanitizeFilename(req.file.originalname), ext);
+    const diskFilename = `${base}_${Date.now()}${ext}`;
+    const storagePath = `sops/${req.params.id}/${diskFilename}`;
+
+    // Upload to Supabase Storage
+    await uploadFile(storagePath, req.file.buffer, fileType);
+
     const info = db.prepare(`
       INSERT INTO sop_files (sop_id, filename, original_name, file_type, file_size, version, uploaded_by)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
       req.params.id,
-      req.file.filename,
+      storagePath,
       req.file.originalname,
       fileType,
       req.file.size,
@@ -92,7 +71,7 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
 
     const created = db.prepare('SELECT * FROM sop_files WHERE id = ?').get(info.lastInsertRowid);
 
-    // Auto-update SOP version from filename (e.g. "KK-SOP-00100_..._v1_0.docx" → "1.0")
+    // Auto-update SOP version from filename
     const versionMatch = req.file.originalname.match(/_v(\d+[._]\d+)/i);
     if (versionMatch) {
       const newVersion = versionMatch[1].replace('_', '.');
@@ -125,24 +104,20 @@ router.get('/sops/:id/files', requireAuth, (req, res) => {
 });
 
 // GET /api/files/:id/download
-router.get('/files/:id/download', requireAuth, (req, res) => {
+router.get('/files/:id/download', requireAuth, async (req, res) => {
   try {
     const file = db.prepare('SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?').get(req.params.id);
     if (!file) return res.status(404).json({ error: 'File not found' });
-
-    const filePath = join(documentsDir, file.filename);
-    if (!existsSync(filePath)) {
-      return res.status(404).json({ error: 'File not found on disk' });
-    }
 
     logAudit(req, 'download_file', 'sops', file.sop_id, file.sop_number, {
       filename: file.original_name,
       version: file.version,
     });
 
+    const buffer = await downloadFile(file.filename);
     res.setHeader('Content-Disposition', `attachment; filename="${file.original_name}"`);
     res.setHeader('Content-Type', file.file_type);
-    createReadStream(filePath).pipe(res);
+    res.send(buffer);
   } catch (err) {
     console.error('File download error:', err);
     res.status(500).json({ error: 'File download failed' });
@@ -150,19 +125,15 @@ router.get('/files/:id/download', requireAuth, (req, res) => {
 });
 
 // GET /api/files/:id/preview - Serve file inline for in-browser viewing
-router.get('/files/:id/preview', requireAuth, (req, res) => {
+router.get('/files/:id/preview', requireAuth, async (req, res) => {
   try {
     const file = db.prepare('SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?').get(req.params.id);
     if (!file) return res.status(404).json({ error: 'File not found' });
 
-    const filePath = join(documentsDir, file.filename);
-    if (!existsSync(filePath)) {
-      return res.status(404).json({ error: 'File not found on disk' });
-    }
-
+    const buffer = await downloadFile(file.filename);
     res.setHeader('Content-Disposition', `inline; filename="${file.original_name}"`);
     res.setHeader('Content-Type', file.file_type);
-    createReadStream(filePath).pipe(res);
+    res.send(buffer);
   } catch (err) {
     console.error('File preview error:', err);
     res.status(500).json({ error: 'File preview failed' });
@@ -175,15 +146,11 @@ router.get('/files/:id/preview-html', requireAuth, async (req, res) => {
     const file = db.prepare('SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?').get(req.params.id);
     if (!file) return res.status(404).json({ error: 'File not found' });
 
-    const filePath = join(documentsDir, file.filename);
-    if (!existsSync(filePath)) {
-      return res.status(404).json({ error: 'File not found on disk' });
-    }
-
     const ext = extname(file.original_name).toLowerCase();
     if (ext === '.docx' || ext === '.doc') {
+      const buffer = await downloadFile(file.filename);
       const mammoth = (await import('mammoth')).default;
-      const result = await mammoth.convertToHtml({ path: filePath });
+      const result = await mammoth.convertToHtml({ buffer });
       const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>${file.original_name}</title>
 <style>
@@ -200,7 +167,6 @@ router.get('/files/:id/preview-html', requireAuth, async (req, res) => {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.send(html);
     } else {
-      // For PDFs, redirect to inline preview
       res.redirect(`/api/files/${req.params.id}/preview`);
     }
   } catch (err) {
@@ -209,8 +175,8 @@ router.get('/files/:id/preview-html', requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/files/:id — admin only, removes file from disk + database
-router.delete('/files/:id', requireAuth, requireRole('admin'), (req, res) => {
+// DELETE /api/files/:id — admin only, removes file from storage + database
+router.delete('/files/:id', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     if (!/^\d+$/.test(req.params.id)) {
       return res.status(400).json({ error: 'Invalid file ID' });
@@ -221,16 +187,16 @@ router.delete('/files/:id', requireAuth, requireRole('admin'), (req, res) => {
     ).get(req.params.id);
     if (!file) return res.status(404).json({ error: 'File not found' });
 
-    // Remove from disk
-    const filePath = join(documentsDir, file.filename);
-    if (existsSync(filePath)) {
-      unlinkSync(filePath);
+    // Remove from Supabase Storage
+    try {
+      await deleteFile(file.filename);
+    } catch (e) {
+      console.warn('Storage delete warning:', e.message);
     }
 
     // Remove from database
     db.prepare('DELETE FROM sop_files WHERE id = ?').run(req.params.id);
 
-    // Audit trail
     logAudit(req, 'delete_file', 'sops', file.sop_id, file.sop_number, {
       filename: file.original_name,
       version: file.version,
