@@ -90,7 +90,7 @@ function capaHtml(c) {
 // GET /api/print/capa/:id
 router.get('/print/capa/:id', requireAuth, async (req, res) => {
   try {
-    const c = await db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const c = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!c) return res.status(404).json({ error: 'CAPA not found' });
     const html = baseHtml('CAPA Report', c.capa_id, capaHtml(c));
     res.send(html);
@@ -100,7 +100,7 @@ router.get('/print/capa/:id', requireAuth, async (req, res) => {
 // GET /api/print/capas
 router.get('/print/capas', requireAuth, async (req, res) => {
   try {
-    const capas = await db.prepare('SELECT * FROM capas ORDER BY capa_id').all();
+    const capas = await db.all('SELECT * FROM capas ORDER BY capa_id');
     let content = `<h2>CAPA Register — ${capas.length} Records</h2>
     <table><tr><th>CAPA #</th><th>Description</th><th>Responsible</th><th>Target</th><th>Status</th><th>Effectiveness</th></tr>`;
     for (const c of capas) {
@@ -116,9 +116,9 @@ router.get('/print/capas', requireAuth, async (req, res) => {
 // GET /api/print/batch-test/:id
 router.get('/print/batch-test/:id', requireAuth, async (req, res) => {
   try {
-    const bt = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const bt = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!bt) return res.status(404).json({ error: 'Batch test not found' });
-    const results = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY test_category, test_type, id').all(bt.id);
+    const results = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY test_category, test_type, id', [bt.id]);
     let content = `<h2>Batch Test Report — Lot ${bt.batch_number}</h2>
     <table>
       <tr><td class="field-label">Batch / Lot #</td><td>${bt.batch_number}</td><td class="field-label">Status</td><td>${statusBadge(bt.status)}</td></tr>
@@ -154,7 +154,7 @@ router.get('/print/batch-test/:id', requireAuth, async (req, res) => {
 // GET /api/print/batch-tests
 router.get('/print/batch-tests', requireAuth, async (req, res) => {
   try {
-    const tests = await db.prepare('SELECT * FROM batch_tests ORDER BY test_date DESC').all();
+    const tests = await db.all('SELECT * FROM batch_tests ORDER BY test_date DESC');
     let content = `<h2>Batch Testing Register — ${tests.length} Records</h2>
     <table><tr><th>Lot #</th><th>Product</th><th>Test Date</th><th>Lab</th><th>Report #</th><th>Status</th></tr>`;
     for (const t of tests) {
@@ -169,9 +169,9 @@ router.get('/print/batch-tests', requireAuth, async (req, res) => {
 // GET /api/print/ccr/:id
 router.get('/print/ccr/:id', requireAuth, async (req, res) => {
   try {
-    const c = await db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    const c = await db.get('SELECT * FROM ccrs WHERE id = ?', [req.params.id]);
     if (!c) return res.status(404).json({ error: 'CCR not found' });
-    const complaints = await db.prepare('SELECT cc.complaint_id, cmp.complaint_number, cmp.issue_type, cmp.product_name, cmp.status FROM ccr_complaints cc LEFT JOIN complaints cmp ON cc.complaint_id = cmp.id WHERE cc.ccr_id = ?').all(c.id);
+    const complaints = await db.all('SELECT cc.complaint_id, cmp.complaint_number, cmp.issue_type, cmp.product_name, cmp.status FROM ccr_complaints cc LEFT JOIN complaints cmp ON cc.complaint_id = cmp.id WHERE cc.ccr_id = ?', [c.id]);
     let content = `<h2>Change Control Record — ${c.ccr_number || 'CCR-' + c.id}</h2>
     <table>
       <tr><td class="field-label">CCR Number</td><td>${c.ccr_number || ''}</td><td class="field-label">Status</td><td>${statusBadge(c.status)}</td></tr>
@@ -197,7 +197,7 @@ router.get('/print/ccr/:id', requireAuth, async (req, res) => {
 // GET /api/print/ccrs
 router.get('/print/ccrs', requireAuth, async (req, res) => {
   try {
-    const ccrs = await db.prepare('SELECT * FROM ccrs ORDER BY id').all();
+    const ccrs = await db.all('SELECT * FROM ccrs ORDER BY id');
     let content = `<h2>CCR Register — ${ccrs.length} Records</h2>
     <table><tr><th>CCR #</th><th>Title</th><th>Status</th><th>Created</th></tr>`;
     for (const c of ccrs) {
@@ -212,7 +212,7 @@ router.get('/print/ccrs', requireAuth, async (req, res) => {
 // GET /api/print/complaints
 router.get('/print/complaints', requireAuth, async (req, res) => {
   try {
-    const complaints = await db.prepare('SELECT * FROM complaints ORDER BY id DESC').all();
+    const complaints = await db.all('SELECT * FROM complaints ORDER BY id DESC');
     let content = `<h2>Complaint Log — ${complaints.length} Records</h2>
     <table><tr><th>Complaint #</th><th>Date</th><th>Product</th><th>Issue Type</th><th>Lot</th><th>Status</th></tr>`;
     for (const c of complaints) {
@@ -228,10 +228,10 @@ router.get('/print/complaints', requireAuth, async (req, res) => {
 router.get('/print/audit-package', requireAuth, async (req, res) => {
   try {
     const now = new Date().toISOString().split('T')[0];
-    const capas = await db.prepare('SELECT * FROM capas ORDER BY capa_id').all();
-    const ccrs = await db.prepare('SELECT * FROM ccrs ORDER BY id').all();
-    const tests = await db.prepare('SELECT * FROM batch_tests ORDER BY test_date DESC').all();
-    const complaints = await db.prepare('SELECT * FROM complaints ORDER BY id DESC').all();
+    const capas = await db.all('SELECT * FROM capas ORDER BY capa_id');
+    const ccrs = await db.all('SELECT * FROM ccrs ORDER BY id');
+    const tests = await db.all('SELECT * FROM batch_tests ORDER BY test_date DESC');
+    const complaints = await db.all('SELECT * FROM complaints ORDER BY id DESC');
 
     let content = `<h2>SGS Audit Document Package</h2>
     <p style="margin:8px 0;color:#666;">Prepared for GMP Certification Audit — ${now}</p>
@@ -360,11 +360,11 @@ function createCAPADoc(capa, updates) {
 // GET /api/print/capa/:id/docx - Download CAPA as Word document
 router.get('/print/capa/:id/docx', requireAuth, async (req, res) => {
   try {
-    const capa = await db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
 
     let updates = [];
-    try { updates = await db.prepare('SELECT * FROM capa_updates WHERE capa_id = ? ORDER BY created_at DESC').all(capa.id); } catch(e) {}
+    try { updates = await db.all('SELECT * FROM capa_updates WHERE capa_id = ? ORDER BY created_at DESC', [capa.id]); } catch(e) {}
     
     const doc = createCAPADoc(capa, updates);
     const buffer = await Packer.toBuffer(doc);

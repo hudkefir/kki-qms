@@ -6,10 +6,10 @@ export async function logAudit(req, action, resourceType, resourceId, resourceNa
     const user = req.session?.user;
     const oldValues = details.old_values || {};
     const newValues = details.new_values || {};
-    await db.prepare(`
+    await db.run(`
       INSERT INTO audit_logs (user_id, username, action, resource_type, resource_id, resource_name, details, old_values, new_values, ip_address, user_agent, session_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `, [
       user?.id || null,
       user?.username || 'anonymous',
       action,
@@ -22,7 +22,7 @@ export async function logAudit(req, action, resourceType, resourceId, resourceNa
       req.ip || req.connection?.remoteAddress || '',
       req.get('user-agent') || '',
       req.sessionID || ''
-    );
+    ]);
   } catch (err) {
     console.error('Audit log error:', err.message);
   }

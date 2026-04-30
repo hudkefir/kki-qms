@@ -273,7 +273,7 @@ router.get('/batch-tests', requireAuth, async (req, res) => {
     query += ' ORDER BY test_date DESC, created_at DESC LIMIT ?';
     params.push(Number(limit));
 
-    const tests = await db.prepare(query).all(...params);
+    const tests = await db.all(query, params);
     res.json(tests);
   } catch (err) {
     console.error('Get batch tests error:', err);
@@ -292,10 +292,10 @@ router.get('/batch-tests/templates', requireAuth, (req, res) => {
 // GET /api/batch-tests/by-lot/:lot - find batch tests by lot/batch number
 router.get('/batch-tests/by-lot/:lot', requireAuth, async (req, res) => {
   try {
-    const tests = await db.prepare('SELECT * FROM batch_tests WHERE batch_number = ? ORDER BY test_date DESC').all(req.params.lot);
+    const tests = await db.all('SELECT * FROM batch_tests WHERE batch_number = ? ORDER BY test_date DESC', [req.params.lot]);
     const enriched = [];
     for (const t of tests) {
-      const results = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY id').all(t.id);
+      const results = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY id', [t.id]);
       enriched.push({ ...t, results });
     }
     res.json(enriched);
@@ -406,14 +406,14 @@ router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coa
       const parsed = parseCOAPdf(group.ocrText);
 
       // Find matching batch test in DB
-      const batchTest = await db.prepare('SELECT * FROM batch_tests WHERE batch_number = ?').get(lotNum);
+      const batchTest = await db.get('SELECT * FROM batch_tests WHERE batch_number = ?', [lotNum]);
 
       let matched = [];
       let attachment = null;
 
       if (batchTest) {
         // Match parsed results to existing test results
-        const existingResults = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY id').all(batchTest.id);
+        const existingResults = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY id', [batchTest.id]);
 
         for (const pr of parsed.results) {
           for (const er of existingResults) {
@@ -446,8 +446,8 @@ router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coa
         existingAttachments.push(attachment);
 
         const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-        await db.prepare('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?')
-          .run(JSON.stringify(existingAttachments), req.session.user.username, now, batchTest.id);
+        await db.run('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?',
+          [JSON.stringify(existingAttachments), req.session.user.username, now, batchTest.id]);
 
         logAudit(req, 'parse', 'batch_test_coa_multi', batchTest.id, lotNum, {
           new_values: { filename: lotPdfName, matches: matched.length, source: req.file.originalname }
@@ -484,10 +484,10 @@ router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coa
 
 router.get('/batch-tests/:id', requireAuth, async (req, res) => {
   try {
-    const test = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const test = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!test) return res.status(404).json({ error: 'Batch test not found' });
 
-    const results = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY id').all(req.params.id);
+    const results = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY id', [req.params.id]);
     res.json({ ...test, results });
   } catch (err) {
     console.error('Get batch test error:', err);
@@ -498,10 +498,10 @@ router.get('/batch-tests/:id', requireAuth, async (req, res) => {
 // GET /api/batch-tests/:id/coa - Certificate of Analysis
 router.get('/batch-tests/:id/coa', requireAuth, async (req, res) => {
   try {
-    const test = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const test = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!test) return res.status(404).json({ error: 'Batch test not found' });
 
-    const results = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY test_category, test_type, id').all(req.params.id);
+    const results = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY test_category, test_type, id', [req.params.id]);
 
     const grouped = {};
     for (const r of results) {
@@ -543,41 +543,32 @@ router.post('/batch-tests', requireAuth, requireWriteAccess, async (req, res) =>
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
-    const insertTest = db.prepare(`
+    const info = await db.run(`
       INSERT INTO batch_tests (batch_number, product_sku, product_name, test_date, tested_by, status, notes, test_profile, lab_name, lab_report_number, sample_date, report_date, created_by, updated_by, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    `, [
+      batch_number, product_sku || '', product_name || '', test_date,
+      tested_by || username, notes || '', profile, lab_name || '',
+      lab_report_number || '', sample_date || '', report_date || '',
+      username, username, now, now
+    ]);
+    const batchId = info.lastInsertRowid;
 
-    const insertResult = db.prepare(`
-      INSERT INTO batch_test_results (batch_test_id, test_type, test_name, target_value, actual_value, unit, pass_fail, notes, test_category, target_min, target_max, comments)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    const testResults = results && results.length > 0 ? results : (TEST_PROFILES[profile]?.tests || ROUTINE_TESTS);
+    for (const r of testResults) {
+      await db.run(`
+        INSERT INTO batch_test_results (batch_test_id, test_type, test_name, target_value, actual_value, unit, pass_fail, notes, test_category, target_min, target_max, comments)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        batchId, r.test_type, r.test_name, r.target_value || '', r.actual_value || '',
+        r.unit || '', r.pass_fail || 'pending', r.notes || '',
+        r.test_category || 'routine', r.target_min || '', r.target_max || '',
+        r.comments || ''
+      ]);
+    }
 
-    const createBatch = db.transaction(async () => {
-      const info = await insertTest.run(
-        batch_number, product_sku || '', product_name || '', test_date,
-        tested_by || username, notes || '', profile, lab_name || '',
-        lab_report_number || '', sample_date || '', report_date || '',
-        username, username, now, now
-      );
-      const batchId = info.lastInsertRowid;
-
-      const testResults = results && results.length > 0 ? results : (TEST_PROFILES[profile]?.tests || ROUTINE_TESTS);
-      for (const r of testResults) {
-        await insertResult.run(
-          batchId, r.test_type, r.test_name, r.target_value || '', r.actual_value || '',
-          r.unit || '', r.pass_fail || 'pending', r.notes || '',
-          r.test_category || 'routine', r.target_min || '', r.target_max || '',
-          r.comments || ''
-        );
-      }
-
-      return batchId;
-    });
-
-    const batchId = await createBatch();
-    const created = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(batchId);
-    const createdResults = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ?').all(batchId);
+    const created = await db.get('SELECT * FROM batch_tests WHERE id = ?', [batchId]);
+    const createdResults = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ?', [batchId]);
 
     logAudit(req, 'create', 'batch_test', batchId, batch_number, { new_values: { batch_number, product_sku, test_date, test_profile: profile } });
 
@@ -591,30 +582,30 @@ router.post('/batch-tests', requireAuth, requireWriteAccess, async (req, res) =>
 // PUT /api/batch-tests/:id - update batch test
 router.put('/batch-tests/:id', requireAuth, requireWriteAccess, async (req, res) => {
   try {
-    const existing = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const existing = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Batch test not found' });
 
     const { batch_number, product_sku, product_name, test_date, tested_by, status, notes, comments, lab_name, lab_report_number, sample_date, report_date } = req.body;
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
-    await db.prepare(`
+    await db.run(`
       UPDATE batch_tests SET batch_number = ?, product_sku = ?, product_name = ?, test_date = ?, tested_by = ?, status = ?, notes = ?, comments = ?,
         lab_name = ?, lab_report_number = ?, sample_date = ?, report_date = ?, updated_by = ?, updated_at = ?
       WHERE id = ?
-    `).run(
+    `, [
       batch_number || existing.batch_number, product_sku ?? existing.product_sku, product_name ?? existing.product_name,
       test_date || existing.test_date, tested_by || existing.tested_by, status || existing.status, notes ?? existing.notes,
       comments ?? existing.comments,
       lab_name ?? existing.lab_name, lab_report_number ?? existing.lab_report_number,
       sample_date ?? existing.sample_date, report_date ?? existing.report_date,
       username, now, req.params.id
-    );
+    ]);
 
     logAudit(req, 'update', 'batch_test', req.params.id, batch_number || existing.batch_number, { old_values: existing, new_values: req.body });
 
-    const updated = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
-    const results = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ?').all(req.params.id);
+    const updated = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
+    const results = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ?', [req.params.id]);
     res.json({ ...updated, results });
   } catch (err) {
     console.error('Update batch test error:', err);
@@ -625,7 +616,7 @@ router.put('/batch-tests/:id', requireAuth, requireWriteAccess, async (req, res)
 // PUT /api/batch-tests/:id/results - update test results (with comments)
 router.put('/batch-tests/:id/results', requireAuth, requireWriteAccess, async (req, res) => {
   try {
-    const existing = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const existing = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Batch test not found' });
 
     const { results } = req.body;
@@ -634,32 +625,27 @@ router.put('/batch-tests/:id/results', requireAuth, requireWriteAccess, async (r
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
-    const updateResult = db.prepare(`
-      UPDATE batch_test_results SET actual_value = ?, pass_fail = ?, notes = ?, comments = ?, target_value = ? WHERE id = ? AND batch_test_id = ?
-    `);
-
-    const updateAll = db.transaction(async () => {
-      for (const r of results) {
-        if (r.id) {
-          await updateResult.run(r.actual_value || '', r.pass_fail || 'pending', r.notes || '', r.comments || '', r.target_value || '', r.id, req.params.id);
-        }
+    for (const r of results) {
+      if (r.id) {
+        await db.run(`
+          UPDATE batch_test_results SET actual_value = ?, pass_fail = ?, notes = ?, comments = ?, target_value = ? WHERE id = ? AND batch_test_id = ?
+        `, [r.actual_value || '', r.pass_fail || 'pending', r.notes || '', r.comments || '', r.target_value || '', r.id, req.params.id]);
       }
+    }
 
-      // Auto-calculate overall status
-      const allResults = await db.prepare('SELECT pass_fail FROM batch_test_results WHERE batch_test_id = ?').all(req.params.id);
-      const hasFail = allResults.some(r => r.pass_fail === 'fail');
-      const allDone = allResults.every(r => r.pass_fail !== 'pending');
-      const currentStatus = existing.status;      const newStatus = currentStatus === 'to_be_shipped' ? 'to_be_shipped' : (hasFail ? 'fail' : (allDone ? 'pass' : 'pending'));
+    // Auto-calculate overall status
+    const allResults = await db.all('SELECT pass_fail FROM batch_test_results WHERE batch_test_id = ?', [req.params.id]);
+    const hasFail = allResults.some(r => r.pass_fail === 'fail');
+    const allDone = allResults.every(r => r.pass_fail !== 'pending');
+    const currentStatus = existing.status;
+    const newStatus = currentStatus === 'to_be_shipped' ? 'to_be_shipped' : (hasFail ? 'fail' : (allDone ? 'pass' : 'pending'));
 
-      await db.prepare('UPDATE batch_tests SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?').run(newStatus, username, now, req.params.id);
-    });
-
-    await updateAll();
+    await db.run('UPDATE batch_tests SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?', [newStatus, username, now, req.params.id]);
 
     logAudit(req, 'update', 'batch_test_results', req.params.id, existing.batch_number, { new_values: { results_count: results.length } });
 
-    const updated = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
-    const updatedResults = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ?').all(req.params.id);
+    const updated = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
+    const updatedResults = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ?', [req.params.id]);
     res.json({ ...updated, results: updatedResults });
   } catch (err) {
     console.error('Update batch test results error:', err);
@@ -670,7 +656,7 @@ router.put('/batch-tests/:id/results', requireAuth, requireWriteAccess, async (r
 // POST /api/batch-tests/:id/results - add a custom test result
 router.post('/batch-tests/:id/results', requireAuth, requireWriteAccess, async (req, res) => {
   try {
-    const test = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const test = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!test) return res.status(404).json({ error: 'Batch test not found' });
 
     const { test_type, test_name, target_value, actual_value, unit, pass_fail, notes, test_category } = req.body;
@@ -679,10 +665,10 @@ router.post('/batch-tests/:id/results', requireAuth, requireWriteAccess, async (
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
-    const info = await db.prepare(`
+    const info = await db.run(`
       INSERT INTO batch_test_results (batch_test_id, test_type, test_name, target_value, actual_value, unit, pass_fail, notes, test_category, target_min, target_max, comments)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '')
-    `).run(
+    `, [
       req.params.id,
       test_type || 'other',
       test_name,
@@ -692,13 +678,13 @@ router.post('/batch-tests/:id/results', requireAuth, requireWriteAccess, async (
       pass_fail || 'pending',
       notes || '',
       test_category || 'custom'
-    );
+    ]);
 
-    await db.prepare('UPDATE batch_tests SET updated_by = ?, updated_at = ? WHERE id = ?').run(username, now, req.params.id);
+    await db.run('UPDATE batch_tests SET updated_by = ?, updated_at = ? WHERE id = ?', [username, now, req.params.id]);
 
     logAudit(req, 'create', 'batch_test_result', req.params.id, test.batch_number, { new_values: { test_name, test_type } });
 
-    const created = await db.prepare('SELECT * FROM batch_test_results WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.get('SELECT * FROM batch_test_results WHERE id = ?', [info.lastInsertRowid]);
     res.json(created);
   } catch (err) {
     console.error('Add custom test result error:', err);
@@ -711,7 +697,7 @@ router.post('/batch-tests/:id/results', requireAuth, requireWriteAccess, async (
 // PATCH /api/batch-tests/:id/status - admin-only status override
 router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async (req, res) => {
   try {
-    const existing = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const existing = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Batch test not found' });
 
     const { status } = req.body;
@@ -723,8 +709,7 @@ router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
-    await db.prepare('UPDATE batch_tests SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?')
-      .run(status, username, now, req.params.id);
+    await db.run('UPDATE batch_tests SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?', [status, username, now, req.params.id]);
 
     logAudit(req, 'status_override', 'batch_test', req.params.id, existing.batch_number, {
       old_status: existing.status,
@@ -732,8 +717,8 @@ router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async
       overridden_by: username
     });
 
-    const updated = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
-    const results = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ?').all(req.params.id);
+    const updated = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
+    const results = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ?', [req.params.id]);
     res.json({ ...updated, results });
   } catch (err) {
     console.error('Status override error:', err);
@@ -742,24 +727,24 @@ router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async
 });
 router.delete('/batch-tests/:id/results/:resultId', requireAuth, requireWriteAccess, async (req, res) => {
   try {
-    const test = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const test = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!test) return res.status(404).json({ error: 'Batch test not found' });
 
-    const result = await db.prepare('SELECT * FROM batch_test_results WHERE id = ? AND batch_test_id = ?').get(req.params.resultId, req.params.id);
+    const result = await db.get('SELECT * FROM batch_test_results WHERE id = ? AND batch_test_id = ?', [req.params.resultId, req.params.id]);
     if (!result) return res.status(404).json({ error: 'Test result not found' });
 
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
-    await db.prepare('DELETE FROM batch_test_results WHERE id = ? AND batch_test_id = ?').run(req.params.resultId, req.params.id);
+    await db.run('DELETE FROM batch_test_results WHERE id = ? AND batch_test_id = ?', [req.params.resultId, req.params.id]);
 
     // Recalculate overall status
-    const remaining = await db.prepare('SELECT pass_fail FROM batch_test_results WHERE batch_test_id = ?').all(req.params.id);
+    const remaining = await db.all('SELECT pass_fail FROM batch_test_results WHERE batch_test_id = ?', [req.params.id]);
     if (remaining.length > 0) {
       const hasFail = remaining.some(r => r.pass_fail === 'fail');
       const allDone = remaining.every(r => r.pass_fail !== 'pending');
       const currentStatus = existing.status;      const newStatus = currentStatus === 'to_be_shipped' ? 'to_be_shipped' : (hasFail ? 'fail' : (allDone ? 'pass' : 'pending'));
-      await db.prepare('UPDATE batch_tests SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?').run(newStatus, username, now, req.params.id);
+      await db.run('UPDATE batch_tests SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?', [newStatus, username, now, req.params.id]);
     }
 
     logAudit(req, 'delete', 'batch_test_result', req.params.id, test.batch_number, { old_values: { result_id: result.id, test_name: result.test_name } });
@@ -774,7 +759,7 @@ router.delete('/batch-tests/:id/results/:resultId', requireAuth, requireWriteAcc
 // POST /api/batch-tests/:id/upload-coa - Upload COA PDF and attach to batch test
 router.post('/batch-tests/:id/upload-coa', requireAuth, requireWriteAccess, coaUpload.single('coa'), async (req, res) => {
   try {
-    const test = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const test = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!test) return res.status(404).json({ error: 'Batch test not found' });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -792,8 +777,8 @@ router.post('/batch-tests/:id/upload-coa', requireAuth, requireWriteAccess, coaU
     existing.push(attachment);
 
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    await db.prepare('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?')
-      .run(JSON.stringify(existing), req.session.user.username, now, req.params.id);
+    await db.run('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?',
+      [JSON.stringify(existing), req.session.user.username, now, req.params.id]);
 
     logAudit(req, 'upload', 'batch_test_coa', req.params.id, test.batch_number, { new_values: { filename: req.file.originalname } });
 
@@ -808,7 +793,7 @@ router.post('/batch-tests/:id/upload-coa', requireAuth, requireWriteAccess, coaU
 // POST /api/batch-tests/:id/parse-coa - Parse an uploaded COA PDF and return autofill data
 router.post('/batch-tests/:id/parse-coa', requireAuth, requireWriteAccess, coaUpload.single('coa'), async (req, res) => {
   try {
-    const test = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const test = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!test) return res.status(404).json({ error: 'Batch test not found' });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -864,8 +849,8 @@ router.post('/batch-tests/:id/parse-coa', requireAuth, requireWriteAccess, coaUp
         existingAttachments.push(attachment);
       }
       const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-      await db.prepare('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?')
-        .run(JSON.stringify(existingAttachments), req.session.user.username, now, req.params.id);
+      await db.run('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?',
+        [JSON.stringify(existingAttachments), req.session.user.username, now, req.params.id]);
 
       return res.json({
         sampleId: '',
@@ -893,10 +878,10 @@ router.post('/batch-tests/:id/parse-coa', requireAuth, requireWriteAccess, coaUp
     }
 
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    await db.prepare('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?')
-      .run(JSON.stringify(existingAttachments), req.session.user.username, now, req.params.id);
+    await db.run('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?',
+      [JSON.stringify(existingAttachments), req.session.user.username, now, req.params.id]);
 
-    const existingResults = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY id').all(req.params.id);
+    const existingResults = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY id', [req.params.id]);
 
     const matched = [];
     for (const pr of parsed.results) {
@@ -947,7 +932,7 @@ router.post('/batch-tests/:id/parse-coa', requireAuth, requireWriteAccess, coaUp
 // PATCH /api/batch-tests/:id/status - admin-only status override
 router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async (req, res) => {
   try {
-    const existing = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const existing = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Batch test not found' });
 
     const { status } = req.body;
@@ -959,8 +944,7 @@ router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
-    await db.prepare('UPDATE batch_tests SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?')
-      .run(status, username, now, req.params.id);
+    await db.run('UPDATE batch_tests SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?', [status, username, now, req.params.id]);
 
     logAudit(req, 'status_override', 'batch_test', req.params.id, existing.batch_number, {
       old_status: existing.status,
@@ -968,8 +952,8 @@ router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async
       overridden_by: username
     });
 
-    const updated = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
-    const results = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ?').all(req.params.id);
+    const updated = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
+    const results = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ?', [req.params.id]);
     res.json({ ...updated, results });
   } catch (err) {
     console.error('Status override error:', err);
@@ -978,7 +962,7 @@ router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async
 });
 router.delete('/batch-tests/:id/attachments/:index', requireAuth, requireWriteAccess, async (req, res) => {
   try {
-    const test = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const test = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!test) return res.status(404).json({ error: 'Batch test not found' });
 
     let attachments = [];
@@ -997,8 +981,8 @@ router.delete('/batch-tests/:id/attachments/:index', requireAuth, requireWriteAc
     }
 
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    await db.prepare('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?')
-      .run(JSON.stringify(attachments), req.session.user.username, now, req.params.id);
+    await db.run('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?',
+      [JSON.stringify(attachments), req.session.user.username, now, req.params.id]);
 
     logAudit(req, 'delete', 'batch_test_attachment', req.params.id, test.batch_number, { old_values: { filename: removed.name } });
 
@@ -1014,7 +998,7 @@ router.delete('/batch-tests/:id/attachments/:index', requireAuth, requireWriteAc
 // PATCH /api/batch-tests/:id/status - admin-only status override
 router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async (req, res) => {
   try {
-    const existing = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const existing = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Batch test not found' });
 
     const { status } = req.body;
@@ -1026,8 +1010,7 @@ router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
-    await db.prepare('UPDATE batch_tests SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?')
-      .run(status, username, now, req.params.id);
+    await db.run('UPDATE batch_tests SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?', [status, username, now, req.params.id]);
 
     logAudit(req, 'status_override', 'batch_test', req.params.id, existing.batch_number, {
       old_status: existing.status,
@@ -1035,8 +1018,8 @@ router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async
       overridden_by: username
     });
 
-    const updated = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
-    const results = await db.prepare('SELECT * FROM batch_test_results WHERE batch_test_id = ?').all(req.params.id);
+    const updated = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
+    const results = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ?', [req.params.id]);
     res.json({ ...updated, results });
   } catch (err) {
     console.error('Status override error:', err);
@@ -1045,11 +1028,11 @@ router.patch('/batch-tests/:id/status', requireAuth, requireRole('admin'), async
 });
 router.delete('/batch-tests/:id', requireAuth, requireWriteAccess, async (req, res) => {
   try {
-    const existing = await db.prepare('SELECT * FROM batch_tests WHERE id = ?').get(req.params.id);
+    const existing = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Batch test not found' });
 
-    await db.prepare('DELETE FROM batch_test_results WHERE batch_test_id = ?').run(req.params.id);
-    await db.prepare('DELETE FROM batch_tests WHERE id = ?').run(req.params.id);
+    await db.run('DELETE FROM batch_test_results WHERE batch_test_id = ?', [req.params.id]);
+    await db.run('DELETE FROM batch_tests WHERE id = ?', [req.params.id]);
 
     logAudit(req, 'delete', 'batch_test', req.params.id, existing.batch_number, { old_values: existing });
 

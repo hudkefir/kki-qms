@@ -54,14 +54,14 @@ await db.exec(`CREATE TABLE IF NOT EXISTS capa_attachments (
 // ──── Sequence helper ────
 async function nextId(type) {
   const year = new Date().getFullYear();
-  const row = await db.prepare('SELECT next_number FROM qms_sequence WHERE type = ? AND year = ?').get(type, year);
+  const row = await db.get('SELECT next_number FROM qms_sequence WHERE type = ? AND year = ?', [type, year]);
   let num;
   if (row) {
     num = row.next_number;
-    await db.prepare('UPDATE qms_sequence SET next_number = ? WHERE type = ? AND year = ?').run(num + 1, type, year);
+    await db.run('UPDATE qms_sequence SET next_number = ? WHERE type = ? AND year = ?', [num + 1, type, year]);
   } else {
     num = 1;
-    await db.prepare('INSERT INTO qms_sequence (type, year, next_number) VALUES (?, ?, ?)').run(type, year, 2);
+    await db.run('INSERT INTO qms_sequence (type, year, next_number) VALUES (?, ?, ?)', [type, year, 2]);
   }
   const prefixes = { change_request: 'CC', deviation: 'DEV', capa: 'CAPA' };
   return `${prefixes[type]}-${year}-${String(num).padStart(3, '0')}`;
@@ -86,12 +86,12 @@ router.get('/change-requests', async (req, res) => {
     }
 
     query += ' ORDER BY created_at DESC, id DESC';
-    const rows = await db.prepare(query).all(...params);
+    const rows = await db.all(query, params);
 
     // Enrich with CAPA counts
     const enriched = [];
     for (const r of rows) {
-      const capaRow = await db.prepare("SELECT COUNT(*) as count FROM capas WHERE source_type = 'change_request' AND source_id = ?").get(r.id);
+      const capaRow = await db.get("SELECT COUNT(*) as count FROM capas WHERE source_type = 'change_request' AND source_id = ?", [r.id]);
       enriched.push({ ...r, capaCount: capaRow.count });
     }
 
@@ -104,10 +104,10 @@ router.get('/change-requests', async (req, res) => {
 // GET /api/change-requests/:id
 router.get('/change-requests/:id', async (req, res) => {
   try {
-    const cr = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const cr = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     if (!cr) return res.status(404).json({ error: 'Change request not found' });
 
-    const capas = await db.prepare("SELECT * FROM capas WHERE source_type = 'change_request' AND source_id = ? ORDER BY id").all(cr.id);
+    const capas = await db.all("SELECT * FROM capas WHERE source_type = 'change_request' AND source_id = ? ORDER BY id", [cr.id]);
 
     res.json({
       ...cr,
@@ -136,12 +136,12 @@ router.post('/change-requests', requireWriteAccess, async (req, res) => {
 
     const request_id = await nextId('change_request');
 
-    const info = await db.prepare(`
+    const info = await db.run(`
       INSERT INTO change_requests (request_id, title, description, category, initiator, proposed_effective_date, affected_documents, training_required, is_emergency)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(request_id, title, description, category, initiator, proposed_effective_date, JSON.stringify(affected_documents), training_required ? 1 : 0, is_emergency ? 1 : 0);
+    `, [request_id, title, description, category, initiator, proposed_effective_date, JSON.stringify(affected_documents), training_required ? 1 : 0, is_emergency ? 1 : 0]);
 
-    const created = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.get('SELECT * FROM change_requests WHERE id = ?', [info.lastInsertRowid]);
     logAudit(req, 'create_change_request', 'change_requests', created.id, request_id, { new_values: { request_id, title, category, initiator } });
     broadcast('change_request_created', created);
     res.status(201).json(created);
@@ -153,7 +153,7 @@ router.post('/change-requests', requireWriteAccess, async (req, res) => {
 // PUT /api/change-requests/:id
 router.put('/change-requests/:id', requireWriteAccess, async (req, res) => {
   try {
-    const cr = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const cr = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     if (!cr) return res.status(404).json({ error: 'Change request not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -186,9 +186,9 @@ router.put('/change-requests/:id', requireWriteAccess, async (req, res) => {
     if (updates.length === 1) return res.json(cr);
 
     params.push(req.params.id);
-    await db.prepare(`UPDATE change_requests SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.run(`UPDATE change_requests SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    const updated = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     logAudit(req, 'update_change_request', 'change_requests', req.params.id, cr.request_id, { old_values: {}, new_values: sanitized });
     broadcast('change_request_updated', updated);
     res.json(updated);
@@ -200,16 +200,16 @@ router.put('/change-requests/:id', requireWriteAccess, async (req, res) => {
 // POST /api/change-requests/:id/classify
 router.post('/change-requests/:id/classify', requireWriteAccess, async (req, res) => {
   try {
-    const cr = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const cr = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     if (!cr) return res.status(404).json({ error: 'Change request not found' });
 
     const { classification, food_safety_impact } = req.body;
     if (!classification) return res.status(400).json({ error: 'classification is required' });
 
-    await db.prepare(`UPDATE change_requests SET classification = ?, food_safety_impact = ?, status = 'pending_review', updated_at = datetime('now') WHERE id = ?`)
-      .run(classification, JSON.stringify(food_safety_impact || {}), req.params.id);
+    await db.run(`UPDATE change_requests SET classification = ?, food_safety_impact = ?, status = 'pending_review', updated_at = datetime('now') WHERE id = ?`,
+      [classification, JSON.stringify(food_safety_impact || {}), req.params.id]);
 
-    const updated = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     logAudit(req, 'classify_change_request', 'change_requests', req.params.id, cr.request_id, { new_values: { classification } });
     broadcast('change_request_updated', updated);
     res.json(updated);
@@ -221,16 +221,16 @@ router.post('/change-requests/:id/classify', requireWriteAccess, async (req, res
 // POST /api/change-requests/:id/approve
 router.post('/change-requests/:id/approve', requireWriteAccess, async (req, res) => {
   try {
-    const cr = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const cr = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     if (!cr) return res.status(404).json({ error: 'Change request not found' });
 
     const sessionUser = req.session?.user;
     const approvedBy = sessionUser?.display_name || sessionUser?.username || '';
 
-    await db.prepare(`UPDATE change_requests SET status = 'approved', approved_by = ?, approved_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
-      .run(approvedBy, req.params.id);
+    await db.run(`UPDATE change_requests SET status = 'approved', approved_by = ?, approved_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+      [approvedBy, req.params.id]);
 
-    const updated = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     logAudit(req, 'approve_change_request', 'change_requests', req.params.id, cr.request_id, { new_values: { approved_by: approvedBy } });
     broadcast('change_request_updated', updated);
     res.json(updated);
@@ -242,16 +242,16 @@ router.post('/change-requests/:id/approve', requireWriteAccess, async (req, res)
 // POST /api/change-requests/:id/reject
 router.post('/change-requests/:id/reject', requireWriteAccess, async (req, res) => {
   try {
-    const cr = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const cr = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     if (!cr) return res.status(404).json({ error: 'Change request not found' });
 
     const { rejection_reason } = req.body;
     if (!rejection_reason) return res.status(400).json({ error: 'rejection_reason is required' });
 
-    await db.prepare(`UPDATE change_requests SET status = 'rejected', rejection_reason = ?, updated_at = datetime('now') WHERE id = ?`)
-      .run(rejection_reason, req.params.id);
+    await db.run(`UPDATE change_requests SET status = 'rejected', rejection_reason = ?, updated_at = datetime('now') WHERE id = ?`,
+      [rejection_reason, req.params.id]);
 
-    const updated = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     logAudit(req, 'reject_change_request', 'change_requests', req.params.id, cr.request_id, { new_values: { rejection_reason } });
     broadcast('change_request_updated', updated);
     res.json(updated);
@@ -263,7 +263,7 @@ router.post('/change-requests/:id/reject', requireWriteAccess, async (req, res) 
 // POST /api/change-requests/:id/effectiveness
 router.post('/change-requests/:id/effectiveness', requireWriteAccess, async (req, res) => {
   try {
-    const cr = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const cr = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     if (!cr) return res.status(404).json({ error: 'Change request not found' });
 
     const { effectiveness_result, effectiveness_notes } = req.body;
@@ -272,10 +272,10 @@ router.post('/change-requests/:id/effectiveness', requireWriteAccess, async (req
     const newStatus = effectiveness_result === 'effective' ? 'closed' : 'implementing';
     const closedAt = effectiveness_result === 'effective' ? "datetime('now')" : null;
 
-    await db.prepare(`UPDATE change_requests SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = datetime('now'), status = ?, closed_at = ${closedAt ? closedAt : 'closed_at'}, updated_at = datetime('now') WHERE id = ?`)
-      .run(effectiveness_result, effectiveness_notes || '', newStatus, req.params.id);
+    await db.run(`UPDATE change_requests SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = datetime('now'), status = ?, closed_at = ${closedAt ? closedAt : 'closed_at'}, updated_at = datetime('now') WHERE id = ?`,
+      [effectiveness_result, effectiveness_notes || '', newStatus, req.params.id]);
 
-    const updated = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     logAudit(req, 'effectiveness_change_request', 'change_requests', req.params.id, cr.request_id, { new_values: { effectiveness_result } });
     broadcast('change_request_updated', updated);
     res.json(updated);
@@ -288,15 +288,15 @@ router.post('/change-requests/:id/effectiveness', requireWriteAccess, async (req
 // DELETE /api/change-requests/:id (admin only, draft status only)
 router.delete('/change-requests/:id', requireRole('admin'), async (req, res) => {
   try {
-    const cr = await db.prepare('SELECT * FROM change_requests WHERE id = ?').get(req.params.id);
+    const cr = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     if (!cr) return res.status(404).json({ error: 'Change request not found' });
 
     if (cr.status !== 'draft') {
       return res.status(400).json({ error: 'Only draft change requests can be deleted' });
     }
 
-    await db.prepare("DELETE FROM capas WHERE source_type = 'change_request' AND source_id = ?").run(cr.id);
-    await db.prepare('DELETE FROM change_requests WHERE id = ?').run(cr.id);
+    await db.run("DELETE FROM capas WHERE source_type = 'change_request' AND source_id = ?", [cr.id]);
+    await db.run('DELETE FROM change_requests WHERE id = ?', [cr.id]);
 
     logAudit(req, 'delete_change_request', 'change_requests', cr.id, cr.request_id, { old_values: cr });
     broadcast('change_request_deleted', { id: cr.id, request_id: cr.request_id });
@@ -326,11 +326,11 @@ router.get('/deviations', async (req, res) => {
     }
 
     query += ' ORDER BY created_at DESC, id DESC';
-    const rows = await db.prepare(query).all(...params);
+    const rows = await db.all(query, params);
 
     const enriched = [];
     for (const r of rows) {
-      const capaRow = await db.prepare("SELECT COUNT(*) as count FROM capas WHERE source_type = 'deviation' AND source_id = ?").get(r.id);
+      const capaRow = await db.get("SELECT COUNT(*) as count FROM capas WHERE source_type = 'deviation' AND source_id = ?", [r.id]);
       enriched.push({ ...r, capaCount: capaRow.count });
     }
 
@@ -343,25 +343,25 @@ router.get('/deviations', async (req, res) => {
 // GET /api/deviations/:id
 router.get('/deviations/:id', async (req, res) => {
   try {
-    const dev = await db.prepare('SELECT * FROM deviation_reports WHERE id = ?').get(req.params.id);
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     if (!dev) return res.status(404).json({ error: 'Deviation not found' });
 
-    const capas = await db.prepare("SELECT * FROM capas WHERE source_type = 'deviation' AND source_id = ? ORDER BY id").all(dev.id);
+    const capas = await db.all("SELECT * FROM capas WHERE source_type = 'deviation' AND source_id = ? ORDER BY id", [dev.id]);
 
     // Parse linked IDs and fetch full records
     const linkedComplaintIds = JSON.parse(dev.linked_complaints_json || '[]');
     const linkedComplaints = linkedComplaintIds.length > 0
-      ? await db.prepare(`SELECT id, complaint_number, reporter, issue_type, date_received, status FROM complaints WHERE id IN (${linkedComplaintIds.map(() => '?').join(',')})`).all(...linkedComplaintIds)
+      ? await db.all(`SELECT id, complaint_number, reporter, issue_type, date_received, status FROM complaints WHERE id IN (${linkedComplaintIds.map(() => '?').join(',')})`, linkedComplaintIds)
       : [];
 
     const linkedSopIds = JSON.parse(dev.linked_sops_json || '[]');
     const linkedSops = linkedSopIds.length > 0
-      ? await db.prepare(`SELECT id, sop_number, title, status FROM sops WHERE id IN (${linkedSopIds.map(() => '?').join(',')})`).all(...linkedSopIds)
+      ? await db.all(`SELECT id, sop_number, title, status FROM sops WHERE id IN (${linkedSopIds.map(() => '?').join(',')})`, linkedSopIds)
       : [];
 
     const linkedBatchTestIds = JSON.parse(dev.linked_batch_tests_json || '[]');
     const linkedBatchTests = linkedBatchTestIds.length > 0
-      ? await db.prepare(`SELECT id, batch_number, test_date, status FROM batch_tests WHERE id IN (${linkedBatchTestIds.map(() => '?').join(',')})`).all(...linkedBatchTestIds)
+      ? await db.all(`SELECT id, batch_number, test_date, status FROM batch_tests WHERE id IN (${linkedBatchTestIds.map(() => '?').join(',')})`, linkedBatchTestIds)
       : [];
 
     res.json({
@@ -399,12 +399,12 @@ router.post('/deviations', requireWriteAccess, async (req, res) => {
 
     const report_id = await nextId('deviation');
 
-    const info = await db.prepare(`
+    const info = await db.run(`
       INSERT INTO deviation_reports (report_id, title, description, category, discovered_by, discovered_at, location, immediate_action, is_ccp_deviation, process_stopped, product_on_hold, affected_batches, affected_products, investigation_due_date)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(report_id, title, description, category, discovered_by, discovered_at, location, immediate_action, is_ccp_deviation ? 1 : 0, process_stopped ? 1 : 0, product_on_hold ? 1 : 0, JSON.stringify(affected_batches), JSON.stringify(affected_products), investigation_due_date);
+    `, [report_id, title, description, category, discovered_by, discovered_at, location, immediate_action, is_ccp_deviation ? 1 : 0, process_stopped ? 1 : 0, product_on_hold ? 1 : 0, JSON.stringify(affected_batches), JSON.stringify(affected_products), investigation_due_date]);
 
-    const created = await db.prepare('SELECT * FROM deviation_reports WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [info.lastInsertRowid]);
     logAudit(req, 'create_deviation', 'deviation_reports', created.id, report_id, { new_values: { report_id, title, category, discovered_by } });
     broadcast('deviation_created', created);
     res.status(201).json(created);
@@ -416,7 +416,7 @@ router.post('/deviations', requireWriteAccess, async (req, res) => {
 // PUT /api/deviations/:id
 router.put('/deviations/:id', requireWriteAccess, async (req, res) => {
   try {
-    const dev = await db.prepare('SELECT * FROM deviation_reports WHERE id = ?').get(req.params.id);
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     if (!dev) return res.status(404).json({ error: 'Deviation not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -450,9 +450,9 @@ router.put('/deviations/:id', requireWriteAccess, async (req, res) => {
     if (updates.length === 1) return res.json(dev);
 
     params.push(req.params.id);
-    await db.prepare(`UPDATE deviation_reports SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.run(`UPDATE deviation_reports SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    const updated = await db.prepare('SELECT * FROM deviation_reports WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     // Build old_values from fields that changed
     const old_values = {};
     for (const field of fields) {
@@ -471,9 +471,9 @@ router.put('/deviations/:id', requireWriteAccess, async (req, res) => {
 // DELETE /api/deviations/:id
 router.delete('/deviations/:id', requireRole('admin'), async (req, res) => {
   try {
-    const dev = await db.prepare('SELECT * FROM deviation_reports WHERE id = ?').get(req.params.id);
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     if (!dev) return res.status(404).json({ error: 'Deviation not found' });
-    await db.prepare('DELETE FROM deviation_reports WHERE id = ?').run(req.params.id);
+    await db.run('DELETE FROM deviation_reports WHERE id = ?', [req.params.id]);
     logAudit(req, 'delete_deviation', 'deviation_reports', req.params.id, dev.report_id, { deleted: dev.title });
     broadcast('deviation_deleted', { id: req.params.id });
     res.json({ success: true });
@@ -485,16 +485,16 @@ router.delete('/deviations/:id', requireRole('admin'), async (req, res) => {
 // POST /api/deviations/:id/classify
 router.post('/deviations/:id/classify', requireWriteAccess, async (req, res) => {
   try {
-    const dev = await db.prepare('SELECT * FROM deviation_reports WHERE id = ?').get(req.params.id);
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     if (!dev) return res.status(404).json({ error: 'Deviation not found' });
 
     const { classification } = req.body;
     if (!classification) return res.status(400).json({ error: 'classification is required' });
 
-    await db.prepare(`UPDATE deviation_reports SET classification = ?, status = 'under_investigation', updated_at = datetime('now') WHERE id = ?`)
-      .run(classification, req.params.id);
+    await db.run(`UPDATE deviation_reports SET classification = ?, status = 'under_investigation', updated_at = datetime('now') WHERE id = ?`,
+      [classification, req.params.id]);
 
-    const updated = await db.prepare('SELECT * FROM deviation_reports WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     logAudit(req, 'classify_deviation', 'deviation_reports', req.params.id, dev.report_id, { new_values: { classification } });
     broadcast('deviation_updated', updated);
     res.json(updated);
@@ -504,17 +504,17 @@ router.post('/deviations/:id/classify', requireWriteAccess, async (req, res) => 
 });
 
 // POST /api/deviations/:id/investigate
-router.post('/deviations/:id/investigate', requireWriteAccess, (req, res) => {
+router.post('/deviations/:id/investigate', requireWriteAccess, async (req, res) => {
   try {
-    const dev = db.prepare('SELECT * FROM deviation_reports WHERE id = ?').get(req.params.id);
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     if (!dev) return res.status(404).json({ error: 'Deviation not found' });
 
     const { root_cause_method, root_cause, scope_assessment } = req.body;
 
-    db.prepare(`UPDATE deviation_reports SET root_cause_method = ?, root_cause = ?, scope_assessment = ?, updated_at = datetime('now') WHERE id = ?`)
-      .run(root_cause_method || null, root_cause || '', scope_assessment || '', req.params.id);
+    await db.run(`UPDATE deviation_reports SET root_cause_method = ?, root_cause = ?, scope_assessment = ?, updated_at = datetime('now') WHERE id = ?`,
+      [root_cause_method || null, root_cause || '', scope_assessment || '', req.params.id]);
 
-    const updated = db.prepare('SELECT * FROM deviation_reports WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     logAudit(req, 'investigate_deviation', 'deviation_reports', req.params.id, dev.report_id, { new_values: { root_cause_method, root_cause } });
     broadcast('deviation_updated', updated);
     res.json(updated);
@@ -524,18 +524,18 @@ router.post('/deviations/:id/investigate', requireWriteAccess, (req, res) => {
 });
 
 // POST /api/deviations/:id/disposition
-router.post('/deviations/:id/disposition', requireWriteAccess, (req, res) => {
+router.post('/deviations/:id/disposition', requireWriteAccess, async (req, res) => {
   try {
-    const dev = db.prepare('SELECT * FROM deviation_reports WHERE id = ?').get(req.params.id);
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     if (!dev) return res.status(404).json({ error: 'Deviation not found' });
 
     const { product_disposition, disposition_rationale } = req.body;
     if (!product_disposition) return res.status(400).json({ error: 'product_disposition is required' });
 
-    db.prepare(`UPDATE deviation_reports SET product_disposition = ?, disposition_rationale = ?, updated_at = datetime('now') WHERE id = ?`)
-      .run(product_disposition, disposition_rationale || '', req.params.id);
+    await db.run(`UPDATE deviation_reports SET product_disposition = ?, disposition_rationale = ?, updated_at = datetime('now') WHERE id = ?`,
+      [product_disposition, disposition_rationale || '', req.params.id]);
 
-    const updated = db.prepare('SELECT * FROM deviation_reports WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     logAudit(req, 'disposition_deviation', 'deviation_reports', req.params.id, dev.report_id, { new_values: { product_disposition } });
     broadcast('deviation_updated', updated);
     res.json(updated);
@@ -547,7 +547,7 @@ router.post('/deviations/:id/disposition', requireWriteAccess, (req, res) => {
 // ==================== CAPAs ====================
 
 // GET /api/capas
-router.get('/capas', (req, res) => {
+router.get('/capas', async (req, res) => {
   try {
     const { status, source_type, overdue, search } = req.query;
     let query = 'SELECT * FROM capas WHERE 1=1';
@@ -565,21 +565,22 @@ router.get('/capas', (req, res) => {
     }
 
     query += ' ORDER BY created_at DESC, id DESC';
-    const rows = db.prepare(query).all(...params);
+    const rows = await db.all(query, params);
 
     // Enrich with source reference
-    const enriched = rows.map(r => {
+    const enriched = [];
+    for (const r of rows) {
       let source_ref = '';
       if (r.source_type === 'change_request') {
-        const cr = db.prepare('SELECT request_id, title FROM change_requests WHERE id = ?').get(r.source_id);
+        const cr = await db.get('SELECT request_id, title FROM change_requests WHERE id = ?', [r.source_id]);
         source_ref = cr ? cr.request_id : '';
       } else if (r.source_type === 'deviation') {
-        const dev = db.prepare('SELECT report_id, title FROM deviation_reports WHERE id = ?').get(r.source_id);
+        const dev = await db.get('SELECT report_id, title FROM deviation_reports WHERE id = ?', [r.source_id]);
         source_ref = dev ? dev.report_id : '';
       }
       const isOverdue = !['completed', 'closed'].includes(r.status) && r.target_date && new Date(r.target_date) < new Date();
-      return { ...r, source_ref, isOverdue };
-    });
+      enriched.push({ ...r, source_ref, isOverdue });
+    }
 
     res.json(enriched);
   } catch (err) {
@@ -588,13 +589,13 @@ router.get('/capas', (req, res) => {
 });
 
 // GET /api/capas/:id
-router.get('/capas/:id', (req, res) => {
+router.get('/capas/:id', async (req, res) => {
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
 
     // Get activity log
-    capa.updates = db.prepare('SELECT * FROM capa_updates WHERE capa_id = ? ORDER BY created_at DESC').all(capa.id);
+    capa.updates = await db.all('SELECT * FROM capa_updates WHERE capa_id = ? ORDER BY created_at DESC', [capa.id]);
 
     // Get linked batch tests
     let linkedTests = [];
@@ -602,7 +603,7 @@ router.get('/capas/:id', (req, res) => {
       const testIds = JSON.parse(capa.linked_batch_tests || '[]');
       if (testIds.length > 0) {
         const placeholders = testIds.map(() => '?').join(',');
-        linkedTests = db.prepare(`SELECT id, batch_number, product_name, test_date, status, linked_retest_of, retest_reason FROM batch_tests WHERE batch_number IN (${placeholders})`).all(...testIds);
+        linkedTests = await db.all(`SELECT id, batch_number, product_name, test_date, status, linked_retest_of, retest_reason FROM batch_tests WHERE batch_number IN (${placeholders})`, testIds);
       }
     } catch(e) {}
     capa.linked_tests = linkedTests;
@@ -611,7 +612,7 @@ router.get('/capas/:id', (req, res) => {
     let linkedComplaints = [];
     try {
       if (capa.source_type === 'change_request' && capa.source_id) {
-        linkedComplaints = db.prepare('SELECT c.* FROM complaints c JOIN ccr_complaints cc ON c.id = cc.complaint_id JOIN ccrs ccr ON cc.ccr_id = ccr.id WHERE ccr.change_request_id = ?').all(capa.source_id);
+        linkedComplaints = await db.all('SELECT c.* FROM complaints c JOIN ccr_complaints cc ON c.id = cc.complaint_id JOIN ccrs ccr ON cc.ccr_id = ccr.id WHERE ccr.change_request_id = ?', [capa.source_id]);
       }
     } catch(e) {}
     // Also get directly linked complaints
@@ -619,7 +620,7 @@ router.get('/capas/:id', (req, res) => {
       const directIds = JSON.parse(capa.linked_complaints_json || '[]');
       if (directIds.length > 0) {
         const placeholders = directIds.map(() => '?').join(',');
-        const directComplaints = db.prepare('SELECT * FROM complaints WHERE id IN (' + placeholders + ')').all(...directIds);
+        const directComplaints = await db.all('SELECT * FROM complaints WHERE id IN (' + placeholders + ')', directIds);
         // Merge without duplicates
         const existingIds = new Set(linkedComplaints.map(c => c.id));
         for (const dc of directComplaints) {
@@ -636,7 +637,7 @@ router.get('/capas/:id', (req, res) => {
   }
 });
 
-router.post('/capas', requireWriteAccess, (req, res) => {
+router.post('/capas', requireWriteAccess, async (req, res) => {
   try {
     const sanitized = sanitizeBody(req.body);
     const {
@@ -652,23 +653,23 @@ router.post('/capas', requireWriteAccess, (req, res) => {
       return res.status(400).json({ error: 'responsible_person and target_date are required' });
     }
 
-    const capa_id = nextId('capa');
+    const capa_id = await nextId('capa');
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-    const info = db.prepare(`
+    const info = await db.run(`
       INSERT INTO capas (capa_id, source_type, source_id, corrective_action, preventive_action,
         responsible_person, target_date, linked_change_request_id,
         title, description, classification, root_cause_analysis, risk_assessment,
         investigation_details, verification_method, priority, initiated_by, department, category,
         linked_complaints_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(capa_id, source_type, source_id, corrective_action, preventive_action,
+    `, [capa_id, source_type, source_id, corrective_action, preventive_action,
       responsible_person, target_date, linked_change_request_id,
       title, description, classification, root_cause_analysis, risk_assessment,
       investigation_details, verification_method, priority, initiated_by, department, category,
-      linked_complaints_json, now, now);
+      linked_complaints_json, now, now]);
 
-    const created = db.prepare('SELECT * FROM capas WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.get('SELECT * FROM capas WHERE id = ?', [info.lastInsertRowid]);
     logAudit(req, 'create_capa', 'capas', created.id, capa_id, { new_values: { capa_id, title, source_type, source_id, responsible_person } });
     broadcast('capa_created', created);
     res.status(201).json(created);
@@ -679,9 +680,9 @@ router.post('/capas', requireWriteAccess, (req, res) => {
 
 // PUT /api/capas/:id
 // DEBUG LOG
-router.put('/capas/:id', requireContentAccess, (req, res) => { console.log('[CAPA PUT] id=' + req.params.id + ' body=' + JSON.stringify(req.body));
+router.put('/capas/:id', requireContentAccess, async (req, res) => { console.log('[CAPA PUT] id=' + req.params.id + ' body=' + JSON.stringify(req.body));
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -715,9 +716,9 @@ router.put('/capas/:id', requireContentAccess, (req, res) => { console.log('[CAP
     if (updates.length === 1) return res.json(capa);
 
     params.push(req.params.id);
-    db.prepare(`UPDATE capas SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.run(`UPDATE capas SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    const updated = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     logAudit(req, 'update_capa', 'capas', req.params.id, capa.capa_id, { old_values: {}, new_values: sanitized });
     broadcast('capa_updated', updated);
     res.json(updated);
@@ -728,32 +729,31 @@ router.put('/capas/:id', requireContentAccess, (req, res) => { console.log('[CAP
 
 // POST /api/capas/:id/effectiveness
 // POST /capas/:id/updates - Add an update/note to a CAPA
-router.post('/capas/:id/updates', requireContentAccess, (req, res) => {
+router.post('/capas/:id/updates', requireContentAccess, async (req, res) => {
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
     const { content, update_type } = req.body;
     if (!content) return res.status(400).json({ error: 'Content is required' });
-    const result = db.prepare('INSERT INTO capa_updates (capa_id, update_type, content, created_by) VALUES (?, ?, ?, ?)').run(
-      capa.id, update_type || 'note', content, req.session.user.username
-    );
-    const update = db.prepare('SELECT * FROM capa_updates WHERE id = ?').get(result.lastInsertRowid);
-    db.prepare("UPDATE capas SET updated_at = datetime('now') WHERE id = ?").run(capa.id);
+    const result = await db.run('INSERT INTO capa_updates (capa_id, update_type, content, created_by) VALUES (?, ?, ?, ?)',
+      [capa.id, update_type || 'note', content, req.session.user.username]);
+    const update = await db.get('SELECT * FROM capa_updates WHERE id = ?', [result.lastInsertRowid]);
+    await db.run("UPDATE capas SET updated_at = datetime('now') WHERE id = ?", [capa.id]);
     res.json(update);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // GET /capas/:id/suggest-links - AI-suggest related batches and complaints
-router.get('/capas/:id/suggest-links', (req, res) => {
+router.get('/capas/:id/suggest-links', async (req, res) => {
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
-    
+
     // Extract keywords from CAPA text
     const capaText = (capa.corrective_action + ' ' + capa.preventive_action + ' ' + (capa.effectiveness_notes || '')).toLowerCase();
-    
+
     // Find matching batch tests by keyword overlap
-    const allBatches = db.prepare('SELECT id, batch_number, product_name, test_date, status, notes FROM batch_tests ORDER BY test_date DESC LIMIT 100').all();
+    const allBatches = await db.all('SELECT id, batch_number, product_name, test_date, status, notes FROM batch_tests ORDER BY test_date DESC LIMIT 100');
     const suggestedBatchIds = [];
     
     for (const bt of allBatches) {
@@ -779,7 +779,7 @@ router.get('/capas/:id/suggest-links', (req, res) => {
     }
     
     // Find matching complaints
-    const allComplaints = db.prepare('SELECT id, complaint_number, issue_type, product_name, description, status FROM complaints ORDER BY id DESC LIMIT 100').all();
+    const allComplaints = await db.all('SELECT id, complaint_number, issue_type, product_name, description, status FROM complaints ORDER BY id DESC LIMIT 100');
     const suggestedComplaintIds = [];
     
     for (const c of allComplaints) {
@@ -818,31 +818,31 @@ router.get('/capas/:id/suggest-links', (req, res) => {
 });
 
 // PUT /capas/:id/link-complaint - Link a complaint to a CAPA
-router.put('/capas/:id/link-complaint', requireWriteAccess, (req, res) => {
+router.put('/capas/:id/link-complaint', requireWriteAccess, async (req, res) => {
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
     const { complaint_id } = req.body;
     if (!complaint_id) return res.status(400).json({ error: 'complaint_id required' });
-    
+
     // Store in a linking table or JSON field
     let linked = [];
     try { linked = JSON.parse(capa.linked_complaints_json || '[]'); } catch(e) {}
     if (!linked.includes(Number(complaint_id))) linked.push(Number(complaint_id));
-    db.prepare("UPDATE capas SET linked_complaints_json = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(linked), capa.id);
+    await db.run("UPDATE capas SET linked_complaints_json = ?, updated_at = datetime('now') WHERE id = ?", [JSON.stringify(linked), capa.id]);
     
     res.json({ success: true, linked_complaints: linked });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // DELETE /api/capas/:id (admin only)
-router.delete('/capas/:id', requireRole('admin'), (req, res) => {
+router.delete('/capas/:id', requireRole('admin'), async (req, res) => {
   try {
     const paramId = parseInt(req.params.id);
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(paramId);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [paramId]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
-    db.prepare('DELETE FROM capa_updates WHERE capa_id = ?').run(paramId);
-    db.prepare('DELETE FROM capas WHERE id = ?').run(paramId);
+    await db.run('DELETE FROM capa_updates WHERE capa_id = ?', [paramId]);
+    await db.run('DELETE FROM capas WHERE id = ?', [paramId]);
     logAudit(req, 'delete_capa', 'capas', paramId, capa.capa_id, { old_values: capa });
     broadcast('capa_deleted', { id: paramId });
     res.json({ success: true });
@@ -853,58 +853,58 @@ router.delete('/capas/:id', requireRole('admin'), (req, res) => {
 });
 
 // DELETE /capas/:id/link-complaint/:complaintId - Unlink a complaint
-router.delete('/capas/:id/link-complaint/:complaintId', requireWriteAccess, (req, res) => {
+router.delete('/capas/:id/link-complaint/:complaintId', requireWriteAccess, async (req, res) => {
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
     let linked = [];
     try { linked = JSON.parse(capa.linked_complaints_json || '[]'); } catch(e) {}
     linked = linked.filter(id => id !== Number(req.params.complaintId));
-    db.prepare("UPDATE capas SET linked_complaints_json = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(linked), capa.id);
+    await db.run("UPDATE capas SET linked_complaints_json = ?, updated_at = datetime('now') WHERE id = ?", [JSON.stringify(linked), capa.id]);
     res.json({ success: true, linked_complaints: linked });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // GET /capas/:id/available-complaints - Get complaints available to link
-router.get('/capas/:id/available-complaints', (req, res) => {
+router.get('/capas/:id/available-complaints', async (req, res) => {
   try {
-    const complaints = db.prepare('SELECT id, complaint_number, issue_type, product_name, status, date_received FROM complaints ORDER BY id DESC LIMIT 50').all();
+    const complaints = await db.all('SELECT id, complaint_number, issue_type, product_name, status, date_received FROM complaints ORDER BY id DESC LIMIT 50');
     res.json(complaints);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // GET /capas/:id/available-batches - Get batch tests available to link
-router.get('/capas/:id/available-batches', (req, res) => {
+router.get('/capas/:id/available-batches', async (req, res) => {
   try {
-    const batches = db.prepare('SELECT id, batch_number, product_name, test_date, status FROM batch_tests ORDER BY test_date DESC LIMIT 50').all();
+    const batches = await db.all('SELECT id, batch_number, product_name, test_date, status FROM batch_tests ORDER BY test_date DESC LIMIT 50');
     res.json(batches);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // PUT /capas/:id/link-batch - Link a batch test to a CAPA
-router.put('/capas/:id/link-batch', requireWriteAccess, (req, res) => {
+router.put('/capas/:id/link-batch', requireWriteAccess, async (req, res) => {
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
     const { batch_id, batch_number } = req.body;
-    
+
     // Support both batch_id (number) and batch_number (string)
     let batchRef = batch_number;
     if (batch_id && !batch_number) {
-      const batch = db.prepare('SELECT batch_number FROM batch_tests WHERE id = ?').get(batch_id);
+      const batch = await db.get('SELECT batch_number FROM batch_tests WHERE id = ?', [batch_id]);
       batchRef = batch ? batch.batch_number : String(batch_id);
     }
-    
+
     let linked = [];
     try { linked = JSON.parse(capa.linked_batch_tests || '[]'); } catch(e) {}
     if (!linked.includes(batchRef)) linked.push(batchRef);
-    db.prepare("UPDATE capas SET linked_batch_tests = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(linked), capa.id);
-    
+    await db.run("UPDATE capas SET linked_batch_tests = ?, updated_at = datetime('now') WHERE id = ?", [JSON.stringify(linked), capa.id]);
+
     // Also update the batch test record
     if (batch_id) {
-      db.prepare('UPDATE batch_tests SET linked_capa_id = ? WHERE id = ?').run(capa.capa_id, batch_id);
+      await db.run('UPDATE batch_tests SET linked_capa_id = ? WHERE id = ?', [capa.capa_id, batch_id]);
     } else if (batchRef) {
-      db.prepare('UPDATE batch_tests SET linked_capa_id = ? WHERE batch_number = ?').run(capa.capa_id, batchRef);
+      await db.run('UPDATE batch_tests SET linked_capa_id = ? WHERE batch_number = ?', [capa.capa_id, batchRef]);
     }
     
     logAudit(req, 'link_batch_to_capa', 'capas', capa.id, capa.capa_id, { batch_id, batch_number: batchRef });
@@ -912,9 +912,9 @@ router.put('/capas/:id/link-batch', requireWriteAccess, (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
 
-router.post('/capas/:id/effectiveness', requireWriteAccess, (req, res) => {
+router.post('/capas/:id/effectiveness', requireWriteAccess, async (req, res) => {
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
 
     const { effectiveness_result, effectiveness_notes } = req.body;
@@ -922,10 +922,10 @@ router.post('/capas/:id/effectiveness', requireWriteAccess, (req, res) => {
 
     const newStatus = effectiveness_result === 'effective' ? 'closed' : 'in_progress';
 
-    db.prepare(`UPDATE capas SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = datetime('now'), status = ?, updated_at = datetime('now') WHERE id = ?`)
-      .run(effectiveness_result, effectiveness_notes || '', newStatus, req.params.id);
+    await db.run(`UPDATE capas SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = datetime('now'), status = ?, updated_at = datetime('now') WHERE id = ?`,
+      [effectiveness_result, effectiveness_notes || '', newStatus, req.params.id]);
 
-    const updated = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const updated = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     logAudit(req, 'effectiveness_capa', 'capas', req.params.id, capa.capa_id, { new_values: { effectiveness_result } });
     broadcast('capa_updated', updated);
     res.json(updated);
@@ -938,34 +938,34 @@ router.post('/capas/:id/effectiveness', requireWriteAccess, (req, res) => {
 // ==================== CAPA SECTION COMMENTS ====================
 
 // GET /capas/:id/comments - Get all comments for a CAPA (optionally filtered by section)
-router.get('/capas/:id/comments', (req, res) => {
+router.get('/capas/:id/comments', async (req, res) => {
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
 
     const { section } = req.query;
     let comments;
     if (section) {
-      comments = db.prepare('SELECT * FROM capa_comments WHERE capa_id = ? AND section = ? ORDER BY created_at ASC').all(req.params.id, section);
+      comments = await db.all('SELECT * FROM capa_comments WHERE capa_id = ? AND section = ? ORDER BY created_at ASC', [req.params.id, section]);
     } else {
-      comments = db.prepare('SELECT * FROM capa_comments WHERE capa_id = ? ORDER BY created_at ASC').all(req.params.id);
+      comments = await db.all('SELECT * FROM capa_comments WHERE capa_id = ? ORDER BY created_at ASC', [req.params.id]);
     }
     res.json(comments);
   } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
 
 // POST /capas/:id/comments - Add a section comment
-router.post('/capas/:id/comments', requireContentAccess, (req, res) => {
+router.post('/capas/:id/comments', requireContentAccess, async (req, res) => {
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
 
     const { section, comment } = req.body;
     if (!section || !comment) return res.status(400).json({ error: 'section and comment are required' });
 
     const author = req.session?.user?.display_name || req.session?.user?.username || 'Unknown';
-    const result = db.prepare('INSERT INTO capa_comments (capa_id, section, author, comment) VALUES (?, ?, ?, ?)').run(req.params.id, section, author, comment);
-    const newComment = db.prepare('SELECT * FROM capa_comments WHERE id = ?').get(result.lastInsertRowid);
+    const result = await db.run('INSERT INTO capa_comments (capa_id, section, author, comment) VALUES (?, ?, ?, ?)', [req.params.id, section, author, comment]);
+    const newComment = await db.get('SELECT * FROM capa_comments WHERE id = ?', [result.lastInsertRowid]);
 
     logAudit(req, 'add_capa_comment', 'capa_comments', newComment.id, capa.capa_id, { section, comment: comment.substring(0, 100) });
     res.status(201).json(newComment);
@@ -975,28 +975,28 @@ router.post('/capas/:id/comments', requireContentAccess, (req, res) => {
 // ==================== CAPA ATTACHMENTS ====================
 
 // GET /capas/:id/attachments - List all attachments for a CAPA
-router.get('/capas/:id/attachments', (req, res) => {
+router.get('/capas/:id/attachments', async (req, res) => {
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
 
-    const attachments = db.prepare('SELECT * FROM capa_attachments WHERE capa_id = ? ORDER BY created_at DESC').all(req.params.id);
+    const attachments = await db.all('SELECT * FROM capa_attachments WHERE capa_id = ? ORDER BY created_at DESC', [req.params.id]);
     res.json(attachments);
   } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
 
 // POST /capas/:id/attachments - Upload a file attachment
-router.post('/capas/:id/attachments', requireContentAccess, capaUpload.single('file'), (req, res) => {
+router.post('/capas/:id/attachments', requireContentAccess, capaUpload.single('file'), async (req, res) => {
   try {
-    const capa = db.prepare('SELECT * FROM capas WHERE id = ?').get(req.params.id);
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const uploader = req.session?.user?.display_name || req.session?.user?.username || 'Unknown';
-    const result = db.prepare('INSERT INTO capa_attachments (capa_id, filename, original_name, file_size, mime_type, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(req.params.id, req.file.filename, req.file.originalname, req.file.size, req.file.mimetype, uploader);
+    const result = await db.run('INSERT INTO capa_attachments (capa_id, filename, original_name, file_size, mime_type, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)',
+      [req.params.id, req.file.filename, req.file.originalname, req.file.size, req.file.mimetype, uploader]);
 
-    const attachment = db.prepare('SELECT * FROM capa_attachments WHERE id = ?').get(result.lastInsertRowid);
+    const attachment = await db.get('SELECT * FROM capa_attachments WHERE id = ?', [result.lastInsertRowid]);
     logAudit(req, 'upload_capa_attachment', 'capa_attachments', attachment.id, capa.capa_id, { filename: req.file.originalname });
     res.status(201).json(attachment);
   } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
@@ -1005,10 +1005,10 @@ router.post('/capas/:id/attachments', requireContentAccess, capaUpload.single('f
 // DELETE /capas/:id/attachments/:attachmentId - Delete an attachment (admin only)
 router.delete('/capas/:id/attachments/:attachmentId', requireRole('admin'), async (req, res) => {
   try {
-    const attachment = db.prepare('SELECT * FROM capa_attachments WHERE id = ? AND capa_id = ?').get(req.params.attachmentId, req.params.id);
+    const attachment = await db.get('SELECT * FROM capa_attachments WHERE id = ? AND capa_id = ?', [req.params.attachmentId, req.params.id]);
     if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
 
-    db.prepare('DELETE FROM capa_attachments WHERE id = ?').run(req.params.attachmentId);
+    await db.run('DELETE FROM capa_attachments WHERE id = ?', [req.params.attachmentId]);
     // Try to delete the physical file
     try {
       const { unlinkSync } = await import('fs');
@@ -1024,21 +1024,21 @@ router.delete('/capas/:id/attachments/:attachmentId', requireRole('admin'), asyn
 // ==================== DASHBOARD ====================
 
 // GET /api/change-control/dashboard
-router.get('/change-control/dashboard', (req, res) => {
+router.get('/change-control/dashboard', async (req, res) => {
   try {
-    const openCCs = db.prepare("SELECT COUNT(*) as count FROM change_requests WHERE status NOT IN ('closed','rejected')").get().count;
-    const openDEVs = db.prepare("SELECT COUNT(*) as count FROM deviation_reports WHERE status != 'closed'").get().count;
-    const overdueCAPAs = db.prepare("SELECT COUNT(*) as count FROM capas WHERE status NOT IN ('completed','closed') AND target_date < date('now')").get().count;
+    const openCCs = (await db.get("SELECT COUNT(*) as count FROM change_requests WHERE status NOT IN ('closed','rejected')")).count;
+    const openDEVs = (await db.get("SELECT COUNT(*) as count FROM deviation_reports WHERE status != 'closed'")).count;
+    const overdueCAPAs = (await db.get("SELECT COUNT(*) as count FROM capas WHERE status NOT IN ('completed','closed') AND target_date < date('now')")).count;
 
     const countsByClassification = {
-      change_requests: db.prepare("SELECT classification, COUNT(*) as count FROM change_requests WHERE classification IS NOT NULL GROUP BY classification").all(),
-      deviations: db.prepare("SELECT classification, COUNT(*) as count FROM deviation_reports WHERE classification IS NOT NULL GROUP BY classification").all(),
+      change_requests: await db.all("SELECT classification, COUNT(*) as count FROM change_requests WHERE classification IS NOT NULL GROUP BY classification"),
+      deviations: await db.all("SELECT classification, COUNT(*) as count FROM deviation_reports WHERE classification IS NOT NULL GROUP BY classification"),
     };
 
     const recentActivity = [
-      ...db.prepare("SELECT id, request_id as ref_id, title, 'change_request' as type, status, created_at FROM change_requests ORDER BY created_at DESC LIMIT 5").all(),
-      ...db.prepare("SELECT id, report_id as ref_id, title, 'deviation' as type, status, created_at FROM deviation_reports ORDER BY created_at DESC LIMIT 5").all(),
-      ...db.prepare("SELECT id, capa_id as ref_id, corrective_action as title, 'capa' as type, status, created_at FROM capas ORDER BY created_at DESC LIMIT 5").all(),
+      ...(await db.all("SELECT id, request_id as ref_id, title, 'change_request' as type, status, created_at FROM change_requests ORDER BY created_at DESC LIMIT 5")),
+      ...(await db.all("SELECT id, report_id as ref_id, title, 'deviation' as type, status, created_at FROM deviation_reports ORDER BY created_at DESC LIMIT 5")),
+      ...(await db.all("SELECT id, capa_id as ref_id, corrective_action as title, 'capa' as type, status, created_at FROM capas ORDER BY created_at DESC LIMIT 5")),
     ].sort((a, b) => b.created_at?.localeCompare(a.created_at)).slice(0, 10);
 
     res.json({ openCCs, openDEVs, overdueCAPAs, recentActivity, countsByClassification });

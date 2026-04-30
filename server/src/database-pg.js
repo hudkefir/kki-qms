@@ -87,41 +87,6 @@ const db = {
   },
 
   /**
-   * Compatibility shim for `db.prepare(sql)`.
-   * Returns an object with async `.get()`, `.all()`, `.run()` methods.
-   * The SQL is converted once; params are passed at call time.
-   */
-  prepare(sql) {
-    const converted = convertSql(sql);
-    // Pre-check if this is an INSERT for run()
-    const isInsert = /^\s*INSERT\s/i.test(converted);
-    const runSql = (isInsert && !/RETURNING\s/i.test(converted))
-      ? converted.replace(/;?\s*$/, ' RETURNING id')
-      : converted;
-
-    return {
-      async get(...args) {
-        const params = flattenParams(args);
-        const result = await pool.query(converted, params);
-        return result.rows[0] || null;
-      },
-      async all(...args) {
-        const params = flattenParams(args);
-        const result = await pool.query(converted, params);
-        return result.rows;
-      },
-      async run(...args) {
-        const params = flattenParams(args);
-        const result = await pool.query(runSql, params);
-        return {
-          lastInsertRowid: result.rows[0]?.id ?? null,
-          changes: result.rowCount,
-        };
-      },
-    };
-  },
-
-  /**
    * Execute raw SQL (typically DDL). Supports multi-statement strings.
    */
   async exec(sql) {
