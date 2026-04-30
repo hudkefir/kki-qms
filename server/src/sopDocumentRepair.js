@@ -11,7 +11,7 @@ export async function repairSOPDocuments() {
   try {
     console.log('🔧 Running SOP document repair...');
     
-    const sopDir = process.env.KKI_DOCS_DIR || '/Users/kefirbot/KKI/QMS/SOPs';
+    const sopDir = process.env.KKI_DOCS_DIR || './sop-files';
     
     if (!existsSync(sopDir)) {
       console.log('⚠️ SOP directory not found, skipping repair');
