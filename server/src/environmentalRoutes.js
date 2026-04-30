@@ -157,13 +157,13 @@ router.post('/environmental/records', requireAuth, requireWriteAccess, async (re
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
-    const insertRecord = db.prepare(`INSERT INTO env_test_records (record_number, sample_point_id, test_date, sampled_by, linked_lot, linked_production_date, lab_name, lab_report_number, notes, created_by, updated_by)
+    const insertRecord = await db.prepare(`INSERT INTO env_test_records (record_number, sample_point_id, test_date, sampled_by, linked_lot, linked_production_date, lab_name, lab_report_number, notes, created_by, updated_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const result = await insertRecord.run(record_number, sample_point_id, test_date, sampled_by || '', linked_lot || '', linked_production_date || '', lab_name || '', lab_report_number || '', notes || '', username, username);
 
     // Insert test results if provided
     if (Array.isArray(results) && results.length > 0) {
-      const insertResult = db.prepare(`INSERT INTO env_test_results (record_id, test_type, test_name, method, target_value, target_min, target_max, actual_value, unit, pass_fail, notes, comments)
+      const insertResult = await db.prepare(`INSERT INTO env_test_results (record_id, test_type, test_name, method, target_value, target_min, target_max, actual_value, unit, pass_fail, notes, comments)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       for (const r of results) {
         await insertResult.run(result.lastInsertRowid, r.test_type || 'microbiological', r.test_name, r.method || '', r.target_value || '', r.target_min || '', r.target_max || '', r.actual_value || '', r.unit || '', r.pass_fail || 'pending', r.notes || '', r.comments || '');
@@ -200,7 +200,7 @@ router.put('/environmental/records/:id', requireAuth, requireWriteAccess, async 
 
     // Update results if provided
     if (Array.isArray(results)) {
-      const updateResult = db.prepare('UPDATE env_test_results SET actual_value = ?, pass_fail = ?, notes = ?, comments = ?, target_value = ? WHERE id = ? AND record_id = ?');
+      const updateResult = await db.prepare('UPDATE env_test_results SET actual_value = ?, pass_fail = ?, notes = ?, comments = ?, target_value = ? WHERE id = ? AND record_id = ?');
       for (const r of results) {
         if (r.id) await updateResult.run(r.actual_value || '', r.pass_fail || 'pending', r.notes || '', r.comments || '', r.target_value || '', r.id, req.params.id);
       }

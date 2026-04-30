@@ -455,9 +455,9 @@ router.post('/traceability-exercises', requireWriteAccess, async (req, res) => {
 });
 
 // PUT /api/traceability-exercises/:id
-router.put('/traceability-exercises/:id', requireWriteAccess, (req, res) => {
+router.put('/traceability-exercises/:id', requireWriteAccess, async (req, res) => {
   try {
-    const exercise = db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(req.params.id);
+    const exercise = await db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(req.params.id);
     if (!exercise) return res.status(404).json({ error: 'Traceability exercise not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -489,9 +489,9 @@ router.put('/traceability-exercises/:id', requireWriteAccess, (req, res) => {
     if (updates.length === 1) return res.json(exercise);
 
     params.push(req.params.id);
-    db.prepare(`UPDATE traceability_exercises SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE traceability_exercises SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
-    const updated = db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(req.params.id);
     logAudit(req, 'update_traceability_exercise', 'traceability_exercises', req.params.id, exercise.exercise_id, { old_values: {}, new_values: sanitized });
     broadcast('traceability_exercise_updated', updated);
     res.json(updated);
@@ -501,9 +501,9 @@ router.put('/traceability-exercises/:id', requireWriteAccess, (req, res) => {
 });
 
 // POST /api/traceability-exercises/:id/complete
-router.post('/traceability-exercises/:id/complete', requireWriteAccess, (req, res) => {
+router.post('/traceability-exercises/:id/complete', requireWriteAccess, async (req, res) => {
   try {
-    const exercise = db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(req.params.id);
+    const exercise = await db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(req.params.id);
     if (!exercise) return res.status(404).json({ error: 'Traceability exercise not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -524,7 +524,7 @@ router.post('/traceability-exercises/:id/complete', requireWriteAccess, (req, re
     const reconciliation_percent = total_produced > 0 ? Math.round((totalAccounted / total_produced) * 10000) / 100 : 0;
     const reconciled = reconciliation_percent >= 100 ? 1 : 0;
 
-    db.prepare(`UPDATE traceability_exercises SET
+    await db.prepare(`UPDATE traceability_exercises SET
       status = ?, end_time = ?, elapsed_minutes = ?,
       total_produced = ?, total_shipped = ?, total_onsite = ?, total_adjustments = ?,
       reconciliation_percent = ?, reconciled = ?,
@@ -543,7 +543,7 @@ router.post('/traceability-exercises/:id/complete', requireWriteAccess, (req, re
       req.params.id
     );
 
-    const updated = db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM traceability_exercises WHERE id = ?').get(req.params.id);
     logAudit(req, 'complete_traceability_exercise', 'traceability_exercises', req.params.id, exercise.exercise_id, { new_values: { status, elapsed_minutes, reconciliation_percent } });
     broadcast('traceability_exercise_updated', updated);
     res.json(updated);
@@ -555,7 +555,7 @@ router.post('/traceability-exercises/:id/complete', requireWriteAccess, (req, re
 // ==================== CRISIS EVENTS ====================
 
 // GET /api/crisis-events
-router.get('/crisis-events', (req, res) => {
+router.get('/crisis-events', async (req, res) => {
   try {
     const { status, type, severity, search } = req.query;
     let query = 'SELECT * FROM crisis_events WHERE 1=1';
@@ -571,7 +571,7 @@ router.get('/crisis-events', (req, res) => {
     }
 
     query += ' ORDER BY created_at DESC, id DESC';
-    const rows = db.prepare(query).all(...params);
+    const rows = await db.prepare(query).all(...params);
     res.json(rows);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -579,9 +579,9 @@ router.get('/crisis-events', (req, res) => {
 });
 
 // GET /api/crisis-events/:id
-router.get('/crisis-events/:id', (req, res) => {
+router.get('/crisis-events/:id', async (req, res) => {
   try {
-    const event = db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
+    const event = await db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Crisis event not found' });
 
     res.json({
@@ -596,7 +596,7 @@ router.get('/crisis-events/:id', (req, res) => {
 });
 
 // POST /api/crisis-events
-router.post('/crisis-events', requireWriteAccess, (req, res) => {
+router.post('/crisis-events', requireWriteAccess, async (req, res) => {
   try {
     const sanitized = sanitizeBody(req.body);
     const {
@@ -613,12 +613,12 @@ router.post('/crisis-events', requireWriteAccess, (req, res) => {
 
     const event_id = nextCrisisId();
 
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO crisis_events (event_id, type, title, description, severity, reported_by, reported_at, production_stopped, product_held, affected_areas, affected_products, food_safety_impact, food_safety_assessment)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(event_id, type, title, description, severity, reported_by, reported_at, production_stopped ? 1 : 0, product_held ? 1 : 0, JSON.stringify(affected_areas), JSON.stringify(affected_products), food_safety_impact ? 1 : 0, food_safety_assessment);
 
-    const created = db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(info.lastInsertRowid);
     logAudit(req, 'create_crisis_event', 'crisis_events', created.id, event_id, { new_values: { event_id, type, title, severity, reported_by } });
     broadcast('crisis_event_created', created);
     res.status(201).json(created);
@@ -628,9 +628,9 @@ router.post('/crisis-events', requireWriteAccess, (req, res) => {
 });
 
 // PUT /api/crisis-events/:id
-router.put('/crisis-events/:id', requireWriteAccess, (req, res) => {
+router.put('/crisis-events/:id', requireWriteAccess, async (req, res) => {
   try {
-    const event = db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
+    const event = await db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Crisis event not found' });
 
     const sanitized = sanitizeBody(req.body);
@@ -663,9 +663,9 @@ router.put('/crisis-events/:id', requireWriteAccess, (req, res) => {
     if (updates.length === 1) return res.json(event);
 
     params.push(req.params.id);
-    db.prepare(`UPDATE crisis_events SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE crisis_events SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
-    const updated = db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
     logAudit(req, 'update_crisis_event', 'crisis_events', req.params.id, event.event_id, { old_values: {}, new_values: sanitized });
     broadcast('crisis_event_updated', updated);
     res.json(updated);
@@ -675,18 +675,18 @@ router.put('/crisis-events/:id', requireWriteAccess, (req, res) => {
 });
 
 // POST /api/crisis-events/:id/resolve
-router.post('/crisis-events/:id/resolve', requireWriteAccess, (req, res) => {
+router.post('/crisis-events/:id/resolve', requireWriteAccess, async (req, res) => {
   try {
-    const event = db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
+    const event = await db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Crisis event not found' });
 
     const { resolution } = req.body;
     if (!resolution) return res.status(400).json({ error: 'resolution is required' });
 
-    db.prepare(`UPDATE crisis_events SET status = 'resolved', resolution = ?, resolved_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
+    await db.prepare(`UPDATE crisis_events SET status = 'resolved', resolution = ?, resolved_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
       .run(resolution, req.params.id);
 
-    const updated = db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
     logAudit(req, 'resolve_crisis_event', 'crisis_events', req.params.id, event.event_id, { new_values: { resolution } });
     broadcast('crisis_event_updated', updated);
     res.json(updated);
@@ -696,15 +696,15 @@ router.post('/crisis-events/:id/resolve', requireWriteAccess, (req, res) => {
 });
 
 // POST /api/crisis-events/:id/close
-router.post('/crisis-events/:id/close', requireWriteAccess, (req, res) => {
+router.post('/crisis-events/:id/close', requireWriteAccess, async (req, res) => {
   try {
-    const event = db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
+    const event = await db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Crisis event not found' });
 
-    db.prepare(`UPDATE crisis_events SET status = 'closed', closed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
+    await db.prepare(`UPDATE crisis_events SET status = 'closed', closed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
       .run(req.params.id);
 
-    const updated = db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM crisis_events WHERE id = ?').get(req.params.id);
     logAudit(req, 'close_crisis_event', 'crisis_events', req.params.id, event.event_id, { new_values: { status: 'closed' } });
     broadcast('crisis_event_updated', updated);
     res.json(updated);
@@ -716,23 +716,23 @@ router.post('/crisis-events/:id/close', requireWriteAccess, (req, res) => {
 // ==================== DASHBOARD ====================
 
 // GET /api/recall/dashboard
-router.get('/recall/dashboard', (req, res) => {
+router.get('/recall/dashboard', async (req, res) => {
   try {
-    const activeRecalls = db.prepare("SELECT COUNT(*) as count FROM recalls WHERE status NOT IN ('closed')").get().count;
-    const openCrises = db.prepare("SELECT COUNT(*) as count FROM crisis_events WHERE status NOT IN ('closed','resolved')").get().count;
+    const activeRecalls = await db.prepare("SELECT COUNT(*) as count FROM recalls WHERE status NOT IN ('closed')").get().count;
+    const openCrises = await db.prepare("SELECT COUNT(*) as count FROM crisis_events WHERE status NOT IN ('closed','resolved')").get().count;
 
     const currentYear = new Date().getFullYear();
-    const exercisesThisYear = db.prepare("SELECT COUNT(*) as count FROM traceability_exercises WHERE strftime('%Y', created_at) = ?").get(String(currentYear)).count;
+    const exercisesThisYear = await db.prepare("SELECT COUNT(*) as count FROM traceability_exercises WHERE strftime('%Y', created_at) = ?").get(String(currentYear)).count;
 
-    const lastExercise = db.prepare('SELECT * FROM traceability_exercises ORDER BY created_at DESC LIMIT 1').get();
+    const lastExercise = await db.prepare('SELECT * FROM traceability_exercises ORDER BY created_at DESC LIMIT 1').get();
     const lastExerciseResult = lastExercise ? lastExercise.status : null;
 
     // Next exercise due: if < 2 this year, flag as due
     const nextExerciseDue = exercisesThisYear < 2 ? 'due' : 'on_track';
 
-    const recentRecalls = db.prepare("SELECT id, recall_id, title, type, classification, status, created_at FROM recalls ORDER BY created_at DESC LIMIT 5").all();
-    const recentCrises = db.prepare("SELECT id, event_id, title, type, severity, status, created_at FROM crisis_events ORDER BY created_at DESC LIMIT 5").all();
-    const recentExercises = db.prepare("SELECT id, exercise_id, type, status, target_lot, elapsed_minutes, reconciliation_percent, created_at FROM traceability_exercises ORDER BY created_at DESC LIMIT 5").all();
+    const recentRecalls = await db.prepare("SELECT id, recall_id, title, type, classification, status, created_at FROM recalls ORDER BY created_at DESC LIMIT 5").all();
+    const recentCrises = await db.prepare("SELECT id, event_id, title, type, severity, status, created_at FROM crisis_events ORDER BY created_at DESC LIMIT 5").all();
+    const recentExercises = await db.prepare("SELECT id, exercise_id, type, status, target_lot, elapsed_minutes, reconciliation_percent, created_at FROM traceability_exercises ORDER BY created_at DESC LIMIT 5").all();
 
     res.json({
       activeRecalls, openCrises, exercisesThisYear, nextExerciseDue, lastExerciseResult,
@@ -744,30 +744,30 @@ router.get('/recall/dashboard', (req, res) => {
 });
 
 // GET /api/recall-team
-router.get('/recall-team', (req, res) => {
+router.get('/recall-team', async (req, res) => {
   try {
-    const team = db.prepare('SELECT * FROM recall_team WHERE is_active = 1 ORDER BY notification_priority ASC, name ASC').all();
+    const team = await db.prepare('SELECT * FROM recall_team WHERE is_active = 1 ORDER BY notification_priority ASC, name ASC').all();
     res.json(team);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // POST /api/recall-team
-router.post('/recall-team', requireWriteAccess, (req, res) => {
+router.post('/recall-team', requireWriteAccess, async (req, res) => {
   try {
     const { name, role, title, phone, email, alternate_phone, responsibility, notification_priority, notes } = req.body;
     if (!name || !role) return res.status(400).json({ error: 'name and role are required' });
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    const info = db.prepare(
+    const info = await db.prepare(
       'INSERT INTO recall_team (name, role, title, phone, email, alternate_phone, responsibility, notification_priority, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(name, role, title || '', phone || '', email || '', alternate_phone || '', responsibility || '', notification_priority || 5, notes || '', now, now);
-    res.status(201).json(db.prepare('SELECT * FROM recall_team WHERE id = ?').get(info.lastInsertRowid));
+    res.status(201).json(await db.prepare('SELECT * FROM recall_team WHERE id = ?').get(info.lastInsertRowid));
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // PUT /api/recall-team/:id
-router.put('/recall-team/:id', requireWriteAccess, (req, res) => {
+router.put('/recall-team/:id', requireWriteAccess, async (req, res) => {
   try {
-    const member = db.prepare('SELECT * FROM recall_team WHERE id = ?').get(req.params.id);
+    const member = await db.prepare('SELECT * FROM recall_team WHERE id = ?').get(req.params.id);
     if (!member) return res.status(404).json({ error: 'Team member not found' });
     const fields = ['name', 'role', 'title', 'phone', 'email', 'alternate_phone', 'responsibility', 'notification_priority', 'notes', 'is_active'];
     const updates = []; const params = [];
@@ -776,15 +776,15 @@ router.put('/recall-team/:id', requireWriteAccess, (req, res) => {
     }
     updates.push("updated_at = datetime('now')");
     params.push(req.params.id);
-    db.prepare('UPDATE recall_team SET ' + updates.join(', ') + ' WHERE id = ?').run(...params);
-    res.json(db.prepare('SELECT * FROM recall_team WHERE id = ?').get(req.params.id));
+    await db.prepare('UPDATE recall_team SET ' + updates.join(', ') + ' WHERE id = ?').run(...params);
+    res.json(await db.prepare('SELECT * FROM recall_team WHERE id = ?').get(req.params.id));
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // DELETE /api/recall-team/:id
-router.delete('/recall-team/:id', requireRole('admin'), (req, res) => {
+router.delete('/recall-team/:id', requireRole('admin'), async (req, res) => {
   try {
-    db.prepare('DELETE FROM recall_team WHERE id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM recall_team WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });

@@ -683,7 +683,7 @@ router.post('/sops/:id/apply-content', requireWriteAccess, async (req, res) => {
       }).join('; ');
       const applyUser = req.session?.user;
       const applyChangedBy = applyUser?.display_name || applyUser?.username || 'Read & Update';
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO sop_revisions (sop_id, version, changed_by, change_description, reason)
         VALUES (?, ?, ?, ?, ?)
       `).run(id, updated.version || sop.version || '1.0', applyChangedBy, changeDesc, 'Content applied from linked document');
@@ -730,13 +730,13 @@ router.post('/sops/bulk-read-content', requireWriteAccess, async (req, res) => {
     
     for (const sopId of sop_ids) {
       try {
-        const sop = db.prepare('SELECT * FROM sops WHERE id = ?').get(sopId);
+        const sop = await db.prepare('SELECT * FROM sops WHERE id = ?').get(sopId);
         if (!sop) {
           results.push({ sop_id: sopId, error: 'SOP not found' });
           continue;
         }
 
-        const document = db.prepare(
+        const document = await db.prepare(
           'SELECT * FROM documents WHERE linked_type = ? AND linked_id = ? AND category = ? ORDER BY upload_date DESC LIMIT 1'
         ).get('sop', sopId, 'sop');
 

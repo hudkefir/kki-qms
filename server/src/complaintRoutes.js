@@ -494,19 +494,19 @@ router.get('/ccrs', async (req, res) => {
 });
 
 // GET /api/ccrs/:id
-router.get('/ccrs/:id', (req, res) => {
+router.get('/ccrs/:id', async (req, res) => {
   try {
-    const ccr = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    const ccr = await db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
     if (!ccr) return res.status(404).json({ error: 'CCR not found' });
 
-    const complaints = db.prepare(`
+    const complaints = await db.prepare(`
       SELECT c.* FROM complaints c
       JOIN ccr_complaints cc ON c.id = cc.complaint_id
       WHERE cc.ccr_id = ?
       ORDER BY c.date_received DESC
     `).all(req.params.id);
 
-    const actions = db.prepare('SELECT * FROM corrective_actions WHERE ccr_id = ? ORDER BY id').all(req.params.id);
+    const actions = await db.prepare('SELECT * FROM corrective_actions WHERE ccr_id = ? ORDER BY id').all(req.params.id);
 
     res.json({
       ...ccr,
@@ -521,7 +521,7 @@ router.get('/ccrs/:id', (req, res) => {
 });
 
 // POST /api/ccrs
-router.post('/ccrs', requireWriteAccess, (req, res) => {
+router.post('/ccrs', requireWriteAccess, async (req, res) => {
   try {
     const {
       title, date_created, status = 'draft',
@@ -533,7 +533,7 @@ router.post('/ccrs', requireWriteAccess, (req, res) => {
     if (!title) return res.status(400).json({ error: 'title is required' });
 
     const year = new Date(date_created || Date.now()).getFullYear();
-    const lastInYear = db.prepare(
+    const lastInYear = await db.prepare(
       "SELECT ccr_number FROM ccrs WHERE ccr_number LIKE ? ORDER BY ccr_number DESC LIMIT 1"
     ).get(`KK-CCR-${year}-%`);
 
@@ -548,7 +548,7 @@ router.post('/ccrs', requireWriteAccess, (req, res) => {
     const createdBy = sessionUser?.display_name || sessionUser?.username || '';
 
     const createCCR = db.transaction(() => {
-      const info = db.prepare(`
+      const info = await db.prepare(`
         INSERT INTO ccrs (ccr_number, title, date_created, status, recipient_company, recipient_contact, recipient_email, root_causes, preventive_measures, target_resolution_date, notes, created_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(ccr_number, title, date_created || new Date().toISOString().slice(0, 10), status, recipient_company, recipient_contact, recipient_email, JSON.stringify(root_causes), JSON.stringify(preventive_measures), target_resolution_date, notes, createdBy);
@@ -556,8 +556,8 @@ router.post('/ccrs', requireWriteAccess, (req, res) => {
       const ccrId = info.lastInsertRowid;
 
       // Link complaints
-      const linkStmt = db.prepare('INSERT INTO ccr_complaints (ccr_id, complaint_id) VALUES (?, ?)');
-      const updateCmpl = db.prepare('UPDATE complaints SET linked_ccr_id = ? WHERE id = ?');
+      const linkStmt = await db.prepare('INSERT INTO ccr_complaints (ccr_id, complaint_id) VALUES (?, ?)');
+      const updateCmpl = await db.prepare('UPDATE complaints SET linked_ccr_id = ? WHERE id = ?');
       for (const cId of complaint_ids) {
         linkStmt.run(ccrId, cId);
         updateCmpl.run(ccrId, cId);
@@ -567,7 +567,7 @@ router.post('/ccrs', requireWriteAccess, (req, res) => {
     });
 
     const ccrId = createCCR();
-    const created = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(ccrId);
+    const created = await db.prepare('SELECT * FROM ccrs WHERE id = ?').get(ccrId);
     logAudit(req, 'create_ccrs', 'ccrs', ccrId, ccr_number, { new_values: { ccr_number, title, status, recipient_company, complaint_ids } });
     broadcast('ccr_created', created);
     res.status(201).json(created);
@@ -577,9 +577,9 @@ router.post('/ccrs', requireWriteAccess, (req, res) => {
 });
 
 // PUT /api/ccrs/:id
-router.put('/ccrs/:id', requireWriteAccess, (req, res) => {
+router.put('/ccrs/:id', requireWriteAccess, async (req, res) => {
   try {
-    const ccr = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    const ccr = await db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
     if (!ccr) return res.status(404).json({ error: 'CCR not found' });
 
     const fields = [
@@ -615,9 +615,9 @@ router.put('/ccrs/:id', requireWriteAccess, (req, res) => {
     if (updates.length === 2) return res.json(ccr); // only updated_by + updated_at = no real change
 
     params.push(req.params.id);
-    db.prepare(`UPDATE ccrs SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE ccrs SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
-    const updated = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
 
     // Audit log with old/new values
     const ccrOld = {};
@@ -642,21 +642,21 @@ router.put('/ccrs/:id', requireWriteAccess, (req, res) => {
 });
 
 // POST /api/ccrs/:id/complaints - link complaints to CCR
-router.post('/ccrs/:id/complaints', requireWriteAccess, (req, res) => {
+router.post('/ccrs/:id/complaints', requireWriteAccess, async (req, res) => {
   try {
-    const ccr = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    const ccr = await db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
     if (!ccr) return res.status(404).json({ error: 'CCR not found' });
 
     const { complaint_ids = [] } = req.body;
-    const linkStmt = db.prepare('INSERT OR IGNORE INTO ccr_complaints (ccr_id, complaint_id) VALUES (?, ?)');
-    const updateCmpl = db.prepare('UPDATE complaints SET linked_ccr_id = ? WHERE id = ?');
+    const linkStmt = await db.prepare('INSERT OR IGNORE INTO ccr_complaints (ccr_id, complaint_id) VALUES (?, ?)');
+    const updateCmpl = await db.prepare('UPDATE complaints SET linked_ccr_id = ? WHERE id = ?');
 
     for (const cId of complaint_ids) {
       linkStmt.run(req.params.id, cId);
       updateCmpl.run(req.params.id, cId);
     }
 
-    const complaints = db.prepare(`
+    const complaints = await db.prepare(`
       SELECT c.* FROM complaints c JOIN ccr_complaints cc ON c.id = cc.complaint_id WHERE cc.ccr_id = ?
     `).all(req.params.id);
 
@@ -668,9 +668,9 @@ router.post('/ccrs/:id/complaints', requireWriteAccess, (req, res) => {
 });
 
 // GET /api/ccrs/:id/actions
-router.get('/ccrs/:id/actions', (req, res) => {
+router.get('/ccrs/:id/actions', async (req, res) => {
   try {
-    const actions = db.prepare('SELECT * FROM corrective_actions WHERE ccr_id = ? ORDER BY id').all(req.params.id);
+    const actions = await db.prepare('SELECT * FROM corrective_actions WHERE ccr_id = ? ORDER BY id').all(req.params.id);
     res.json(actions);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
@@ -678,9 +678,9 @@ router.get('/ccrs/:id/actions', (req, res) => {
 });
 
 // POST /api/ccrs/:id/actions
-router.post('/ccrs/:id/actions', requireWriteAccess, (req, res) => {
+router.post('/ccrs/:id/actions', requireWriteAccess, async (req, res) => {
   try {
-    const ccr = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    const ccr = await db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
     if (!ccr) return res.status(404).json({ error: 'CCR not found' });
 
     const { description, responsible = '', target_date = null, status = 'pending', notes = '' } = req.body;
@@ -689,12 +689,12 @@ router.post('/ccrs/:id/actions', requireWriteAccess, (req, res) => {
     const sessionUser = req.session?.user;
     const createdBy = sessionUser?.display_name || sessionUser?.username || '';
 
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO corrective_actions (ccr_id, description, responsible, target_date, status, notes, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(req.params.id, description, responsible, target_date, status, notes, createdBy);
 
-    const created = db.prepare('SELECT * FROM corrective_actions WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.prepare('SELECT * FROM corrective_actions WHERE id = ?').get(info.lastInsertRowid);
     logAudit(req, 'create_action', 'corrective_actions', created.id, ccr.ccr_number, { new_values: { ccr_id: req.params.id, description, responsible, target_date, status } });
     broadcast('action_created', { ...created, ccr_number: ccr.ccr_number });
     res.status(201).json(created);
@@ -704,9 +704,9 @@ router.post('/ccrs/:id/actions', requireWriteAccess, (req, res) => {
 });
 
 // PUT /api/ccrs/:id/actions/:actionId
-router.put('/ccrs/:id/actions/:actionId', requireWriteAccess, (req, res) => {
+router.put('/ccrs/:id/actions/:actionId', requireWriteAccess, async (req, res) => {
   try {
-    const action = db.prepare('SELECT * FROM corrective_actions WHERE id = ? AND ccr_id = ?').get(req.params.actionId, req.params.id);
+    const action = await db.prepare('SELECT * FROM corrective_actions WHERE id = ? AND ccr_id = ?').get(req.params.actionId, req.params.id);
     if (!action) return res.status(404).json({ error: 'Action not found' });
 
     const fields = ['description', 'responsible', 'target_date', 'completion_date', 'status', 'notes'];
@@ -729,9 +729,9 @@ router.put('/ccrs/:id/actions/:actionId', requireWriteAccess, (req, res) => {
     if (updates.length === 2) return res.json(action); // only updated_by + updated_at = no real change
 
     params.push(req.params.actionId);
-    db.prepare(`UPDATE corrective_actions SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE corrective_actions SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
-    const updated = db.prepare('SELECT * FROM corrective_actions WHERE id = ?').get(req.params.actionId);
+    const updated = await db.prepare('SELECT * FROM corrective_actions WHERE id = ?').get(req.params.actionId);
 
     // Audit log with old/new values
     const actOld = {};
@@ -754,15 +754,15 @@ router.put('/ccrs/:id/actions/:actionId', requireWriteAccess, (req, res) => {
 });
 
 // DELETE /api/ccrs/:id (admin only)
-router.delete('/ccrs/:id', requireRole('admin'), (req, res) => {
+router.delete('/ccrs/:id', requireRole('admin'), async (req, res) => {
   try {
-    const ccr = db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
+    const ccr = await db.prepare('SELECT * FROM ccrs WHERE id = ?').get(req.params.id);
     if (!ccr) return res.status(404).json({ error: 'CCR not found' });
 
-    db.prepare('UPDATE complaints SET linked_ccr_id = NULL WHERE linked_ccr_id = ?').run(req.params.id);
-    db.prepare('DELETE FROM ccr_complaints WHERE ccr_id = ?').run(req.params.id);
-    db.prepare('DELETE FROM corrective_actions WHERE ccr_id = ?').run(req.params.id);
-    db.prepare('DELETE FROM ccrs WHERE id = ?').run(req.params.id);
+    await db.prepare('UPDATE complaints SET linked_ccr_id = NULL WHERE linked_ccr_id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM ccr_complaints WHERE ccr_id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM corrective_actions WHERE ccr_id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM ccrs WHERE id = ?').run(req.params.id);
     logAudit(req, 'delete_ccrs', 'ccrs', req.params.id, ccr.ccr_number, { old_values: ccr });
     res.json({ success: true, message: `CCR ${ccr.ccr_number} deleted` });
   } catch (err) {
@@ -771,12 +771,12 @@ router.delete('/ccrs/:id', requireRole('admin'), (req, res) => {
 });
 
 // DELETE /api/ccrs/:id/actions/:actionId (admin only)
-router.delete('/ccrs/:id/actions/:actionId', requireRole('admin'), (req, res) => {
+router.delete('/ccrs/:id/actions/:actionId', requireRole('admin'), async (req, res) => {
   try {
-    const action = db.prepare('SELECT * FROM corrective_actions WHERE id = ? AND ccr_id = ?').get(req.params.actionId, req.params.id);
+    const action = await db.prepare('SELECT * FROM corrective_actions WHERE id = ? AND ccr_id = ?').get(req.params.actionId, req.params.id);
     if (!action) return res.status(404).json({ error: 'Action not found' });
 
-    db.prepare('DELETE FROM corrective_actions WHERE id = ?').run(req.params.actionId);
+    await db.prepare('DELETE FROM corrective_actions WHERE id = ?').run(req.params.actionId);
     logAudit(req, 'delete_action', 'corrective_actions', req.params.actionId, action.description?.slice(0, 60), { old_values: action });
     res.json({ success: true, message: 'Corrective action deleted' });
   } catch (err) {
@@ -787,55 +787,55 @@ router.delete('/ccrs/:id/actions/:actionId', requireRole('admin'), (req, res) =>
 // ==================== QA DASHBOARD ====================
 
 // GET /api/qa-dashboard
-router.get('/qa-dashboard', (req, res) => {
+router.get('/qa-dashboard', async (req, res) => {
   try {
     // Complaint stats
-    const totalComplaints = db.prepare('SELECT COUNT(*) as count FROM complaints').get().count;
-    const openComplaints = db.prepare("SELECT COUNT(*) as count FROM complaints WHERE status NOT IN ('resolved','closed')").get().count;
+    const totalComplaints = await db.prepare('SELECT COUNT(*) as count FROM complaints').get().count;
+    const openComplaints = await db.prepare("SELECT COUNT(*) as count FROM complaints WHERE status NOT IN ('resolved','closed')").get().count;
 
-    const complaintsBySeverity = db.prepare(`
+    const complaintsBySeverity = await db.prepare(`
       SELECT severity, COUNT(*) as count FROM complaints GROUP BY severity
     `).all();
 
-    const complaintsByProduct = db.prepare(`
+    const complaintsByProduct = await db.prepare(`
       SELECT product_name, product_sku, COUNT(*) as count FROM complaints GROUP BY product_sku ORDER BY count DESC
     `).all();
 
     // Trend data - last 6 months
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-    const complaintTrend = db.prepare(`
+    const complaintTrend = await db.prepare(`
       SELECT strftime('%Y-%m', date_received) as month, COUNT(*) as count
       FROM complaints WHERE date_received >= ?
       GROUP BY month ORDER BY month
     `).all(sixMonthsAgo.toISOString().slice(0, 10));
 
     // CCR stats
-    const totalCCRs = db.prepare('SELECT COUNT(*) as count FROM ccrs').get().count;
-    const openCCRs = db.prepare("SELECT COUNT(*) as count FROM ccrs WHERE status NOT IN ('closed')").get().count;
+    const totalCCRs = await db.prepare('SELECT COUNT(*) as count FROM ccrs').get().count;
+    const openCCRs = await db.prepare("SELECT COUNT(*) as count FROM ccrs WHERE status NOT IN ('closed')").get().count;
 
-    const overdueActions = db.prepare(`
+    const overdueActions = await db.prepare(`
       SELECT COUNT(*) as count FROM corrective_actions
       WHERE status NOT IN ('completed') AND target_date < date('now')
     `).get().count;
 
-    const totalActions = db.prepare('SELECT COUNT(*) as count FROM corrective_actions').get().count;
-    const completedActions = db.prepare("SELECT COUNT(*) as count FROM corrective_actions WHERE status = 'completed'").get().count;
+    const totalActions = await db.prepare('SELECT COUNT(*) as count FROM corrective_actions').get().count;
+    const completedActions = await db.prepare("SELECT COUNT(*) as count FROM corrective_actions WHERE status = 'completed'").get().count;
 
     // Top affected lots
-    const topLots = db.prepare(`
+    const topLots = await db.prepare(`
       SELECT lot_number, product_name, COUNT(*) as count
       FROM complaints WHERE lot_number != ''
       GROUP BY lot_number ORDER BY count DESC LIMIT 5
     `).all();
 
     // Recent activity
-    const recentComplaints = db.prepare(`
+    const recentComplaints = await db.prepare(`
       SELECT id, complaint_number, date_received, product_name, issue_type, severity, status, created_at
       FROM complaints ORDER BY created_at DESC LIMIT 5
     `).all();
 
-    const recentCCRUpdates = db.prepare(`
+    const recentCCRUpdates = await db.prepare(`
       SELECT id, ccr_number, title, status, updated_at
       FROM ccrs ORDER BY updated_at DESC LIMIT 5
     `).all();

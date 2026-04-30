@@ -23,7 +23,7 @@ router.get('/state', async (req, res) => {
 });
 
 // POST /api/taskboard/state — DISABLED (v1 blob endpoint causes data loss with multi-device sync)
-router.post('/state', (req, res) => {
+router.post('/state', async (req, res) => {
   console.warn('[TASKBOARD] Blocked v1 POST /state from stale client');
   res.status(410).json({
     error: 'This endpoint has been disabled to prevent data loss. Please hard-refresh your browser (Ctrl+Shift+R or Cmd+Shift+R) to get the latest version.',

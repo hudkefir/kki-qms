@@ -40,7 +40,7 @@ export async function repairSOPDocuments() {
         } else {
           // DISABLED: Don't delete document records automatically
           // This was causing uploaded documents to disappear
-          // db.prepare('DELETE FROM documents WHERE id = ?').run(doc.id);
+          // await db.prepare('DELETE FROM documents WHERE id = ?').run(doc.id);
           console.log(`⚠️ Document record exists but file missing: ${doc.filename} (keeping record)`);
           // deleted++;
         }

@@ -282,7 +282,7 @@ router.get('/batch-tests', requireAuth, async (req, res) => {
 });
 
 // GET /api/batch-tests/templates - get test profile templates
-router.get('/batch-tests/templates', requireAuth, (req, res) => {
+router.get('/batch-tests/templates', requireAuth, async (req, res) => {
   res.json({
     profiles: Object.entries(TEST_PROFILES).map(([key, val]) => ({ key, label: val.label, test_count: val.tests.length })),
     tests: TEST_PROFILES,
@@ -543,12 +543,12 @@ router.post('/batch-tests', requireAuth, requireWriteAccess, async (req, res) =>
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
-    const insertTest = db.prepare(`
+    const insertTest = await db.prepare(`
       INSERT INTO batch_tests (batch_number, product_sku, product_name, test_date, tested_by, status, notes, test_profile, lab_name, lab_report_number, sample_date, report_date, created_by, updated_by, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const insertResult = db.prepare(`
+    const insertResult = await db.prepare(`
       INSERT INTO batch_test_results (batch_test_id, test_type, test_name, target_value, actual_value, unit, pass_fail, notes, test_category, target_min, target_max, comments)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
@@ -634,7 +634,7 @@ router.put('/batch-tests/:id/results', requireAuth, requireWriteAccess, async (r
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
-    const updateResult = db.prepare(`
+    const updateResult = await db.prepare(`
       UPDATE batch_test_results SET actual_value = ?, pass_fail = ?, notes = ?, comments = ?, target_value = ? WHERE id = ? AND batch_test_id = ?
     `);
 

@@ -42,7 +42,7 @@ router.post('/daily-tasks/templates', requireAuth, requireRole('admin', 'manager
         'INSERT INTO daily_task_templates (template_name, description, created_by) VALUES (?, ?, ?)'
       ).run(template_name, description || '', req.session.user.username);
 
-      const insertItem = db.prepare(
+      const insertItem = await db.prepare(
         'INSERT INTO daily_task_template_items (template_id, task_name, category, description, sop_reference, sort_order, color) VALUES (?, ?, ?, ?, ?, ?, ?)'
       );
       if (Array.isArray(items)) {
@@ -77,7 +77,7 @@ router.put('/daily-tasks/templates/:id', requireAuth, requireRole('admin', 'mana
 
       if (Array.isArray(items)) {
         await db.prepare('DELETE FROM daily_task_template_items WHERE template_id = ?').run(req.params.id);
-        const insertItem = db.prepare(
+        const insertItem = await db.prepare(
           'INSERT INTO daily_task_template_items (template_id, task_name, category, description, sop_reference, sort_order, color) VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
         for (const item of items) {
@@ -125,7 +125,7 @@ router.post('/daily-tasks/templates/:id/load', requireAuth, requireRole('admin',
     let baseOrder = (maxOrder.max_order || 0) + 1;
 
     const inserted = await db.transaction(async () => {
-      const insert = db.prepare(
+      const insert = await db.prepare(
         'INSERT INTO daily_tasks (task_name, category, frequency, description, sop_reference, sort_order, color) VALUES (?, ?, ?, ?, ?, ?, ?)'
       );
       const ids = [];

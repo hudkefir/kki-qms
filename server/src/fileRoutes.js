@@ -30,7 +30,7 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
       return res.status(400).json({ error: 'Invalid SOP ID' });
     }
 
-    const sop = db.prepare('SELECT * FROM sops WHERE id = ?').get(req.params.id);
+    const sop = await db.prepare('SELECT * FROM sops WHERE id = ?').get(req.params.id);
     if (!sop) return res.status(404).json({ error: 'SOP not found' });
 
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -40,7 +40,7 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
     }
 
     // Determine version
-    const lastFile = db.prepare(
+    const lastFile = await db.prepare(
       'SELECT MAX(version) as maxVersion FROM sop_files WHERE sop_id = ? AND original_name = ?'
     ).get(req.params.id, req.file.originalname);
     const version = (lastFile?.maxVersion || 0) + 1;
@@ -56,7 +56,7 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
     // Upload to Supabase Storage
     await uploadFile(storagePath, req.file.buffer, fileType);
 
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO sop_files (sop_id, filename, original_name, file_type, file_size, version, uploaded_by)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -69,13 +69,13 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
       req.session.user.username
     );
 
-    const created = db.prepare('SELECT * FROM sop_files WHERE id = ?').get(info.lastInsertRowid);
+    const created = await db.prepare('SELECT * FROM sop_files WHERE id = ?').get(info.lastInsertRowid);
 
     // Auto-update SOP version from filename
     const versionMatch = req.file.originalname.match(/_v(\d+[._]\d+)/i);
     if (versionMatch) {
       const newVersion = versionMatch[1].replace('_', '.');
-      db.prepare('UPDATE sops SET version = ?, updated_at = datetime(\'now\') WHERE id = ?').run(newVersion, req.params.id);
+      await db.prepare('UPDATE sops SET version = ?, updated_at = datetime(\'now\') WHERE id = ?').run(newVersion, req.params.id);
     }
 
     logAudit(req, 'upload_file', 'sops', req.params.id, sop.sop_number, {
@@ -92,9 +92,9 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
 });
 
 // GET /api/sops/:id/files
-router.get('/sops/:id/files', requireAuth, (req, res) => {
+router.get('/sops/:id/files', requireAuth, async (req, res) => {
   try {
-    const files = db.prepare(
+    const files = await db.prepare(
       'SELECT * FROM sop_files WHERE sop_id = ? ORDER BY original_name, version DESC'
     ).all(req.params.id);
     res.json(files);
@@ -106,7 +106,7 @@ router.get('/sops/:id/files', requireAuth, (req, res) => {
 // GET /api/files/:id/download
 router.get('/files/:id/download', requireAuth, async (req, res) => {
   try {
-    const file = db.prepare('SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?').get(req.params.id);
+    const file = await db.prepare('SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?').get(req.params.id);
     if (!file) return res.status(404).json({ error: 'File not found' });
 
     logAudit(req, 'download_file', 'sops', file.sop_id, file.sop_number, {
@@ -127,7 +127,7 @@ router.get('/files/:id/download', requireAuth, async (req, res) => {
 // GET /api/files/:id/preview - Serve file inline for in-browser viewing
 router.get('/files/:id/preview', requireAuth, async (req, res) => {
   try {
-    const file = db.prepare('SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?').get(req.params.id);
+    const file = await db.prepare('SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?').get(req.params.id);
     if (!file) return res.status(404).json({ error: 'File not found' });
 
     const buffer = await downloadFile(file.filename);
@@ -143,7 +143,7 @@ router.get('/files/:id/preview', requireAuth, async (req, res) => {
 // GET /api/files/:id/preview-html - Render DOCX as HTML for in-browser reading
 router.get('/files/:id/preview-html', requireAuth, async (req, res) => {
   try {
-    const file = db.prepare('SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?').get(req.params.id);
+    const file = await db.prepare('SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?').get(req.params.id);
     if (!file) return res.status(404).json({ error: 'File not found' });
 
     const ext = extname(file.original_name).toLowerCase();
@@ -182,7 +182,7 @@ router.delete('/files/:id', requireAuth, requireRole('admin'), async (req, res) 
       return res.status(400).json({ error: 'Invalid file ID' });
     }
 
-    const file = db.prepare(
+    const file = await db.prepare(
       'SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?'
     ).get(req.params.id);
     if (!file) return res.status(404).json({ error: 'File not found' });
@@ -195,7 +195,7 @@ router.delete('/files/:id', requireAuth, requireRole('admin'), async (req, res) 
     }
 
     // Remove from database
-    db.prepare('DELETE FROM sop_files WHERE id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM sop_files WHERE id = ?').run(req.params.id);
 
     logAudit(req, 'delete_file', 'sops', file.sop_id, file.sop_number, {
       filename: file.original_name,
