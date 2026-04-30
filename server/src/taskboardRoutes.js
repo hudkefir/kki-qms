@@ -85,6 +85,13 @@ router.post('/tasks', async (req, res) => {
       return res.status(400).json({ error: 'tasks must be an array' });
     }
 
+    // SAFETY: reject empty push if server already has tasks
+    const existingCount = await db.get('SELECT COUNT(*) as c FROM taskboard_tasks');
+    if (tasks.length === 0 && existingCount.c > 0) {
+      console.warn('[TASKBOARD SAFETY] Blocked empty tasks push (server has ' + existingCount.c + ' tasks)');
+      return res.status(409).json({ error: 'Blocked: cannot replace ' + existingCount.c + ' tasks with empty set' });
+    }
+
     const save = db.transaction(async () => {
       await db.run('DELETE FROM taskboard_tasks');
       for (const t of tasks) {
