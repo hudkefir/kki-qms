@@ -1,0 +1,70 @@
+You are working on the KKI QMS app — a React + Vite + TailwindCSS frontend with an Express backend using Supabase PostgreSQL (via database-pg.js which wraps pg with a better-sqlite3-compatible API: db.all, db.get, db.run).
+
+## YOUR TASK
+Migrate the standalone production planner (currently a 6300-line monolithic HTML/JS app at planner-source-reference.html in this repo) into the QMS as a proper React module with Supabase-backed tables. This is Option A — full rebuild using the existing QMS architecture.
+
+## ARCHITECTURE REQUIREMENTS
+- Backend: Express routes in server/src/plannerRoutes.js (replace the current 37-line JSON blob version)
+- Database: Supabase PostgreSQL via the existing database-pg.js abstraction (db.all, db.get, db.run with ? placeholders auto-converted to $N)
+- Frontend: React pages in client/src/pages/ and components in client/src/components/ following existing patterns
+- Styling: TailwindCSS (same as rest of QMS)
+- Auth: Uses existing authMiddleware.js (JWT-based, req.user available)
+- File storage: Supabase Storage via supabase.js if needed
+
+## WHAT THE PLANNER DOES (study planner-source-reference.html)
+Core features to port:
+1. **Production scheduling** — weekly view with date ranges, bin counts per day
+2. **Purchase order management** — CRUD for POs with SKUs, quantities, ship dates, FIFO allocation
+3. **Batch management** — batch records with production dates, bin counts, SKU, inventory tracking
+4. **Fermentation pipeline** — GRP batches tracking ferment→strain→ready stages with dates
+5. **Small fridge tracking** — separate GRP fridge inventory
+6. **FIFO allocation engine** — oldest-batch-first allocation against POs
+7. **Inventory by SKU** — real-time inventory view
+8. **Pour batch records** — tracking pours from GRP to finished product
+9. **Physical inventory counts & verification audits** — count vs system reconciliation
+10. **Charts** — demand vs production, bins scheduled vs needed (Chart.js)
+11. **Dark mode, print views, data export**
+
+## DATABASE DESIGN
+Create proper normalized Supabase tables. Key tables needed:
+- planner_batches (id, batch_number, sku, production_date, bins, cases_per_bin, inventory_remaining, status, hold, notes, created_at, updated_at)
+- planner_purchase_orders (id, po_number, customer, sku, quantity_cases, ship_date, status, shipped_at, notes, created_at, updated_at)
+- planner_fermentation (id, batch_number, bins, flavour, grp_source, ferment_date, strain_date, ready_date, status, notes, created_at, updated_at)
+- planner_pours (id, batch_number, pour_date, fermentation_batch_id, bins_poured, actual_cases, notes, created_at, updated_at)
+- planner_inventory_counts (id, count_date, sku, system_count, physical_count, variance, notes, counted_by, created_at)
+- planner_settings (id, key, value) — for starting bin number, coconut per bin, etc.
+- planner_fridge (id, batch_number, status, bins, entered_at, notes)
+
+Add a database init function that creates these tables if they dont exist (same pattern as other init() calls in database-pg.js or the route files).
+
+## FRONTEND STRUCTURE
+Create these React pages/components:
+- client/src/pages/Planner.jsx — main planner view (weekly calendar grid, batch schedule, PO tracking)
+- client/src/pages/PlannerBatchDetail.jsx — individual batch detail/edit
+- client/src/pages/PlannerPODetail.jsx — individual PO detail/edit
+- client/src/pages/Fermentation.jsx — fermentation pipeline view (GRP tracking)
+- client/src/components/PlannerCalendar.jsx — weekly grid component
+- client/src/components/FIFOAllocation.jsx — allocation visualization
+- client/src/components/InventoryCount.jsx — physical count modal/form
+
+## IMPORTANT RULES
+- Follow existing code patterns exactly (look at BatchTesting.jsx, CAPADetail.jsx for reference)
+- Use the existing database-pg.js db object (import db from "./database-pg.js")
+- Use TailwindCSS classes matching the existing dark mode support
+- Add routes to server/src/index.js router mounting
+- Add page routes to client/src/App.jsx
+- Add nav links to the sidebar/nav
+- DO NOT touch or modify any existing files except to add imports/routes for the new planner module
+- Build the client after all changes: cd client && npx vite build
+- DO NOT deploy — just build. Hudson will deploy separately.
+
+## REFERENCE FILES TO READ FIRST
+1. planner-source-reference.html — the full current planner (study all functions)
+2. server/src/database-pg.js — DB abstraction
+3. server/src/batchTestRoutes.js — example of a well-structured route file
+4. client/src/pages/BatchTesting.jsx — example of a list page
+5. client/src/pages/BatchTestDetail.jsx — example of a detail page
+6. client/src/App.jsx — router setup
+7. server/src/index.js — server entry + route mounting
+
+When completely finished, run this command to notify: openclaw system event --text "Done: Production Planner migrated to QMS React+Supabase architecture" --mode now

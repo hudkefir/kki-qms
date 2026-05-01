@@ -116,7 +116,7 @@ app.use('/api/planner', (req, res, next) => {
   const origin = req.headers.origin;
   if (origin && (origin.endsWith('.pages.dev') || origin.includes('localhost'))) {
     res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type');
   }
   if (req.method === 'OPTIONS') return res.sendStatus(204);

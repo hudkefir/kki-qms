@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
-import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive } from 'lucide-react';
+import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -38,6 +38,10 @@ import InventoryCountDetail from './pages/InventoryCountDetail';
 import PickLists from './pages/PickLists';
 import PickListDetail from './pages/PickListDetail';
 import useWebSocket from './hooks/useWebSocket';
+import Planner from './pages/Planner';
+import PlannerBatchDetail from './pages/PlannerBatchDetail';
+import PlannerPODetail from './pages/PlannerPODetail';
+import Fermentation from './pages/Fermentation';
 import AccessDenied from "./components/AccessDenied";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -104,6 +108,8 @@ export default function App() {
     },
     { label: 'Production',
       items: [
+        { to: '/planner', icon: CalendarDays, label: 'Planner' },
+        { to: '/fermentation', icon: Beaker, label: 'Fermentation' },
         { to: '/batch-testing', icon: FlaskConical, label: 'Batch Testing' },
         { to: '/daily-tasks', icon: ClipboardList, label: 'Daily Tasks' },
         { to: '/inventory-counts', icon: Archive, label: 'Inventory Counts' },
@@ -230,6 +236,10 @@ export default function App() {
             <Route path="/ccrs" element={<CCRs />} />
             <Route path="/ccrs/:id" element={<CCRDetail />} />
             <Route path="/documents" element={<DocumentLibrary />} />
+            <Route path="/planner" element={<Planner />} />
+            <Route path="/planner/batches/:id" element={<PlannerBatchDetail />} />
+            <Route path="/planner/purchase-orders/:id" element={<PlannerPODetail />} />
+            <Route path="/fermentation" element={<Fermentation />} />
             <Route path="/batch-testing" element={<BatchTesting />} />
             <Route path="/batch-testing/:id" element={<BatchTestDetail />} />
             <Route path="/daily-tasks" element={<DailyTasks />} />
