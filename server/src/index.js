@@ -26,6 +26,7 @@ import printRoutes from './printRoutes.js';
 import environmentalRoutes from './environmentalRoutes.js';
 import supplierRoutes from './supplierRoutes.js';
 import linkRoutes from './linkRoutes.js';
+import aiRoutes from './aiRoutes.js';
 import { setupWebSocket } from './websocket.js';
 import { requireAuth } from './authMiddleware.js';
 import { auditApiMiddleware } from './auditMiddleware.js';
@@ -148,6 +149,7 @@ app.use('/api', printRoutes);
 app.use('/api', requireAuth, environmentalRoutes);
 app.use('/api', requireAuth, supplierRoutes);
 app.use('/api', requireAuth, linkRoutes);
+app.use('/api', requireAuth, aiRoutes);
 
 // Global error handler — prevent stack trace leaks
 app.use((err, req, res, _next) => {

@@ -12,6 +12,7 @@ import { useFetch, apiPut, apiPost, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { SeverityBadge, ComplaintStatusBadge, PRODUCT_OPTIONS, ISSUE_TYPES, SEVERITY_OPTIONS, STATUS_OPTIONS, STATUS_LABELS } from './Complaints';
+import AiSuggestButton from '../components/AiSuggestButton';
 
 export default function ComplaintDetail() {
   const { id } = useParams();
@@ -315,7 +316,17 @@ export default function ComplaintDetail() {
 
           {/* Description */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-1">Description</h2>
+            <div className="flex items-center gap-2 mb-1">
+              <h2 className="text-lg font-semibold text-gray-900">Description</h2>
+              {editing && (
+                <AiSuggestButton
+                  field="description"
+                  recordType="complaint"
+                  context={formData}
+                  onSuggestion={(text) => setFormData({ ...formData, description: text })}
+                />
+              )}
+            </div>
             {editing && <FieldHelp text={helpTexts.description} />}
             {editing ? (
               <textarea rows={4} value={formData.description || ''} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder={placeholders.description} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />

@@ -7,6 +7,7 @@ import {
 import { useFetch, apiPut, apiPost } from '../hooks/useApi';
 import RecordLinker from '../components/RecordLinker';
 import { FieldHelp, RecordInfoTooltip, GMP_HELP } from '../components/GmpFieldHelp';
+import AiSuggestButton from '../components/AiSuggestButton';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Modal from '../components/Modal';
 import { DevStatusBadge, DevClassificationBadge, DEV_STATUS_OPTIONS, DEV_STATUS_LABELS, DEV_CATEGORY_LABELS } from './Deviations';
@@ -274,7 +275,10 @@ export default function DeviationDetail() {
                   </select>
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Description</label>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <label className="block text-sm font-medium text-gray-700">Description</label>
+                    <AiSuggestButton field="description" recordType="deviation" context={formData} onSuggestion={(text) => setFormData({ ...formData, description: text })} />
+                  </div>
                   <FieldHelp text={GMP_HELP.deviation.fields.description} />
                   <textarea rows={3} value={formData.description || ''} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder={GMP_HELP.deviation.placeholders.description} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
@@ -315,12 +319,18 @@ export default function DeviationDetail() {
                   <input type="date" value={formData.investigation_due_date || ''} onChange={e => setFormData({ ...formData, investigation_due_date: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Immediate Action Taken</label>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <label className="block text-sm font-medium text-gray-700">Immediate Action Taken</label>
+                    <AiSuggestButton field="containment_action" recordType="deviation" context={formData} onSuggestion={(text) => setFormData({ ...formData, immediate_action: text })} />
+                  </div>
                   <FieldHelp text={GMP_HELP.deviation.fields.immediate_action} />
                   <textarea rows={2} value={formData.immediate_action || ''} onChange={e => setFormData({ ...formData, immediate_action: e.target.value })} placeholder={GMP_HELP.deviation.placeholders.immediate_action} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-0.5">Root Cause</label>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <label className="block text-sm font-medium text-gray-700">Root Cause</label>
+                    <AiSuggestButton field="root_cause" recordType="deviation" context={formData} onSuggestion={(text) => setFormData({ ...formData, root_cause: text })} />
+                  </div>
                   <FieldHelp text={GMP_HELP.deviation.fields.root_cause} />
                   <textarea rows={3} value={formData.root_cause || ''} onChange={e => setFormData({ ...formData, root_cause: e.target.value })} placeholder={GMP_HELP.deviation.placeholders.root_cause} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
                 </div>
@@ -710,7 +720,10 @@ export default function DeviationDetail() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Root Cause</label>
+            <div className="flex items-center gap-2 mb-1">
+              <label className="block text-sm font-medium text-gray-700">Root Cause</label>
+              <AiSuggestButton field="root_cause" recordType="deviation" context={{ ...dev, ...investigateForm }} onSuggestion={(text) => setInvestigateForm({ ...investigateForm, root_cause: text })} />
+            </div>
             <textarea rows={3} value={investigateForm.root_cause || ''} onChange={e => setInvestigateForm({ ...investigateForm, root_cause: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
           </div>
           <div>

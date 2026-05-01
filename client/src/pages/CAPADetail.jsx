@@ -6,6 +6,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import FormattedText from '../components/FormattedText';
 import RecordLinker from '../components/RecordLinker';
 import { FieldHelp, RecordInfoTooltip, GMP_HELP } from '../components/GmpFieldHelp';
+import AiSuggestButton from '../components/AiSuggestButton';
 import {
   ArrowLeft, Save, Printer, Shield, Clock, CheckCircle, XCircle,
   AlertTriangle, FileText, Plus, Send, CalendarDays,
@@ -122,7 +123,7 @@ function Card({ children, className = '' }) {
 
 // ── Editable text field card ───────────────────────────────────────────────
 
-function EditableCard({ icon: Icon, iconColor, title, value, rawValue, placeholder, isAdmin, onSave }) {
+function EditableCard({ icon: Icon, iconColor, title, value, rawValue, placeholder, isAdmin, onSave, aiSuggestProps }) {
   const [editing, setEditing] = useState(false);
   const editableValue = rawValue !== undefined ? rawValue : (typeof value === 'string' ? value : '');
   const [draft, setDraft] = useState(editableValue);
@@ -153,6 +154,7 @@ function EditableCard({ icon: Icon, iconColor, title, value, rawValue, placehold
         <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
           {Icon && <Icon className={`w-4 h-4 ${iconColor}`} />}
           {title}
+          {aiSuggestProps && editing && <AiSuggestButton {...aiSuggestProps} onSuggestion={(text) => { setDraft(text); aiSuggestProps.onSuggestion?.(text); }} />}
         </h3>
         {isAdmin && !editing && (
           <button
@@ -1302,6 +1304,7 @@ export default function CAPADetail() {
               placeholder={GMP_HELP.capa.placeholders.description}
               isAdmin={canEditContent}
               onSave={saveTextCard('description')}
+              aiSuggestProps={{ field: 'description', recordType: 'capa', context: capa }}
             />
           </CollapsibleSection>
 
@@ -1322,6 +1325,7 @@ export default function CAPADetail() {
               placeholder={GMP_HELP.capa.placeholders.containment_action}
               isAdmin={canEditContent}
               onSave={saveTextCard('containment_action')}
+              aiSuggestProps={{ field: 'containment_action', recordType: 'capa', context: capa }}
             />
           </CollapsibleSection>
 
@@ -1368,6 +1372,7 @@ export default function CAPADetail() {
               placeholder={GMP_HELP.capa.placeholders.root_cause_analysis}
               isAdmin={canEditContent}
               onSave={saveTextCard('root_cause_analysis')}
+              aiSuggestProps={{ field: 'root_cause_analysis', recordType: 'capa', context: capa }}
             />
           </CollapsibleSection>
 
@@ -1388,6 +1393,7 @@ export default function CAPADetail() {
               placeholder={GMP_HELP.capa.placeholders.corrective_action}
               isAdmin={canEditContent}
               onSave={saveTextCard('corrective_action')}
+              aiSuggestProps={{ field: 'corrective_action', recordType: 'capa', context: capa }}
             />
           </CollapsibleSection>
 
@@ -1408,6 +1414,7 @@ export default function CAPADetail() {
               placeholder={GMP_HELP.capa.placeholders.preventive_action}
               isAdmin={canEditContent}
               onSave={saveTextCard('preventive_action')}
+              aiSuggestProps={{ field: 'preventive_action', recordType: 'capa', context: capa }}
             />
           </CollapsibleSection>
 
