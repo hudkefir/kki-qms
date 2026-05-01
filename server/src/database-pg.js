@@ -267,9 +267,9 @@ async function initTables() {
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
-      sid TEXT PRIMARY KEY,
-      sess TEXT NOT NULL,
-      expire TIMESTAMP NOT NULL
+      sid VARCHAR NOT NULL PRIMARY KEY,
+      sess JSON NOT NULL,
+      expire TIMESTAMP(6) NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS audit_logs (
@@ -976,6 +976,51 @@ async function initTables() {
       year INTEGER PRIMARY KEY,
       next_number INTEGER NOT NULL DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS inventory_counts (
+      id SERIAL PRIMARY KEY,
+      sku TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      counted_qty REAL NOT NULL DEFAULT 0,
+      count_date TEXT NOT NULL,
+      counted_by TEXT DEFAULT '',
+      location TEXT DEFAULT '',
+      lot_number TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_by TEXT DEFAULT '',
+      updated_by TEXT DEFAULT '',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS pick_lists (
+      id SERIAL PRIMARY KEY,
+      sales_order_number TEXT NOT NULL,
+      customer_name TEXT DEFAULT '',
+      customer_po TEXT DEFAULT '',
+      pick_date TEXT NOT NULL,
+      picked_by TEXT DEFAULT '',
+      status TEXT DEFAULT 'pending',
+      notes TEXT DEFAULT '',
+      created_by TEXT DEFAULT '',
+      updated_by TEXT DEFAULT '',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS pick_list_items (
+      id SERIAL PRIMARY KEY,
+      pick_list_id INTEGER NOT NULL REFERENCES pick_lists(id) ON DELETE CASCADE,
+      sku TEXT NOT NULL,
+      item_name TEXT DEFAULT '',
+      ordered_qty REAL NOT NULL DEFAULT 0,
+      picked_qty REAL DEFAULT 0,
+      uom TEXT DEFAULT 'cases',
+      bin_location TEXT DEFAULT '',
+      lot_number TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   // Create indexes
@@ -1019,6 +1064,11 @@ async function initTables() {
     CREATE INDEX IF NOT EXISTS idx_crisis_events_severity ON crisis_events(severity);
     CREATE INDEX IF NOT EXISTS idx_record_links_source ON qms_record_links(source_type, source_id);
     CREATE INDEX IF NOT EXISTS idx_record_links_target ON qms_record_links(target_type, target_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_counts_date ON inventory_counts(count_date);
+    CREATE INDEX IF NOT EXISTS idx_inventory_counts_sku ON inventory_counts(sku);
+    CREATE INDEX IF NOT EXISTS idx_pick_lists_date ON pick_lists(pick_date);
+    CREATE INDEX IF NOT EXISTS idx_pick_lists_status ON pick_lists(status);
+    CREATE INDEX IF NOT EXISTS idx_pick_list_items_pick_list ON pick_list_items(pick_list_id);
   `);
 }
 
@@ -1029,6 +1079,43 @@ try {
 } catch (err) {
   console.error('PostgreSQL init error:', err.message);
   // Don't crash — tables likely already exist in Supabase
+}
+
+/**
+ * Startup health check — verifies PG is reachable and core tables exist.
+ * Call this before accepting traffic. Throws on failure.
+ */
+export async function checkDbHealth() {
+  // 1. Basic connectivity
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query('SELECT 1 AS ok');
+    if (!rows[0]?.ok) throw new Error('PG connectivity check returned no result');
+
+    // 2. Verify core tables exist
+    const coreTables = ['sops', 'users', 'complaints', 'batch_tests', 'audit_logs'];
+    const tableCheck = await client.query(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = ANY($1)`,
+      [coreTables]
+    );
+    const found = tableCheck.rows.map(r => r.table_name);
+    const missing = coreTables.filter(t => !found.includes(t));
+    if (missing.length > 0) {
+      throw new Error(`Missing core tables: ${missing.join(', ')}`);
+    }
+
+    // 3. Verify read/write with a simple test
+    await client.query(`CREATE TABLE IF NOT EXISTS _health_check (checked_at TIMESTAMPTZ)`);
+    await client.query(`DELETE FROM _health_check`);
+    await client.query(`INSERT INTO _health_check (checked_at) VALUES (CURRENT_TIMESTAMP)`);
+    const verify = await client.query(`SELECT checked_at FROM _health_check`);
+    if (!verify.rows[0]?.checked_at) throw new Error('PG read/write verification failed');
+
+    console.log(`DB health check passed — ${found.length} core tables verified, read/write OK`);
+  } finally {
+    client.release();
+  }
 }
 
 export function getDb() {

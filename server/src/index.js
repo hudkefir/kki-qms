@@ -2,11 +2,11 @@ import express from 'express';
 import { requestLogger } from "./requestLogger.js";
 import cors from 'cors';
 import session from 'express-session';
-import sqliteStoreFactory from 'better-sqlite3-session-store';
+import pgSession from 'connect-pg-simple';
 import { createServer } from 'http';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import Database from 'better-sqlite3';
+import db, { checkDbHealth } from './database-pg.js';
 import routes from './routes.js';
 import complaintRoutes from './complaintRoutes.js';
 import authRoutes from './authRoutes.js';
@@ -27,6 +27,8 @@ import environmentalRoutes from './environmentalRoutes.js';
 import supplierRoutes from './supplierRoutes.js';
 import linkRoutes from './linkRoutes.js';
 import aiRoutes from './aiRoutes.js';
+import inventoryRoutes from './inventoryRoutes.js';
+import pickListRoutes from './pickListRoutes.js';
 import { setupWebSocket } from './websocket.js';
 import { requireAuth } from './authMiddleware.js';
 import { auditApiMiddleware } from './auditMiddleware.js';
@@ -40,12 +42,8 @@ const app = express();
 const server = createServer(app);
 const PORT = process.env.PORT || 3002;
 
-// Session store — use /tmp on Cloud Run (ephemeral but sessions are short-lived)
-const SqliteStore = sqliteStoreFactory(session);
-const sessionDataDir = process.env.KKI_DATA_DIR || '/tmp';
-const { existsSync, mkdirSync } = await import('fs');
-if (!existsSync(sessionDataDir)) { mkdirSync(sessionDataDir, { recursive: true }); }
-const sessionDb = new Database(join(sessionDataDir, 'sessions.db'));
+// Session store — Postgres-backed (persists across Cloud Run restarts)
+const PgStore = pgSession(session);
 
 // Middleware
 app.use(cors({
@@ -61,11 +59,12 @@ app.use(requestLogger);
 // Trust proxy for correct IP in audit logs
 app.set('trust proxy', 1);
 
-// Session middleware
+// Session middleware — Postgres-backed
 app.use(session({
-  store: new SqliteStore({
-    client: sessionDb,
-    expired: { clear: true, intervalMs: 900000 }, // Clear expired sessions every 15 min
+  store: new PgStore({
+    pool: db.pool,
+    tableName: 'sessions',
+    pruneSessionInterval: 900, // Clear expired sessions every 15 min (seconds)
   }),
   secret: process.env.SESSION_SECRET || 'kki-qms-session-secret-2026',
   name: 'qms.sid',
@@ -85,12 +84,12 @@ app.use('/api', (req, res, next) => {
   // Extract path segments and check common ID patterns
   const segments = req.path.split('/').filter(Boolean);
   // Check segments that follow known resource names (sops, complaints, ccrs, users, documents, audit, files)
-  const resources = ['sops', 'complaints', 'ccrs', 'users', 'documents', 'audit', 'files', 'corrective-actions', 'batch-tests', 'daily-tasks', 'sop-forms', 'change-requests', 'deviations', 'capas', 'change-control', 'equipment', 'pm-schedules', 'work-orders', 'recalls', 'traceability-exercises', 'crisis-events', 'recall', 'suppliers', 'links'];
+  const resources = ['sops', 'complaints', 'ccrs', 'users', 'documents', 'audit', 'files', 'corrective-actions', 'batch-tests', 'daily-tasks', 'sop-forms', 'change-requests', 'deviations', 'capas', 'change-control', 'equipment', 'pm-schedules', 'work-orders', 'recalls', 'traceability-exercises', 'crisis-events', 'recall', 'suppliers', 'links', 'inventory', 'picklists'];
   for (let i = 0; i < segments.length - 1; i++) {
     if (resources.includes(segments[i])) {
       const idSegment = segments[i + 1];
       // Skip known sub-paths that aren't IDs
-      if (['analytics', 'upload', 'by-lot', 'bulk-read-content', 'status', 'admin', 'completions', 'templates', 'results', 'verify', 'bulk', 'summary', 'fields', 'entries', 'forms', 'operators', 'export', 'admin-override', 'unlock', 'load', 'classify', 'approve', 'reject', 'effectiveness', 'investigate', 'disposition', 'dashboard', 'overdue', 'upcoming', 'complete', 'hold', 'notify-cfia', 'notify-customers', 'distribution', 'close', 'resolve', 'parse-coa-multi', 'print', 'environmental', 'updates', 'link-batch', 'link-complaint', 'available-complaints', 'available-batches', 'audit-trail', 'suggest-links', 'import', 'reviews', 'checklist', 'search', 'suggestions', 'capa', 'deviation', 'complaint', 'ccr', 'change_request', 'batch_test', 'sop'].includes(idSegment)) continue;
+      if (['analytics', 'upload', 'by-lot', 'bulk-read-content', 'status', 'admin', 'completions', 'templates', 'results', 'verify', 'bulk', 'summary', 'fields', 'entries', 'forms', 'operators', 'export', 'admin-override', 'unlock', 'load', 'classify', 'approve', 'reject', 'effectiveness', 'investigate', 'disposition', 'dashboard', 'overdue', 'upcoming', 'complete', 'hold', 'notify-cfia', 'notify-customers', 'distribution', 'close', 'resolve', 'parse-coa-multi', 'print', 'environmental', 'updates', 'link-batch', 'link-complaint', 'available-complaints', 'available-batches', 'audit-trail', 'suggest-links', 'import', 'reviews', 'checklist', 'search', 'suggestions', 'capa', 'deviation', 'complaint', 'ccr', 'change_request', 'batch_test', 'sop', 'counts', 'skus', 'sos'].includes(idSegment)) continue;
       if (!/^\d+$/.test(idSegment)) {
         return res.status(400).json({ error: `Invalid ID '${idSegment}': must be a numeric value` });
       }
@@ -150,6 +149,8 @@ app.use('/api', requireAuth, environmentalRoutes);
 app.use('/api', requireAuth, supplierRoutes);
 app.use('/api', requireAuth, linkRoutes);
 app.use('/api', requireAuth, aiRoutes);
+app.use('/api', requireAuth, inventoryRoutes);
+app.use('/api', requireAuth, pickListRoutes);
 
 // Global error handler — prevent stack trace leaks
 app.use((err, req, res, _next) => {
@@ -177,10 +178,19 @@ app.get('*', (req, res) => {
 // WebSocket
 setupWebSocket(server);
 
+// Startup health check — fail closed if Postgres unreachable
+try {
+  await checkDbHealth();
+} catch (err) {
+  console.error('FATAL: Database health check failed:', err.message);
+  console.error('Refusing to start — fix DB connectivity before deploying.');
+  process.exit(1);
+}
+
 // Start server
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`KKI QMS Server running on http://0.0.0.0:${PORT}`);
-  
+
   // Run SOP document repair on startup
   try {
     await repairSOPDocuments();
