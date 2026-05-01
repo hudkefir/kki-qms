@@ -255,20 +255,11 @@ router.post('/suppliers/:id/reviews', requireWriteAccess, async (req, res) => {
 
 // ==================== DOCUMENT UPLOAD ====================
 import multer from "multer";
-import { join, dirname, extname } from "path";
-import { fileURLToPath } from "url";
-import { existsSync, mkdirSync, unlinkSync } from "fs";
-
-const __filename_s = fileURLToPath(import.meta.url);
-const __dirname_s = dirname(__filename_s);
-const supplierDocsDir = join(__dirname_s, "..", "..", "documents", "Suppliers");
-if (!existsSync(supplierDocsDir)) mkdirSync(supplierDocsDir, { recursive: true });
+import { extname } from "path";
+import { uploadFile, downloadFile, deleteFile } from './supabase.js';
 
 const supplierUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, supplierDocsDir),
-    filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
 });
 
@@ -282,9 +273,15 @@ router.post("/suppliers/:id/documents", requireWriteAccess, supplierUpload.singl
     const user = req.session?.user;
     const uploaded_by = user?.display_name || user?.username || "";
 
+    // Upload to Supabase Storage
+    const ext = extname(req.file.originalname).toLowerCase();
+    const diskFilename = `${Date.now()}-${req.file.originalname}`;
+    const storagePath = `suppliers/${req.params.id}/${diskFilename}`;
+    await uploadFile(storagePath, req.file.buffer, req.file.mimetype);
+
     const info = await db.run(
       "INSERT INTO supplier_documents (supplier_id, filename, original_name, document_type, notes, file_size, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [req.params.id, req.file.filename, req.file.originalname, document_type, description || notes || "", req.file.size, uploaded_by]
+      [req.params.id, storagePath, req.file.originalname, document_type, description || notes || "", req.file.size, uploaded_by]
     );
 
     const doc = await db.get("SELECT * FROM supplier_documents WHERE id = ?", [info.lastInsertRowid]);
