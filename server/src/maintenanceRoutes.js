@@ -136,7 +136,7 @@ router.put('/equipment/:id', requireWriteAccess, async (req, res) => {
       params.push(typeof sanitized.associated_sops === 'string' ? sanitized.associated_sops : JSON.stringify(sanitized.associated_sops));
     }
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 1) return res.json(equip);
 
     params.push(req.params.id);
@@ -157,7 +157,7 @@ router.delete('/equipment/:id', requireWriteAccess, async (req, res) => {
     const equip = await db.get('SELECT * FROM equipment WHERE id = ?', [req.params.id]);
     if (!equip) return res.status(404).json({ error: 'Equipment not found' });
 
-    await db.run("UPDATE equipment SET status = 'decommissioned', updated_at = datetime('now') WHERE id = ?", [req.params.id]);
+    await db.run("UPDATE equipment SET status = 'decommissioned', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
 
     const updated = await db.get('SELECT * FROM equipment WHERE id = ?', [req.params.id]);
     logAudit(req, 'decommission_equipment', 'equipment', req.params.id, equip.equipment_id, { new_values: { status: 'decommissioned' } });
@@ -263,7 +263,7 @@ router.put('/pm-schedules/:id', requireWriteAccess, async (req, res) => {
       }
     }
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 1) return res.json(schedule);
 
     params.push(req.params.id);
@@ -303,7 +303,7 @@ router.post('/pm-schedules/:id/complete', requireWriteAccess, async (req, res) =
     `, [schedule.id, schedule.equipment_id, completed_by, completed_at, status, notes, issues_found, JSON.stringify(parts_used), nextDue]);
 
     // Update schedule
-    await db.run("UPDATE pm_schedules SET last_completed_date = ?, next_due_date = ?, updated_at = datetime('now') WHERE id = ?",
+    await db.run("UPDATE pm_schedules SET last_completed_date = ?, next_due_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [completed_at, nextDue, schedule.id]);
 
     const completion = await db.get('SELECT * FROM pm_completions WHERE id = ?', [info.lastInsertRowid]);
@@ -419,7 +419,7 @@ router.put('/work-orders/:id', requireWriteAccess, async (req, res) => {
       params.push(typeof sanitized.parts_used === 'string' ? sanitized.parts_used : JSON.stringify(sanitized.parts_used));
     }
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 1) return res.json(wo);
 
     params.push(req.params.id);
@@ -448,10 +448,10 @@ router.post('/work-orders/:id/complete', requireWriteAccess, async (req, res) =>
 
     await db.run(`
       UPDATE work_orders SET status = 'completed', work_performed = ?, parts_used = ?,
-        completed_by = ?, completed_at = datetime('now'),
+        completed_by = ?, completed_at = CURRENT_TIMESTAMP,
         post_maintenance_sanitation = ?, equipment_returned_to_service = ?,
-        returned_to_service_at = CASE WHEN ? THEN datetime('now') ELSE returned_to_service_at END,
-        updated_at = datetime('now') WHERE id = ?
+        returned_to_service_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE returned_to_service_at END,
+        updated_at = CURRENT_TIMESTAMP WHERE id = ?
     `, [work_performed, JSON.stringify(parts_used), completedBy, post_maintenance_sanitation ? 1 : 0, equipment_returned_to_service ? 1 : 0, equipment_returned_to_service ? 1 : 0, req.params.id]);
 
     const updated = await db.get('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
@@ -472,7 +472,7 @@ router.post('/work-orders/:id/verify', requireWriteAccess, async (req, res) => {
     const sessionUser = req.session?.user;
     const verifiedBy = sessionUser?.display_name || sessionUser?.username || '';
 
-    await db.run("UPDATE work_orders SET status = 'closed', verified_by = ?, updated_at = datetime('now') WHERE id = ?",
+    await db.run("UPDATE work_orders SET status = 'closed', verified_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [verifiedBy, req.params.id]);
 
     const updated = await db.get('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);

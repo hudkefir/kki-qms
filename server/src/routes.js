@@ -173,7 +173,7 @@ router.put('/sops/:id', requireWriteAccess, async (req, res) => {
     updates.push('updated_by = ?');
     params.push(updatedBy);
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
 
     if (updates.length === 1) {
       // Only updated_at, nothing else to update
@@ -419,7 +419,7 @@ router.put('/audit/:id', requireWriteAccess, async (req, res) => {
       params.push(evidence_ref);
     }
 
-    updates.push("checked_at = datetime('now')");
+    updates.push("checked_at = CURRENT_TIMESTAMP");
 
     if (updates.length === 1) {
       return res.json(item);
@@ -509,7 +509,7 @@ router.post('/sops/:id/read-content', requireWriteAccess, async (req, res) => {
         file_size: sopFile.file_size,
         upload_date: sopFile.uploaded_at,
         _source: 'sop_files',
-        _storagePath: `sops/${id}/${sopFile.filename}`,
+        _storagePath: sopFile.filename,
       };
     }
 
@@ -700,7 +700,7 @@ router.post('/sops/bulk-read-content', requireWriteAccess, async (req, res) => {
         );
 
         if (sopFile) {
-          storagePath = `sops/${sopId}/${sopFile.filename}`;
+          storagePath = sopFile.filename;
           originalName = sopFile.original_name;
         } else {
           const document = await db.get(

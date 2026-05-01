@@ -165,7 +165,7 @@ router.put('/recalls/:id', requireWriteAccess, async (req, res) => {
       }
     }
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 1) return res.json(recall);
 
     params.push(req.params.id);
@@ -186,7 +186,7 @@ router.post('/recalls/:id/hold', requireWriteAccess, async (req, res) => {
     const recall = await db.get('SELECT * FROM recalls WHERE id = ?', [req.params.id]);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
-    await db.run(`UPDATE recalls SET status = 'hold_segregate', updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE recalls SET status = 'hold_segregate', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [req.params.id]);
 
     const updated = await db.get('SELECT * FROM recalls WHERE id = ?', [req.params.id]);
@@ -206,7 +206,7 @@ router.post('/recalls/:id/notify-cfia', requireWriteAccess, async (req, res) => 
 
     const { cfia_contact_name, cfia_reference_number } = req.body;
 
-    await db.run(`UPDATE recalls SET status = 'cfia_notified', cfia_notified = 1, cfia_notified_at = datetime('now'), cfia_contact_name = ?, cfia_reference_number = ?, updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE recalls SET status = 'cfia_notified', cfia_notified = 1, cfia_notified_at = CURRENT_TIMESTAMP, cfia_contact_name = ?, cfia_reference_number = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [cfia_contact_name || '', cfia_reference_number || '', req.params.id]);
 
     const updated = await db.get('SELECT * FROM recalls WHERE id = ?', [req.params.id]);
@@ -224,7 +224,7 @@ router.post('/recalls/:id/notify-customers', requireWriteAccess, async (req, res
     const recall = await db.get('SELECT * FROM recalls WHERE id = ?', [req.params.id]);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
-    await db.run(`UPDATE recalls SET status = 'customers_notified', customers_notified = 1, recall_notice_sent = 1, updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE recalls SET status = 'customers_notified', customers_notified = 1, recall_notice_sent = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [req.params.id]);
 
     const updated = await db.get('SELECT * FROM recalls WHERE id = ?', [req.params.id]);
@@ -244,7 +244,7 @@ router.post('/recalls/:id/effectiveness', requireWriteAccess, async (req, res) =
 
     const { total_quantity_accounted } = req.body;
 
-    await db.run(`UPDATE recalls SET status = 'effectiveness_check', total_quantity_accounted = ?, updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE recalls SET status = 'effectiveness_check', total_quantity_accounted = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [total_quantity_accounted || 0, req.params.id]);
 
     const updated = await db.get('SELECT * FROM recalls WHERE id = ?', [req.params.id]);
@@ -265,7 +265,7 @@ router.post('/recalls/:id/disposition', requireWriteAccess, async (req, res) => 
     const { product_disposition, disposition_witnessed_by } = req.body;
     if (!product_disposition) return res.status(400).json({ error: 'product_disposition is required' });
 
-    await db.run(`UPDATE recalls SET product_disposition = ?, disposition_date = datetime('now'), disposition_witnessed_by = ?, updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE recalls SET product_disposition = ?, disposition_date = CURRENT_TIMESTAMP, disposition_witnessed_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [product_disposition, disposition_witnessed_by || '', req.params.id]);
 
     const updated = await db.get('SELECT * FROM recalls WHERE id = ?', [req.params.id]);
@@ -283,7 +283,7 @@ router.post('/recalls/:id/close', requireWriteAccess, async (req, res) => {
     const recall = await db.get('SELECT * FROM recalls WHERE id = ?', [req.params.id]);
     if (!recall) return res.status(404).json({ error: 'Recall not found' });
 
-    await db.run(`UPDATE recalls SET status = 'closed', closed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE recalls SET status = 'closed', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [req.params.id]);
 
     const updated = await db.get('SELECT * FROM recalls WHERE id = ?', [req.params.id]);
@@ -485,7 +485,7 @@ router.put('/traceability-exercises/:id', requireWriteAccess, async (req, res) =
       }
     }
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 1) return res.json(exercise);
 
     params.push(req.params.id);
@@ -531,7 +531,7 @@ router.post('/traceability-exercises/:id/complete', requireWriteAccess, async (r
       team_reachable_1hr = ?, evidence_complete = ?,
       backward_trace = ?, forward_trace = ?,
       gaps_identified = ?, corrective_action = ?, corrective_action_due = ?, notes = ?,
-      updated_at = datetime('now')
+      updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`, [
       status, end_time, elapsed_minutes,
       total_produced, total_shipped, total_onsite, total_adjustments,
@@ -659,7 +659,7 @@ router.put('/crisis-events/:id', requireWriteAccess, async (req, res) => {
       }
     }
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 1) return res.json(event);
 
     params.push(req.params.id);
@@ -683,7 +683,7 @@ router.post('/crisis-events/:id/resolve', requireWriteAccess, async (req, res) =
     const { resolution } = req.body;
     if (!resolution) return res.status(400).json({ error: 'resolution is required' });
 
-    await db.run(`UPDATE crisis_events SET status = 'resolved', resolution = ?, resolved_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE crisis_events SET status = 'resolved', resolution = ?, resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [resolution, req.params.id]);
 
     const updated = await db.get('SELECT * FROM crisis_events WHERE id = ?', [req.params.id]);
@@ -701,7 +701,7 @@ router.post('/crisis-events/:id/close', requireWriteAccess, async (req, res) => 
     const event = await db.get('SELECT * FROM crisis_events WHERE id = ?', [req.params.id]);
     if (!event) return res.status(404).json({ error: 'Crisis event not found' });
 
-    await db.run(`UPDATE crisis_events SET status = 'closed', closed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE crisis_events SET status = 'closed', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [req.params.id]);
 
     const updated = await db.get('SELECT * FROM crisis_events WHERE id = ?', [req.params.id]);
@@ -775,7 +775,7 @@ router.put('/recall-team/:id', requireWriteAccess, async (req, res) => {
     for (const f of fields) {
       if (req.body[f] !== undefined) { updates.push(f + ' = ?'); params.push(req.body[f]); }
     }
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     params.push(req.params.id);
     await db.run('UPDATE recall_team SET ' + updates.join(', ') + ' WHERE id = ?', params);
     res.json(await db.get('SELECT * FROM recall_team WHERE id = ?', [req.params.id]));

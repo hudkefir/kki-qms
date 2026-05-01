@@ -20,8 +20,8 @@ CREATE TABLE IF NOT EXISTS env_sample_points (
   description TEXT DEFAULT '',
   test_frequency TEXT DEFAULT 'per_production_run' CHECK(test_frequency IN ('daily','weekly','monthly','per_production_run','quarterly','annual')),
   active INTEGER DEFAULT 1,
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT DEFAULT (CURRENT_TIMESTAMP),
+  updated_at TEXT DEFAULT (CURRENT_TIMESTAMP)
 );
 
 CREATE TABLE IF NOT EXISTS env_test_records (
@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS env_test_records (
   attachments TEXT DEFAULT '[]',
   created_by TEXT DEFAULT '',
   updated_by TEXT DEFAULT '',
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now')),
+  created_at TEXT DEFAULT (CURRENT_TIMESTAMP),
+  updated_at TEXT DEFAULT (CURRENT_TIMESTAMP),
   FOREIGN KEY (sample_point_id) REFERENCES env_sample_points(id)
 );
 
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS env_test_results (
   pass_fail TEXT DEFAULT 'pending' CHECK(pass_fail IN ('pass','fail','pending','na')),
   notes TEXT DEFAULT '',
   comments TEXT DEFAULT '',
-  created_at TEXT DEFAULT (datetime('now')),
+  created_at TEXT DEFAULT (CURRENT_TIMESTAMP),
   FOREIGN KEY (record_id) REFERENCES env_test_records(id) ON DELETE CASCADE
 );
 

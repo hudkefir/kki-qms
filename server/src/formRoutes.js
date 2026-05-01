@@ -99,7 +99,7 @@ router.put('/sop-forms/:id', requireWriteAccess, async (req, res) => {
 
     const { form_number, title, form_type, description, version, status } = req.body;
     await db.run(`
-      UPDATE sop_forms SET form_number = ?, title = ?, form_type = ?, description = ?, version = ?, status = ?, updated_at = datetime('now')
+      UPDATE sop_forms SET form_number = ?, title = ?, form_type = ?, description = ?, version = ?, status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
       form_number ?? form.form_number, title ?? form.title, form_type ?? form.form_type,
@@ -335,7 +335,7 @@ router.put('/sop-forms/:formId/entries/:entryId/verify', requireWriteAccess, asy
 
     const verifiedBy = req.session.user?.display_name || req.session.user?.username || '';
     await db.run(`
-      UPDATE sop_form_entries SET status = 'verified', verified_by = ?, verified_at = datetime('now')
+      UPDATE sop_form_entries SET status = 'verified', verified_by = ?, verified_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [verifiedBy, req.params.entryId]);
 

@@ -26,8 +26,8 @@ try {
       notes TEXT DEFAULT '',
       created_by TEXT DEFAULT '',
       updated_by TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP),
+      updated_at TEXT DEFAULT (CURRENT_TIMESTAMP)
     );
 
     CREATE TABLE IF NOT EXISTS supplier_documents (
@@ -38,7 +38,7 @@ try {
       original_name TEXT NOT NULL,
       file_size INTEGER DEFAULT 0,
       uploaded_by TEXT DEFAULT '',
-      uploaded_at TEXT DEFAULT (datetime('now')),
+      uploaded_at TEXT DEFAULT (CURRENT_TIMESTAMP),
       notes TEXT DEFAULT ''
     );
 
@@ -51,7 +51,7 @@ try {
       findings TEXT DEFAULT '',
       corrective_actions TEXT DEFAULT '',
       next_review TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP)
     );
   `);
 } catch (e) {
@@ -167,7 +167,7 @@ router.put('/suppliers/:id', requireWriteAccess, async (req, res) => {
 
     const user = req.session?.user;
     updates.push('updated_by = ?'); params.push(user?.display_name || user?.username || '');
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length <= 2) return res.json(supplier);
 
     params.push(req.params.id);
@@ -193,7 +193,7 @@ router.patch('/suppliers/:id/status', requireRole('admin'), async (req, res) => 
     if (!valid.includes(status)) return res.status(400).json({ error: 'Invalid status. Must be one of: ' + valid.join(', ') });
 
     const user = req.session?.user;
-    await db.run("UPDATE suppliers SET status = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?", [status, user?.display_name || user?.username || '', req.params.id]);
+    await db.run("UPDATE suppliers SET status = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [status, user?.display_name || user?.username || '', req.params.id]);
     if (status === 'approved' && !supplier.approval_date) await db.run("UPDATE suppliers SET approval_date = date('now') WHERE id = ?", [req.params.id]);
 
     const updated = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
@@ -238,7 +238,7 @@ router.post('/suppliers/:id/reviews', requireWriteAccess, async (req, res) => {
     const info = await db.run('INSERT INTO supplier_reviews (supplier_id, review_date, reviewer, outcome, findings, corrective_actions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)', [req.params.id, review_date, reviewer, outcome, findings, corrective_actions, next_review]);
 
     // Update supplier status based on review
-    const updateFields = ["status = ?", "updated_at = datetime('now')"];
+    const updateFields = ["status = ?", "updated_at = CURRENT_TIMESTAMP"];
     const updateParams = [outcome];
     if (next_review) { updateFields.push('next_review_date = ?'); updateParams.push(next_review); }
     updateParams.push(req.params.id);
@@ -347,10 +347,10 @@ router.patch("/suppliers/:id/checklist/:itemId", requireWriteAccess, async (req,
     if (!item) return res.status(404).json({ error: "Checklist item not found" });
     const { completed, notes, required } = req.body;
     const updates = []; const params = [];
-    if (completed !== undefined) { updates.push("completed = ?"); params.push(completed ? 1 : 0); updates.push(completed ? "completed_date = datetime('now')" : "completed_date = NULL"); }
+    if (completed !== undefined) { updates.push("completed = ?"); params.push(completed ? 1 : 0); updates.push(completed ? "completed_date = CURRENT_TIMESTAMP" : "completed_date = NULL"); }
     if (notes !== undefined) { updates.push("notes = ?"); params.push(notes); }
     if (required !== undefined) { updates.push("required = ?"); params.push(required ? 1 : 0); }
-    updates.push("updated_at = datetime('now')"); params.push(req.params.itemId);
+    updates.push("updated_at = CURRENT_TIMESTAMP"); params.push(req.params.itemId);
     await db.run("UPDATE supplier_checklist SET " + updates.join(", ") + " WHERE id = ?", params);
     res.json(await db.get("SELECT * FROM supplier_checklist WHERE id = ?", [req.params.itemId]));
   } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }

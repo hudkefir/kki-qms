@@ -47,7 +47,7 @@ await db.exec(`CREATE TABLE IF NOT EXISTS capa_attachments (
   file_size INTEGER DEFAULT 0,
   mime_type TEXT DEFAULT '',
   uploaded_by TEXT DEFAULT '',
-  created_at TEXT DEFAULT (datetime('now')),
+  created_at TEXT DEFAULT (CURRENT_TIMESTAMP),
   FOREIGN KEY (capa_id) REFERENCES capas(id) ON DELETE CASCADE
 )`);
 
@@ -182,7 +182,7 @@ router.put('/change-requests/:id', requireWriteAccess, async (req, res) => {
       params.push(typeof sanitized.affected_documents === 'string' ? sanitized.affected_documents : JSON.stringify(sanitized.affected_documents));
     }
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 1) return res.json(cr);
 
     params.push(req.params.id);
@@ -206,7 +206,7 @@ router.post('/change-requests/:id/classify', requireWriteAccess, async (req, res
     const { classification, food_safety_impact } = req.body;
     if (!classification) return res.status(400).json({ error: 'classification is required' });
 
-    await db.run(`UPDATE change_requests SET classification = ?, food_safety_impact = ?, status = 'pending_review', updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE change_requests SET classification = ?, food_safety_impact = ?, status = 'pending_review', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [classification, JSON.stringify(food_safety_impact || {}), req.params.id]);
 
     const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
@@ -227,7 +227,7 @@ router.post('/change-requests/:id/approve', requireWriteAccess, async (req, res)
     const sessionUser = req.session?.user;
     const approvedBy = sessionUser?.display_name || sessionUser?.username || '';
 
-    await db.run(`UPDATE change_requests SET status = 'approved', approved_by = ?, approved_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE change_requests SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [approvedBy, req.params.id]);
 
     const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
@@ -248,7 +248,7 @@ router.post('/change-requests/:id/reject', requireWriteAccess, async (req, res) 
     const { rejection_reason } = req.body;
     if (!rejection_reason) return res.status(400).json({ error: 'rejection_reason is required' });
 
-    await db.run(`UPDATE change_requests SET status = 'rejected', rejection_reason = ?, updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE change_requests SET status = 'rejected', rejection_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [rejection_reason, req.params.id]);
 
     const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
@@ -270,9 +270,9 @@ router.post('/change-requests/:id/effectiveness', requireWriteAccess, async (req
     if (!effectiveness_result) return res.status(400).json({ error: 'effectiveness_result is required' });
 
     const newStatus = effectiveness_result === 'effective' ? 'closed' : 'implementing';
-    const closedAt = effectiveness_result === 'effective' ? "datetime('now')" : null;
+    const closedAt = effectiveness_result === 'effective' ? "CURRENT_TIMESTAMP" : null;
 
-    await db.run(`UPDATE change_requests SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = datetime('now'), status = ?, closed_at = ${closedAt ? closedAt : 'closed_at'}, updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE change_requests SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = CURRENT_TIMESTAMP, status = ?, closed_at = ${closedAt ? closedAt : 'closed_at'}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [effectiveness_result, effectiveness_notes || '', newStatus, req.params.id]);
 
     const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
@@ -446,7 +446,7 @@ router.put('/deviations/:id', requireWriteAccess, async (req, res) => {
       params.push(typeof sanitized.affected_products === 'string' ? sanitized.affected_products : JSON.stringify(sanitized.affected_products));
     }
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 1) return res.json(dev);
 
     params.push(req.params.id);
@@ -491,7 +491,7 @@ router.post('/deviations/:id/classify', requireWriteAccess, async (req, res) => 
     const { classification } = req.body;
     if (!classification) return res.status(400).json({ error: 'classification is required' });
 
-    await db.run(`UPDATE deviation_reports SET classification = ?, status = 'under_investigation', updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE deviation_reports SET classification = ?, status = 'under_investigation', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [classification, req.params.id]);
 
     const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
@@ -511,7 +511,7 @@ router.post('/deviations/:id/investigate', requireWriteAccess, async (req, res) 
 
     const { root_cause_method, root_cause, scope_assessment } = req.body;
 
-    await db.run(`UPDATE deviation_reports SET root_cause_method = ?, root_cause = ?, scope_assessment = ?, updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE deviation_reports SET root_cause_method = ?, root_cause = ?, scope_assessment = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [root_cause_method || null, root_cause || '', scope_assessment || '', req.params.id]);
 
     const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
@@ -532,7 +532,7 @@ router.post('/deviations/:id/disposition', requireWriteAccess, async (req, res) 
     const { product_disposition, disposition_rationale } = req.body;
     if (!product_disposition) return res.status(400).json({ error: 'product_disposition is required' });
 
-    await db.run(`UPDATE deviation_reports SET product_disposition = ?, disposition_rationale = ?, updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE deviation_reports SET product_disposition = ?, disposition_rationale = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [product_disposition, disposition_rationale || '', req.params.id]);
 
     const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
@@ -712,7 +712,7 @@ router.put('/capas/:id', requireContentAccess, async (req, res) => { console.log
       }
     }
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 1) return res.json(capa);
 
     params.push(req.params.id);
@@ -738,7 +738,7 @@ router.post('/capas/:id/updates', requireContentAccess, async (req, res) => {
     const result = await db.run('INSERT INTO capa_updates (capa_id, update_type, content, created_by) VALUES (?, ?, ?, ?)',
       [capa.id, update_type || 'note', content, req.session.user.username]);
     const update = await db.get('SELECT * FROM capa_updates WHERE id = ?', [result.lastInsertRowid]);
-    await db.run("UPDATE capas SET updated_at = datetime('now') WHERE id = ?", [capa.id]);
+    await db.run("UPDATE capas SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", [capa.id]);
     res.json(update);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -829,7 +829,7 @@ router.put('/capas/:id/link-complaint', requireWriteAccess, async (req, res) => 
     let linked = [];
     try { linked = JSON.parse(capa.linked_complaints_json || '[]'); } catch(e) {}
     if (!linked.includes(Number(complaint_id))) linked.push(Number(complaint_id));
-    await db.run("UPDATE capas SET linked_complaints_json = ?, updated_at = datetime('now') WHERE id = ?", [JSON.stringify(linked), capa.id]);
+    await db.run("UPDATE capas SET linked_complaints_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [JSON.stringify(linked), capa.id]);
     
     res.json({ success: true, linked_complaints: linked });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -860,7 +860,7 @@ router.delete('/capas/:id/link-complaint/:complaintId', requireWriteAccess, asyn
     let linked = [];
     try { linked = JSON.parse(capa.linked_complaints_json || '[]'); } catch(e) {}
     linked = linked.filter(id => id !== Number(req.params.complaintId));
-    await db.run("UPDATE capas SET linked_complaints_json = ?, updated_at = datetime('now') WHERE id = ?", [JSON.stringify(linked), capa.id]);
+    await db.run("UPDATE capas SET linked_complaints_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [JSON.stringify(linked), capa.id]);
     res.json({ success: true, linked_complaints: linked });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -898,7 +898,7 @@ router.put('/capas/:id/link-batch', requireWriteAccess, async (req, res) => {
     let linked = [];
     try { linked = JSON.parse(capa.linked_batch_tests || '[]'); } catch(e) {}
     if (!linked.includes(batchRef)) linked.push(batchRef);
-    await db.run("UPDATE capas SET linked_batch_tests = ?, updated_at = datetime('now') WHERE id = ?", [JSON.stringify(linked), capa.id]);
+    await db.run("UPDATE capas SET linked_batch_tests = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [JSON.stringify(linked), capa.id]);
 
     // Also update the batch test record
     if (batch_id) {
@@ -922,7 +922,7 @@ router.post('/capas/:id/effectiveness', requireWriteAccess, async (req, res) => 
 
     const newStatus = effectiveness_result === 'effective' ? 'closed' : 'in_progress';
 
-    await db.run(`UPDATE capas SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = datetime('now'), status = ?, updated_at = datetime('now') WHERE id = ?`,
+    await db.run(`UPDATE capas SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = CURRENT_TIMESTAMP, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [effectiveness_result, effectiveness_notes || '', newStatus, req.params.id]);
 
     const updated = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);

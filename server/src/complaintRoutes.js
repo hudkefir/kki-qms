@@ -16,7 +16,7 @@ await db.exec(`
     new_status TEXT NOT NULL,
     changed_by TEXT DEFAULT '',
     reason TEXT DEFAULT '',
-    created_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (CURRENT_TIMESTAMP),
     FOREIGN KEY (complaint_id) REFERENCES complaints(id)
   )
 `);
@@ -220,7 +220,7 @@ router.put('/complaints/:id', requireWriteAccess, async (req, res) => {
     updates.push('updated_by = ?');
     params.push(sessionUser?.display_name || sessionUser?.username || '');
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
 
     if (updates.length === 2) return res.json(complaint); // only updated_by + updated_at = no real change
 
@@ -266,7 +266,7 @@ router.patch('/complaints/:id/archive', requireWriteAccess, async (req, res) => 
 
     const sessionUser = req.session?.user;
     const updatedBy = sessionUser?.display_name || sessionUser?.username || '';
-    await db.run("UPDATE complaints SET archived = 1, updated_by = ?, updated_at = datetime('now') WHERE id = ?", [updatedBy, req.params.id]);
+    await db.run("UPDATE complaints SET archived = 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [updatedBy, req.params.id]);
     const updated = await db.get('SELECT * FROM complaints WHERE id = ?', [req.params.id]);
 
     logAudit(req, 'archive_complaint', 'complaints', updated.id, updated.complaint_number, { old_values: { archived: 0 }, new_values: { archived: 1 } });
@@ -286,7 +286,7 @@ router.patch('/complaints/:id/unarchive', requireWriteAccess, async (req, res) =
 
     const sessionUser = req.session?.user;
     const updatedBy = sessionUser?.display_name || sessionUser?.username || '';
-    await db.run("UPDATE complaints SET archived = 0, updated_by = ?, updated_at = datetime('now') WHERE id = ?", [updatedBy, req.params.id]);
+    await db.run("UPDATE complaints SET archived = 0, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [updatedBy, req.params.id]);
     const updated = await db.get('SELECT * FROM complaints WHERE id = ?', [req.params.id]);
 
     logAudit(req, 'unarchive_complaint', 'complaints', updated.id, updated.complaint_number, { old_values: { archived: 1 }, new_values: { archived: 0 } });
@@ -346,7 +346,7 @@ router.post('/complaints/:id/comments', requireWriteAccess, async (req, res) => 
     const created = await db.get('SELECT * FROM complaint_comments WHERE id = ?', [info.lastInsertRowid]);
 
     // Update complaint updated_at
-    await db.run("UPDATE complaints SET updated_at = datetime('now') WHERE id = ?", [req.params.id]);
+    await db.run("UPDATE complaints SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
 
     logAudit(req, 'add_comment', 'complaints', req.params.id, complaint.complaint_number, { new_values: { comment: comment.trim(), author } });
     broadcast('complaint_comment_added', { complaint_id: req.params.id, complaint_number: complaint.complaint_number, comment: created });
@@ -436,7 +436,7 @@ router.post('/complaints/:id/status', requireWriteAccess, async (req, res) => {
     const changedBy = sessionUser?.display_name || sessionUser?.username || '';
     const oldStatus = complaint.status;
 
-    await db.run("UPDATE complaints SET status = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
+    await db.run("UPDATE complaints SET status = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [status, changedBy, req.params.id]);
 
     await db.run(`INSERT INTO complaint_status_history (complaint_id, old_status, new_status, changed_by, reason) VALUES (?, ?, ?, ?, ?)`,
@@ -604,7 +604,7 @@ router.put('/ccrs/:id', requireWriteAccess, async (req, res) => {
     updates.push('updated_by = ?');
     params.push(sessionUser?.display_name || sessionUser?.username || '');
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 2) return res.json(ccr); // only updated_by + updated_at = no real change
 
     params.push(req.params.id);
@@ -716,7 +716,7 @@ router.put('/ccrs/:id/actions/:actionId', requireWriteAccess, async (req, res) =
     updates.push('updated_by = ?');
     params.push(sessionUser?.display_name || sessionUser?.username || '');
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 2) return res.json(action); // only updated_by + updated_at = no real change
 
     params.push(req.params.actionId);

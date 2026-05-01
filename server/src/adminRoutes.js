@@ -32,7 +32,7 @@ async function auditedUpdate(req, table, id, allowedFields, identifierField) {
 
   if (updates.length === 0) return old;
 
-  updates.push("updated_at = datetime('now')");
+  updates.push("updated_at = CURRENT_TIMESTAMP");
   params.push(id);
   await db.run(`UPDATE ${table} SET ${updates.join(', ')} WHERE id = ?`, params);
 
@@ -213,7 +213,7 @@ router.put('/admin/audit-checklist/:id', async (req, res) => {
     }
     if (updates.length === 0) return res.json(old);
 
-    updates.push("checked_at = datetime('now')");
+    updates.push("checked_at = CURRENT_TIMESTAMP");
     params.push(req.params.id);
     await db.run(`UPDATE audit_checklist SET ${updates.join(', ')} WHERE id = ?`, params);
 
@@ -290,7 +290,7 @@ router.put('/admin/users/:id', async (req, res) => {
     }
     if (updates.length === 0) return res.json(old);
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     params.push(req.params.id);
     await db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
 
@@ -312,7 +312,7 @@ router.delete('/admin/users/:id', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     // Soft delete - deactivate
-    await db.run("UPDATE users SET active = 0, updated_at = datetime('now') WHERE id = ?", [req.params.id]);
+    await db.run("UPDATE users SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
 
     logAudit(req, 'admin_delete_users', 'users', req.params.id, user.username, {
       old_values: { active: 1 },

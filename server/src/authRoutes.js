@@ -159,7 +159,7 @@ router.put('/users/:id', requireAuth, requireRole('admin'), async (req, res) => 
 
     if (updates.length === 0) return res.json(user);
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     params.push(req.params.id);
     await db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
 
@@ -188,7 +188,7 @@ router.delete('/users/:id', requireAuth, requireRole('admin'), async (req, res) 
     }
 
     // Soft-delete: deactivate instead of hard delete to preserve audit trail
-    await db.run("UPDATE users SET active = 0, updated_at = datetime('now') WHERE id = ?", [req.params.id]);
+    await db.run("UPDATE users SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
     await logAudit(req, 'delete_user', 'users', user.id, user.username, { old_values: { active: 1 }, new_values: { active: 0 } });
 
     // Destroy any active sessions for this user
@@ -212,7 +212,7 @@ router.post('/users/:id/reset-password', requireAuth, requireRole('admin'), asyn
     }
 
     const hash = bcrypt.hashSync(password, 10);
-    await db.run("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?", [hash, req.params.id]);
+    await db.run("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [hash, req.params.id]);
 
     await logAudit(req, 'reset_password', 'users', user.id, user.username, {});
     res.json({ success: true });
