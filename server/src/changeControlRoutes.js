@@ -5,28 +5,10 @@ import { requireWriteAccess, requireRole, requireContentAccess } from './authMid
 import { logAudit } from './auditMiddleware.js';
 import { sanitizeBody } from './sanitize.js';
 import multer from 'multer';
-import { existsSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename_cc = fileURLToPath(import.meta.url);
-const __dirname_cc = dirname(__filename_cc);
-
-// ── Multer setup for CAPA document uploads ──
-const capaUploadsDir = join(__dirname_cc, '..', '..', 'uploads', 'capa-docs');
-if (!existsSync(capaUploadsDir)) { mkdirSync(capaUploadsDir, { recursive: true }); }
-
-const capaStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, capaUploadsDir),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = file.originalname.split('.').pop();
-    cb(null, 'capa-' + req.params.id + '-' + uniqueSuffix + '.' + ext);
-  }
-});
+import { uploadFile, downloadFile, deleteFile } from './supabase.js';
 
 const capaUpload = multer({
-  storage: capaStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
     const allowed = /pdf|doc|docx|xls|xlsx|jpg|jpeg|png|gif/;
@@ -992,9 +974,16 @@ router.post('/capas/:id/attachments', requireContentAccess, capaUpload.single('f
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
+    // Upload to Supabase Storage
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = req.file.originalname.split('.').pop();
+    const storageFilename = 'capa-' + req.params.id + '-' + uniqueSuffix + '.' + ext;
+    const storagePath = `capa-docs/${req.params.id}/${storageFilename}`;
+    await uploadFile(storagePath, req.file.buffer, req.file.mimetype);
+
     const uploader = req.session?.user?.display_name || req.session?.user?.username || 'Unknown';
     const result = await db.run('INSERT INTO capa_attachments (capa_id, filename, original_name, file_size, mime_type, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)',
-      [req.params.id, req.file.filename, req.file.originalname, req.file.size, req.file.mimetype, uploader]);
+      [req.params.id, storagePath, req.file.originalname, req.file.size, req.file.mimetype, uploader]);
 
     const attachment = await db.get('SELECT * FROM capa_attachments WHERE id = ?', [result.lastInsertRowid]);
     logAudit(req, 'upload_capa_attachment', 'capa_attachments', attachment.id, capa.capa_id, { filename: req.file.originalname });
@@ -1009,12 +998,10 @@ router.delete('/capas/:id/attachments/:attachmentId', requireRole('admin'), asyn
     if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
 
     await db.run('DELETE FROM capa_attachments WHERE id = ?', [req.params.attachmentId]);
-    // Try to delete the physical file
+    // Delete from Supabase Storage
     try {
-      const { unlinkSync } = await import('fs');
-      const fpath = join(capaUploadsDir, attachment.filename);
-      if (existsSync(fpath)) unlinkSync(fpath);
-    } catch (e) { console.warn('Could not delete file:', e.message); }
+      await deleteFile(attachment.filename);
+    } catch (e) { console.warn('Could not delete file from storage:', e.message); }
 
     logAudit(req, 'delete_capa_attachment', 'capa_attachments', req.params.attachmentId, null, { filename: attachment.original_name });
     res.json({ success: true });
