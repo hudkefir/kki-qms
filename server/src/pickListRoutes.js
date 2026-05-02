@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { readFileSync } from 'fs';
 import db from './database-pg.js';
 import { requireWriteAccess } from './authMiddleware.js';
 import { logAudit } from './auditMiddleware.js';
@@ -11,13 +10,8 @@ function getSOSConfig() {
   if (process.env.SOS_API_KEY) {
     return { apiKey: process.env.SOS_API_KEY };
   }
-  try {
-    const raw = readFileSync('/Users/kefirbot/.openclaw/secrets/sos-inventory.json', 'utf-8');
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error('Failed to load SOS credentials:', err.message);
-    return null;
-  }
+  console.error('SOS_API_KEY environment variable not set');
+  return null;
 }
 
 async function sosApiFetch(path, token) {

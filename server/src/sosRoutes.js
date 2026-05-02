@@ -1,7 +1,5 @@
 import { Router } from 'express';
 import { requireAuth } from './authMiddleware.js';
-import { readFileSync } from 'fs';
-
 const router = Router();
 
 // Simple in-memory cache (5 min TTL)
@@ -19,18 +17,13 @@ function setCache(key, data) {
   cache.set(key, { data, ts: Date.now() });
 }
 
-// Load SOS credentials from env vars (Cloud Run) or fallback to local file
+// Load SOS credentials from env vars (required on Cloud Run)
 function getSOSConfig() {
   if (process.env.SOS_API_KEY) {
     return { apiKey: process.env.SOS_API_KEY };
   }
-  try {
-    const raw = readFileSync('/Users/kefirbot/.openclaw/secrets/sos-inventory.json', 'utf-8');
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error('Failed to load SOS credentials:', err.message);
-    return null;
-  }
+  console.error('SOS_API_KEY environment variable not set');
+  return null;
 }
 
 async function sosApiFetch(path, token) {
