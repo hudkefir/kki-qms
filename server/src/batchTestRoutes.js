@@ -1,34 +1,18 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync, rmSync } from 'fs';
-import { dirname, join, extname, basename } from 'path';
+import { writeFileSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'fs';
+import { join, extname } from 'path';
 import { execSync } from 'child_process';
-import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 import db from './database-pg.js';
 import { requireAuth, requireWriteAccess, requireRole } from './authMiddleware.js';
 import { logAudit } from './auditMiddleware.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { uploadFile, downloadFile, deleteFile } from './supabase.js';
 
 // ── Multer setup for COA PDF uploads ────────────────────────────────────────
-const uploadsDir = join(__dirname, '..', '..', 'uploads', 'batch-testing');
-if (!existsSync(uploadsDir)) {
-  mkdirSync(uploadsDir, { recursive: true });
-}
-
-const coaStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const ext = extname(file.originalname).toLowerCase();
-    const base = basename(file.originalname, ext).replace(/[^a-zA-Z0-9_.-]/g, '_');
-    cb(null, `${base}_${Date.now()}${ext}`);
-  },
-});
-
 const coaUpload = multer({
-  storage: coaStorage,
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (extname(file.originalname).toLowerCase() === '.pdf') {
       cb(null, true);
@@ -312,11 +296,14 @@ router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coa
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    const tmpDir = join(__dirname, '..', '..', 'uploads', 'ocr-multi-' + Date.now());
+    const tmpDir = join(tmpdir(), 'ocr-multi-' + Date.now());
     mkdirSync(tmpDir, { recursive: true });
 
+    const inputPdfPath = join(tmpDir, 'input.pdf');
+    writeFileSync(inputPdfPath, req.file.buffer);
+
     // Step 1: Split PDF into individual pages
-    execSync(`pdfseparate "${req.file.path}" "${join(tmpDir, 'page-%d.pdf')}"`, { timeout: 60000 });
+    execSync(`pdfseparate "${inputPdfPath}" "${join(tmpDir, 'page-%d.pdf')}"`, { timeout: 60000 });
     const pageFiles = readdirSync(tmpDir).filter(f => f.startsWith('page-') && f.endsWith('.pdf')).sort((a, b) => {
       const na = parseInt(a.match(/\d+/)[0]);
       const nb = parseInt(b.match(/\d+/)[0]);
@@ -376,30 +363,30 @@ router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coa
     }
 
     // Step 4: For each lot, merge pages into a per-lot PDF, parse results, match to DB
-    const uploadsDir = join(__dirname, '..', '..', 'uploads', 'batch-testing');
     const results = [];
 
     for (const [lotNum, group] of Object.entries(lotGroups)) {
       // Merge pages into per-lot PDF
       const lotPdfName = `COA-Lot-${lotNum}_${Date.now()}.pdf`;
-      const lotPdfPath = join(uploadsDir, lotPdfName);
+      const lotPdfPath = join(tmpDir, lotPdfName);
 
       if (group.pages.length === 1) {
-        // Just copy the single page
         const { copyFileSync } = await import('fs');
         copyFileSync(group.pages[0], lotPdfPath);
       } else {
         execSync(`pdfunite ${group.pages.map(p => '"' + p + '"').join(' ')} "${lotPdfPath}"`, { timeout: 30000 });
       }
 
+      // Upload per-lot PDF to Supabase
+      await uploadFile('batch-testing/' + lotPdfName, readFileSync(lotPdfPath), 'application/pdf');
+
       // Also create a PNG screenshot of the first page for quick preview
       const pngName = `COA-Lot-${lotNum}_${Date.now()}.png`;
-      const pngPath = join(uploadsDir, pngName);
       execSync(`pdftoppm -png -r 200 -f 1 -l 1 "${lotPdfPath}" "${join(tmpDir, 'preview-' + lotNum)}"`, { timeout: 15000 });
       const previewImg = readdirSync(tmpDir).find(f => f.startsWith('preview-' + lotNum) && f.endsWith('.png'));
       if (previewImg) {
-        const { copyFileSync } = await import('fs');
-        copyFileSync(join(tmpDir, previewImg), pngPath);
+        const previewPath = join(tmpDir, previewImg);
+        await uploadFile('batch-testing/' + pngName, readFileSync(previewPath), 'image/png');
       }
 
       // Parse test results from OCR text
@@ -435,10 +422,10 @@ router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coa
         // Attach per-lot PDF to batch test
         attachment = {
           name: `COA - Lot ${lotNum} (extracted from ${req.file.originalname})`,
-          path: `/uploads/batch-testing/${lotPdfName}`,
+          path: 'batch-testing/' + lotPdfName,
           size: readFileSync(lotPdfPath).length,
           uploaded_at: new Date().toISOString(),
-          preview: previewImg ? `/uploads/batch-testing/${pngName}` : null,
+          preview: previewImg ? 'batch-testing/' + pngName : null,
         };
 
         let existingAttachments = [];
@@ -764,9 +751,12 @@ router.post('/batch-tests/:id/upload-coa', requireAuth, requireWriteAccess, coaU
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     // Build attachment record
+    const filename = req.file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_').replace(/\.pdf$/i, '') + '_' + Date.now() + '.pdf';
+    await uploadFile('batch-testing/' + filename, req.file.buffer, 'application/pdf');
+
     const attachment = {
       name: req.file.originalname,
-      path: `/uploads/batch-testing/${req.file.filename}`,
+      path: 'batch-testing/' + filename,
       size: req.file.size,
       uploaded_at: new Date().toISOString(),
     };
@@ -801,7 +791,7 @@ router.post('/batch-tests/:id/parse-coa', requireAuth, requireWriteAccess, coaUp
     let pdfText = '';
     try {
       const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
-      const pdfBuffer = readFileSync(req.file.path);
+      const pdfBuffer = req.file.buffer;
       const uint8 = new Uint8Array(pdfBuffer);
       const doc = await getDocument({ data: uint8 }).promise;
       for (let i = 1; i <= doc.numPages; i++) {
@@ -815,10 +805,13 @@ router.post('/batch-tests/:id/parse-coa', requireAuth, requireWriteAccess, coaUp
     // If no text extracted (scanned PDF), try OCR with tesseract
     if (!pdfText || pdfText.trim().length < 20) {
       try {
-        const ocrDir = join(__dirname, '..', '..', 'uploads', 'ocr-tmp-' + Date.now());
+        const ocrDir = join(tmpdir(), 'ocr-tmp-' + Date.now());
         mkdirSync(ocrDir, { recursive: true });
 
-        execSync(`pdftoppm -png -r 300 "${req.file.path}" "${join(ocrDir, 'page')}"`, { timeout: 60000 });
+        const tmpPdf = join(ocrDir, 'input.pdf');
+        writeFileSync(tmpPdf, req.file.buffer);
+
+        execSync(`pdftoppm -png -r 300 "${tmpPdf}" "${join(ocrDir, 'page')}"`, { timeout: 60000 });
 
         const pageFiles = readdirSync(ocrDir).filter(f => f.endsWith('.png')).sort();
         pdfText = '';
@@ -837,9 +830,12 @@ router.post('/batch-tests/:id/parse-coa', requireAuth, requireWriteAccess, coaUp
     }
 
     if (!pdfText || pdfText.trim().length < 20) {
+      const fallbackFilename = req.file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_').replace(/\.pdf$/i, '') + '_' + Date.now() + '.pdf';
+      await uploadFile('batch-testing/' + fallbackFilename, req.file.buffer, 'application/pdf');
+
       const attachment = {
         name: req.file.originalname,
-        path: `/uploads/batch-testing/${req.file.filename}`,
+        path: 'batch-testing/' + fallbackFilename,
         size: req.file.size,
         uploaded_at: new Date().toISOString(),
       };
@@ -864,9 +860,12 @@ router.post('/batch-tests/:id/parse-coa', requireAuth, requireWriteAccess, coaUp
     }
     const parsed = parseCOAPdf(pdfText);
 
+    const parseFilename = req.file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_').replace(/\.pdf$/i, '') + '_' + Date.now() + '.pdf';
+    await uploadFile('batch-testing/' + parseFilename, req.file.buffer, 'application/pdf');
+
     const attachment = {
       name: req.file.originalname,
-      path: `/uploads/batch-testing/${req.file.filename}`,
+      path: 'batch-testing/' + parseFilename,
       size: req.file.size,
       uploaded_at: new Date().toISOString(),
     };
@@ -976,8 +975,7 @@ router.delete('/batch-tests/:id/attachments/:index', requireAuth, requireWriteAc
     const removed = attachments.splice(idx, 1)[0];
 
     if (removed.path) {
-      const filePath2 = join(__dirname, '..', '..', removed.path);
-      try { unlinkSync(filePath2); } catch(e) { /* file may not exist */ }
+      try { await deleteFile(removed.path); } catch(e) { /* file may not exist in storage */ }
     }
 
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
