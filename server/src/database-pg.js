@@ -31,6 +31,10 @@ function convertSql(sql) {
   let s = convertPlaceholders(sql);
   // datetime('now') → CURRENT_TIMESTAMP
   s = s.replace(/datetime\('now'\)/gi, 'CURRENT_TIMESTAMP');
+  // date('now') → CURRENT_DATE
+  s = s.replace(/date\('now'\)/gi, 'CURRENT_DATE');
+  // date('now', '+N days') → CURRENT_DATE + INTERVAL 'N days'
+  s = s.replace(/date\('now',\s*'([^']+)'\)/gi, (_, interval) => `CURRENT_DATE + INTERVAL '${interval.replace(/^\+/, '')}'`);
   // INTEGER PRIMARY KEY AUTOINCREMENT → SERIAL PRIMARY KEY
   s = s.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
   return s;
@@ -631,7 +635,10 @@ async function initTables() {
       escalated_from_minor INTEGER DEFAULT 0,
       closed_at TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      linked_complaints_json TEXT DEFAULT '[]',
+      linked_sops_json TEXT DEFAULT '[]',
+      linked_batch_tests_json TEXT DEFAULT '[]'
     );
 
     CREATE TABLE IF NOT EXISTS capas (
@@ -1070,6 +1077,11 @@ async function initTables() {
     CREATE INDEX IF NOT EXISTS idx_pick_lists_status ON pick_lists(status);
     CREATE INDEX IF NOT EXISTS idx_pick_list_items_pick_list ON pick_list_items(pick_list_id);
   `);
+
+  // Add missing columns to existing deviation_reports table
+  await pool.query(`ALTER TABLE deviation_reports ADD COLUMN IF NOT EXISTS linked_complaints_json TEXT DEFAULT '[]'`);
+  await pool.query(`ALTER TABLE deviation_reports ADD COLUMN IF NOT EXISTS linked_sops_json TEXT DEFAULT '[]'`);
+  await pool.query(`ALTER TABLE deviation_reports ADD COLUMN IF NOT EXISTS linked_batch_tests_json TEXT DEFAULT '[]'`);
 }
 
 // ─── Initialize on import ────────────────────────────────────────────────────

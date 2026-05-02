@@ -538,7 +538,7 @@ router.get('/capas', async (req, res) => {
     if (status) { query += ' AND status = ?'; params.push(status); }
     if (source_type) { query += ' AND source_type = ?'; params.push(source_type); }
     if (overdue === 'true') {
-      query += " AND status NOT IN ('completed','closed') AND target_date < date('now')";
+      query += " AND status NOT IN ('completed','closed') AND target_date < CURRENT_DATE";
     }
     if (search) {
       query += ' AND (capa_id LIKE ? OR corrective_action LIKE ? OR preventive_action LIKE ? OR responsible_person LIKE ?)';

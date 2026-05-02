@@ -1,13 +1,9 @@
 import { Router } from 'express';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import db from './database-pg.js';
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType, HeadingLevel } from 'docx';
 import { requireAuth } from './authMiddleware.js';
+import { uploadFile } from './supabase.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 const router = Router();
 
 const COMPANY = {
@@ -369,11 +365,12 @@ router.get('/print/capa/:id/docx', requireAuth, async (req, res) => {
     const doc = createCAPADoc(capa, updates);
     const buffer = await Packer.toBuffer(doc);
     
-    // Archive on Mac mini
-    const archiveDir = join(__dirname, '..', '..', 'uploads', 'capa-docs');
-    if (!existsSync(archiveDir)) mkdirSync(archiveDir, { recursive: true });
     const archiveName = capa.capa_id + '_' + new Date().toISOString().split('T')[0] + '.docx';
-    writeFileSync(join(archiveDir, archiveName), buffer);
+    try {
+      await uploadFile(`capa-docs/${archiveName}`, buffer, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    } catch (e) {
+      console.error('Failed to archive CAPA doc to Supabase:', e.message);
+    }
     
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.setHeader('Content-Disposition', 'attachment; filename="' + capa.capa_id + '_Report.docx"');

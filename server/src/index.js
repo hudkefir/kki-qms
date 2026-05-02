@@ -124,6 +124,16 @@ app.use('/api/planner', (req, res, next) => {
 });
 app.use('/api/planner', plannerRoutes);
 
+// Health endpoint (public — no auth, for Cloud Run probes)
+app.get('/api/health', async (req, res) => {
+  try {
+    await checkDbHealth();
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  } catch (err) {
+    res.status(503).json({ status: 'unhealthy', error: err.message });
+  }
+});
+
 // Auth routes (no auth required for login)
 app.use('/api', authRoutes);
 
