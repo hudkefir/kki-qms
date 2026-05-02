@@ -497,7 +497,7 @@ router.get('/maintenance/dashboard', async (req, res) => {
     const openWorkOrders = (await db.get("SELECT COUNT(*) as count FROM work_orders WHERE status NOT IN ('completed','closed')")).count;
 
     // Completion rate this month
-    const totalThisMonth = (await db.get("SELECT COUNT(*) as count FROM pm_completions WHERE completed_at >= date('now', 'start of month')")).count;
+    const totalThisMonth = (await db.get("SELECT COUNT(*) as count FROM pm_completions WHERE completed_at >= date_trunc('month', CURRENT_DATE)")).count;
     const scheduledThisMonth = (await db.get("SELECT COUNT(*) as count FROM pm_schedules WHERE is_active = 1")).count;
     const completionRateThisMonth = scheduledThisMonth > 0 ? Math.round((totalThisMonth / scheduledThisMonth) * 100) : 0;
 

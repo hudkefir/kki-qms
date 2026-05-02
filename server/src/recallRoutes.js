@@ -722,7 +722,7 @@ router.get('/recall/dashboard', async (req, res) => {
     const openCrises = (await db.get("SELECT COUNT(*) as count FROM crisis_events WHERE status NOT IN ('closed','resolved')")).count;
 
     const currentYear = new Date().getFullYear();
-    const exercisesThisYear = (await db.get("SELECT COUNT(*) as count FROM traceability_exercises WHERE strftime('%Y', created_at) = ?", [String(currentYear)])).count;
+    const exercisesThisYear = (await db.get("SELECT COUNT(*) as count FROM traceability_exercises WHERE EXTRACT(YEAR FROM created_at::timestamp) = ?", [currentYear])).count;
 
     const lastExercise = await db.get('SELECT * FROM traceability_exercises ORDER BY created_at DESC LIMIT 1');
     const lastExerciseResult = lastExercise ? lastExercise.status : null;

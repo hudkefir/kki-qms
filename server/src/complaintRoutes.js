@@ -82,12 +82,12 @@ router.get('/complaints/analytics', async (req, res) => {
     `);
 
     const byMonth = await db.all(`
-      SELECT strftime('%Y-%m', date_received) as month, COUNT(*) as count
+      SELECT TO_CHAR(date_received::date, 'YYYY-MM') as month, COUNT(*) as count
       FROM complaints GROUP BY month ORDER BY month
     `);
 
     const byLot = await db.all(`
-      SELECT lot_number, product_name, product_sku, COUNT(*) as count, GROUP_CONCAT(complaint_number) as complaint_numbers
+      SELECT lot_number, product_name, product_sku, COUNT(*) as count, STRING_AGG(complaint_number, ',') as complaint_numbers
       FROM complaints WHERE lot_number != '' GROUP BY lot_number ORDER BY count DESC
     `);
 
@@ -100,7 +100,7 @@ router.get('/complaints/analytics', async (req, res) => {
 
     // Average resolution time (for resolved/closed complaints)
     const avgResolution = await db.get(`
-      SELECT AVG(julianday(updated_at) - julianday(date_received)) as avg_days
+      SELECT AVG(EXTRACT(EPOCH FROM (updated_at::timestamp - date_received::timestamp)) / 86400) as avg_days
       FROM complaints WHERE status IN ('resolved','closed')
     `);
 
@@ -643,7 +643,7 @@ router.post('/ccrs/:id/complaints', requireWriteAccess, async (req, res) => {
     const { complaint_ids = [] } = req.body;
 
     for (const cId of complaint_ids) {
-      await db.run('INSERT OR IGNORE INTO ccr_complaints (ccr_id, complaint_id) VALUES (?, ?)', [req.params.id, cId]);
+      await db.run('INSERT INTO ccr_complaints (ccr_id, complaint_id) VALUES (?, ?) ON CONFLICT DO NOTHING', [req.params.id, cId]);
       await db.run('UPDATE complaints SET linked_ccr_id = ? WHERE id = ?', [req.params.id, cId]);
     }
 
@@ -796,7 +796,7 @@ router.get('/qa-dashboard', async (req, res) => {
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     const complaintTrend = await db.all(`
-      SELECT strftime('%Y-%m', date_received) as month, COUNT(*) as count
+      SELECT TO_CHAR(date_received::date, 'YYYY-MM') as month, COUNT(*) as count
       FROM complaints WHERE date_received >= ?
       GROUP BY month ORDER BY month
     `, [sixMonthsAgo.toISOString().slice(0, 10)]);
