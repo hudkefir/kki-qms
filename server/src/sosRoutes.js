@@ -19,8 +19,11 @@ function setCache(key, data) {
   cache.set(key, { data, ts: Date.now() });
 }
 
-// Load SOS credentials
+// Load SOS credentials from env vars (Cloud Run) or fallback to local file
 function getSOSConfig() {
+  if (process.env.SOS_API_KEY) {
+    return { apiKey: process.env.SOS_API_KEY };
+  }
   try {
     const raw = readFileSync('/Users/kefirbot/.openclaw/secrets/sos-inventory.json', 'utf-8');
     return JSON.parse(raw);

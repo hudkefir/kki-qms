@@ -8,6 +8,9 @@ const router = Router();
 
 // SOS Inventory helpers (reuse same config as sosRoutes.js)
 function getSOSConfig() {
+  if (process.env.SOS_API_KEY) {
+    return { apiKey: process.env.SOS_API_KEY };
+  }
   try {
     const raw = readFileSync('/Users/kefirbot/.openclaw/secrets/sos-inventory.json', 'utf-8');
     return JSON.parse(raw);

@@ -1,14 +1,7 @@
 import { Router } from 'express';
-import { execSync } from 'child_process';
-import { writeFileSync, readFileSync, unlinkSync, mkdirSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import db from './database-pg.js';
 import { requireAuth, requireWriteAccess } from './authMiddleware.js';
 import { logAudit } from './auditMiddleware.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 const router = Router();
 
 // ── DB Schema (auto-create tables) ─────────────────────────────────────────

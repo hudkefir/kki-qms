@@ -309,9 +309,8 @@ router.delete("/suppliers/:id/documents/:docId", requireRole("admin"), async (re
     const doc = await db.get("SELECT * FROM supplier_documents WHERE id = ? AND supplier_id = ?", [req.params.docId, req.params.id]);
     if (!doc) return res.status(404).json({ error: "Document not found" });
 
-    // Remove file from disk
-    const filePath = join(supplierDocsDir, doc.filename);
-    try { unlinkSync(filePath); } catch (e) { /* file may already be gone */ }
+    // Remove file from Supabase storage
+    try { await deleteFile('supplier-docs/' + doc.filename); } catch (e) { /* file may already be gone */ }
 
     await db.run("DELETE FROM supplier_documents WHERE id = ?", [doc.id]);
 
