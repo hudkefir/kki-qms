@@ -698,6 +698,7 @@ function AddBatchModal({ open, onClose, onSaved }) {
 
 function InventoryCountModal({ open, onClose, onSaved }) {
   const [counts, setCounts] = useState(() => SKU_LABELS.map(l => ({ sku: l, counted: '' })));
+  const [countDate, setCountDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -711,7 +712,7 @@ function InventoryCountModal({ open, onClose, onSaved }) {
     try {
       const payload = counts.filter(c => c.counted !== '').map(c => ({ sku: c.sku, counted: Number(c.counted) }));
       if (payload.length === 0) { setError('Enter at least one count'); setSaving(false); return; }
-      await apiPost('/api/planner/inventory/count', { counts: payload });
+      await apiPost('/api/planner/inventory/counts', { counts: payload, count_date: countDate });
       onSaved();
       onClose();
     } catch (e) {
@@ -725,6 +726,15 @@ function InventoryCountModal({ open, onClose, onSaved }) {
     <Modal isOpen={open} onClose={onClose} title="Physical Inventory Count">
       <div className="space-y-3">
         {error && <p className="text-sm text-red-600">{error}</p>}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Count Date</label>
+          <input
+            type="date"
+            value={countDate}
+            onChange={e => setCountDate(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
         <p className="text-sm text-gray-500">Enter counted cases for each SKU. Leave blank to skip.</p>
         {counts.map(c => (
           <div key={c.sku} className="flex items-center gap-3">

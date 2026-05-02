@@ -617,8 +617,27 @@ router.get('/inventory/counts', async (req, res) => {
 
 router.post('/inventory/counts', async (req, res) => {
   try {
-    const { count_date, sku, system_count, physical_count, variance, notes, counted_by } = req.body;
     const now = new Date().toISOString();
+
+    // Support batch format from planner modal: { counts: [...], count_date }
+    if (req.body.counts && Array.isArray(req.body.counts)) {
+      const batchDate = req.body.count_date || now.slice(0, 10);
+      const operator = req.user?.name || req.user?.username || '';
+      const created = [];
+      for (const item of req.body.counts) {
+        const result = await db.run(
+          `INSERT INTO planner_inventory_counts (count_date, sku, system_count, physical_count, variance, notes, counted_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [batchDate, item.sku, 0, item.counted || 0, item.counted || 0, '', operator, now]
+        );
+        const row = await db.get('SELECT * FROM planner_inventory_counts WHERE id = ?', [result.lastInsertRowid]);
+        if (row) created.push(row);
+      }
+      return res.status(201).json(created);
+    }
+
+    // Single record format (from InventoryCounts page)
+    const { count_date, sku, system_count, physical_count, variance, notes, counted_by } = req.body;
     const computedVariance = variance != null ? variance : (physical_count || 0) - (system_count || 0);
     const result = await db.run(
       `INSERT INTO planner_inventory_counts (count_date, sku, system_count, physical_count, variance, notes, counted_by, created_at)
