@@ -88,7 +88,7 @@ router.get('/suppliers/summary', async (req, res) => {
     const conditional = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE status = 'conditional'")).count;
     const suspended = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE status = 'suspended'")).count;
     const pending = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE status = 'pending'")).count;
-    const overdue = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE next_review_date < date('now') AND status != 'suspended'")).count;
+    const overdue = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE next_review_date < CURRENT_DATE AND status != 'suspended'")).count;
     res.json({ total, approved, conditional, suspended, pending, overdue });
   } catch (err) {
     console.error('Supplier summary error:', err); res.status(500).json({ error: 'Internal server error' });
@@ -194,7 +194,7 @@ router.patch('/suppliers/:id/status', requireRole('admin'), async (req, res) => 
 
     const user = req.session?.user;
     await db.run("UPDATE suppliers SET status = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [status, user?.display_name || user?.username || '', req.params.id]);
-    if (status === 'approved' && !supplier.approval_date) await db.run("UPDATE suppliers SET approval_date = date('now') WHERE id = ?", [req.params.id]);
+    if (status === 'approved' && !supplier.approval_date) await db.run("UPDATE suppliers SET approval_date = CURRENT_DATE WHERE id = ?", [req.params.id]);
 
     const updated = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
     logAudit(req, 'update_supplier_status', 'suppliers', req.params.id, supplier.name, { old_values: { status: supplier.status }, new_values: { status } });

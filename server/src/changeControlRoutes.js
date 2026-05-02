@@ -1015,7 +1015,7 @@ router.get('/change-control/dashboard', async (req, res) => {
   try {
     const openCCs = (await db.get("SELECT COUNT(*) as count FROM change_requests WHERE status NOT IN ('closed','rejected')")).count;
     const openDEVs = (await db.get("SELECT COUNT(*) as count FROM deviation_reports WHERE status != 'closed'")).count;
-    const overdueCAPAs = (await db.get("SELECT COUNT(*) as count FROM capas WHERE status NOT IN ('completed','closed') AND target_date < date('now')")).count;
+    const overdueCAPAs = (await db.get("SELECT COUNT(*) as count FROM capas WHERE status NOT IN ('completed','closed') AND target_date < CURRENT_DATE")).count;
 
     const countsByClassification = {
       change_requests: await db.all("SELECT classification, COUNT(*) as count FROM change_requests WHERE classification IS NOT NULL GROUP BY classification"),

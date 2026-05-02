@@ -180,7 +180,7 @@ router.get('/pm-schedules', async (req, res) => {
     if (equipment_id) { query += ' AND ps.equipment_id = ?'; params.push(equipment_id); }
     if (frequency) { query += ' AND ps.frequency = ?'; params.push(frequency); }
     if (overdue === 'true') {
-      query += " AND ps.is_active = 1 AND ps.next_due_date < date('now')";
+      query += " AND ps.is_active = 1 AND ps.next_due_date < CURRENT_DATE";
     }
 
     query += ' ORDER BY ps.next_due_date ASC';
@@ -195,7 +195,7 @@ router.get('/pm-schedules', async (req, res) => {
 router.get('/pm-schedules/overdue', async (req, res) => {
   try {
     const rows = await db.all(
-      "SELECT ps.*, e.equipment_id AS equip_code, e.name AS equipment_name FROM pm_schedules ps JOIN equipment e ON ps.equipment_id = e.id WHERE ps.is_active = 1 AND ps.next_due_date < date('now') ORDER BY ps.next_due_date ASC"
+      "SELECT ps.*, e.equipment_id AS equip_code, e.name AS equipment_name FROM pm_schedules ps JOIN equipment e ON ps.equipment_id = e.id WHERE ps.is_active = 1 AND ps.next_due_date < CURRENT_DATE ORDER BY ps.next_due_date ASC"
     );
     res.json(rows);
   } catch (err) {
@@ -207,7 +207,7 @@ router.get('/pm-schedules/overdue', async (req, res) => {
 router.get('/pm-schedules/upcoming', async (req, res) => {
   try {
     const rows = await db.all(
-      "SELECT ps.*, e.equipment_id AS equip_code, e.name AS equipment_name FROM pm_schedules ps JOIN equipment e ON ps.equipment_id = e.id WHERE ps.is_active = 1 AND ps.next_due_date >= date('now') AND ps.next_due_date <= date('now', '+7 days') ORDER BY ps.next_due_date ASC"
+      "SELECT ps.*, e.equipment_id AS equip_code, e.name AS equipment_name FROM pm_schedules ps JOIN equipment e ON ps.equipment_id = e.id WHERE ps.is_active = 1 AND ps.next_due_date >= CURRENT_DATE AND ps.next_due_date <= CURRENT_DATE + INTERVAL '7 days' ORDER BY ps.next_due_date ASC"
     );
     res.json(rows);
   } catch (err) {
@@ -492,8 +492,8 @@ router.get('/maintenance/dashboard', async (req, res) => {
     const totalEquipment = (await db.get('SELECT COUNT(*) as count FROM equipment')).count;
     const activeEquipment = (await db.get("SELECT COUNT(*) as count FROM equipment WHERE status = 'active'")).count;
     const criticalEquipment = (await db.get("SELECT COUNT(*) as count FROM equipment WHERE is_critical = 1 AND status = 'active'")).count;
-    const overdueCount = (await db.get("SELECT COUNT(*) as count FROM pm_schedules WHERE is_active = 1 AND next_due_date < date('now')")).count;
-    const upcomingThisWeek = (await db.get("SELECT COUNT(*) as count FROM pm_schedules WHERE is_active = 1 AND next_due_date >= date('now') AND next_due_date <= date('now', '+7 days')")).count;
+    const overdueCount = (await db.get("SELECT COUNT(*) as count FROM pm_schedules WHERE is_active = 1 AND next_due_date < CURRENT_DATE")).count;
+    const upcomingThisWeek = (await db.get("SELECT COUNT(*) as count FROM pm_schedules WHERE is_active = 1 AND next_due_date >= CURRENT_DATE AND next_due_date <= CURRENT_DATE + INTERVAL '7 days'")).count;
     const openWorkOrders = (await db.get("SELECT COUNT(*) as count FROM work_orders WHERE status NOT IN ('completed','closed')")).count;
 
     // Completion rate this month
