@@ -58,6 +58,8 @@ export default function DeviationDetail() {
   const [dispositionForm, setDispositionForm] = useState({});
   const [showCapaModal, setShowCapaModal] = useState(false);
   const [capaForm, setCapaForm] = useState({});
+  const [linkType, setLinkType] = useState('');
+  const [linkSearch, setLinkSearch] = useState('');
 
   if (loading) return <LoadingSpinner message="Loading Deviation..." />;
   if (error) return <div className="text-center py-16 text-red-600">{error}</div>;
@@ -116,8 +118,6 @@ export default function DeviationDetail() {
   };
 
   const capas = dev.capas || [];
-  const [linkType, setLinkType] = useState('');
-  const [linkSearch, setLinkSearch] = useState('');
 
   const handleLink = async (type, itemId) => {
     const fieldMap = { complaint: 'linked_complaints_json', sop: 'linked_sops_json', batch: 'linked_batch_tests_json' };
