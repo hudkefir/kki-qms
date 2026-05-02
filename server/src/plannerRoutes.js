@@ -389,6 +389,20 @@ router.delete('/purchase-orders/:id', async (req, res) => {
   try {
     const result = await db.run('DELETE FROM planner_purchase_orders WHERE id = ?', [req.params.id]);
     if (result.changes === 0) return res.status(404).json({ error: 'Purchase order not found' });
+
+    // Cascade: restore picked inventory back to batches, then remove pick records
+    const picks = await db.all('SELECT * FROM planner_pick_records WHERE po_id = ?', [req.params.id]);
+    const now = new Date().toISOString();
+    for (const pick of picks) {
+      await db.run(
+        `UPDATE planner_batches SET inventory_remaining = inventory_remaining + ?,
+                status = CASE WHEN status = 'depleted' THEN 'available' ELSE status END,
+                updated_at = ? WHERE id = ?`,
+        [pick.quantity, now, pick.batch_id]
+      );
+    }
+    await db.run('DELETE FROM planner_pick_records WHERE po_id = ?', [req.params.id]);
+
     res.json({ ok: true });
   } catch (err) {
     console.error('Planner DELETE /purchase-orders/:id error:', err);
