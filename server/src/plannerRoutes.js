@@ -214,6 +214,37 @@ router.post('/batches', async (req, res) => {
       [batch_number, sku, production_date, bins || 0, cases_per_bin || 0, estimated_cases || 0, actual_cases || 0, inventory_remaining || 0, status || 'available', hold || 0, pour_week, pour_day, pour_index, notes || '', now, now]
     );
     const created = await db.get('SELECT * FROM planner_batches WHERE id = ?', [result.lastInsertRowid]);
+
+    // If this batch came from a pour, consume fridge bins
+    if (pour_week != null && pour_day != null) {
+      const pour = await db.get(
+        'SELECT * FROM planner_pours WHERE week_index = ? AND day_index = ? AND pour_index = ?',
+        [pour_week, pour_day, pour_index || 0]
+      );
+      if (pour && pour.fermentation_links) {
+        const fermLinks = safeParse(pour.fermentation_links, []);
+        for (const link of fermLinks) {
+          const grpNum = link.grp_number || link.grpNumber || link;
+          if (grpNum) {
+            // Decrement fridge bins for this fermentation group
+            const fridgeEntry = await db.get(
+              'SELECT * FROM planner_fridge WHERE grp_number = ? AND status = ?',
+              [grpNum, 'ready']
+            );
+            if (fridgeEntry) {
+              const binsUsed = link.bins || pour.bins || bins || 0;
+              const newBins = Math.max(0, fridgeEntry.bins - binsUsed);
+              const newStatus = newBins <= 0 ? 'consumed' : 'ready';
+              await db.run(
+                'UPDATE planner_fridge SET bins = ?, status = ?, notes = ? WHERE id = ?',
+                [newBins, newStatus, `Used ${binsUsed} bins for batch ${batch_number}`, fridgeEntry.id]
+              );
+            }
+          }
+        }
+      }
+    }
+
     res.status(201).json(created);
   } catch (err) {
     console.error('Planner POST /batches error:', err);
@@ -243,6 +274,8 @@ router.delete('/batches/:id', async (req, res) => {
   try {
     const result = await db.run('DELETE FROM planner_batches WHERE id = ?', [req.params.id]);
     if (result.changes === 0) return res.status(404).json({ error: 'Batch not found' });
+    // Cascade: remove pick records referencing this batch
+    await db.run('DELETE FROM planner_pick_records WHERE batch_id = ?', [req.params.id]);
     res.json({ ok: true });
   } catch (err) {
     console.error('Planner DELETE /batches/:id error:', err);
@@ -365,13 +398,42 @@ router.delete('/purchase-orders/:id', async (req, res) => {
 
 router.patch('/purchase-orders/:id/ship', async (req, res) => {
   try {
+    const po = await db.get('SELECT * FROM planner_purchase_orders WHERE id = ?', [req.params.id]);
+    if (!po) return res.status(404).json({ error: 'Purchase order not found' });
+
+    // Validate picks cover order quantities
+    const skuDemand = safeParse(po.skus, {});
+    const pickRows = await db.all(
+      'SELECT sku, COALESCE(SUM(quantity), 0) AS picked FROM planner_pick_records WHERE po_id = ? GROUP BY sku',
+      [req.params.id]
+    );
+    const picked = {};
+    for (const r of pickRows) picked[r.sku] = r.picked;
+
+    const shortages = {};
+    for (const [sku, need] of Object.entries(skuDemand)) {
+      const qty = Number(need) || 0;
+      if (qty <= 0) continue;
+      const have = picked[sku] || 0;
+      if (have < qty) {
+        shortages[sku] = { need: qty, picked: have, short: qty - have };
+      }
+    }
+
+    // Allow force-ship with ?force=1, otherwise block
+    if (Object.keys(shortages).length > 0 && req.query.force !== '1') {
+      return res.status(400).json({
+        error: 'Cannot ship — picks do not cover all SKU quantities. Use ?force=1 to override.',
+        shortages
+      });
+    }
+
     const now = new Date().toISOString();
     await db.run(
       'UPDATE planner_purchase_orders SET shipped = 1, shipped_at = ?, status = ?, updated_at = ? WHERE id = ?',
       [now, 'shipped', now, req.params.id]
     );
     const updated = await db.get('SELECT * FROM planner_purchase_orders WHERE id = ?', [req.params.id]);
-    if (!updated) return res.status(404).json({ error: 'Purchase order not found' });
     res.json(updated);
   } catch (err) {
     console.error('Planner PATCH /purchase-orders/:id/ship error:', err);
@@ -619,32 +681,98 @@ router.post('/inventory/counts', async (req, res) => {
   try {
     const now = new Date().toISOString();
 
+    // Helper: adjust batch inventory_remaining based on count variance
+    async function adjustBatchesForVariance(sku, variance) {
+      if (variance === 0) return;
+      // Get available batches for this SKU, newest first (adjust newest first)
+      const batches = await db.all(
+        `SELECT * FROM planner_batches WHERE sku = ? AND status IN ('available', 'on-hold') AND inventory_remaining > 0
+         ORDER BY production_date DESC, id DESC`,
+        [sku]
+      );
+      if (batches.length === 0) return;
+
+      let remaining = variance; // negative = we have less than system thinks
+
+      if (remaining < 0) {
+        // Physical < system: reduce batch inventory (newest first)
+        let toReduce = Math.abs(remaining);
+        for (const b of batches) {
+          if (toReduce <= 0) break;
+          const reduce = Math.min(toReduce, b.inventory_remaining);
+          const newRemaining = b.inventory_remaining - reduce;
+          const newStatus = newRemaining <= 0 ? 'depleted' : b.status;
+          await db.run(
+            'UPDATE planner_batches SET inventory_remaining = ?, status = ?, updated_at = ? WHERE id = ?',
+            [newRemaining, newStatus, now, b.id]
+          );
+          toReduce -= reduce;
+        }
+      } else {
+        // Physical > system: add to the newest available batch
+        const newest = batches[0];
+        await db.run(
+          'UPDATE planner_batches SET inventory_remaining = inventory_remaining + ?, updated_at = ? WHERE id = ?',
+          [remaining, now, newest.id]
+        );
+      }
+    }
+
     // Support batch format from planner modal: { counts: [...], count_date }
     if (req.body.counts && Array.isArray(req.body.counts)) {
       const batchDate = req.body.count_date || now.slice(0, 10);
       const operator = req.user?.name || req.user?.username || '';
       const created = [];
       for (const item of req.body.counts) {
+        // Calculate real system count from batches
+        const sysRow = await db.get(
+          `SELECT COALESCE(SUM(inventory_remaining), 0) AS total FROM planner_batches WHERE sku = ? AND status IN ('available', 'on-hold')`,
+          [item.sku]
+        );
+        const systemCount = sysRow?.total || 0;
+        const physicalCount = item.counted || 0;
+        const variance = physicalCount - systemCount;
+
         const result = await db.run(
           `INSERT INTO planner_inventory_counts (count_date, sku, system_count, physical_count, variance, notes, counted_by, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [batchDate, item.sku, 0, item.counted || 0, item.counted || 0, '', operator, now]
+          [batchDate, item.sku, systemCount, physicalCount, variance, '', operator, now]
         );
         const row = await db.get('SELECT * FROM planner_inventory_counts WHERE id = ?', [result.lastInsertRowid]);
         if (row) created.push(row);
+
+        // Auto-adjust batch inventory to match physical count
+        if (variance !== 0) {
+          await adjustBatchesForVariance(item.sku, variance);
+        }
       }
       return res.status(201).json(created);
     }
 
     // Single record format (from InventoryCounts page)
     const { count_date, sku, system_count, physical_count, variance, notes, counted_by } = req.body;
-    const computedVariance = variance != null ? variance : (physical_count || 0) - (system_count || 0);
+    // If system_count not provided, calculate from batches
+    let actualSystemCount = system_count;
+    if (actualSystemCount == null || actualSystemCount === 0) {
+      const sysRow = await db.get(
+        `SELECT COALESCE(SUM(inventory_remaining), 0) AS total FROM planner_batches WHERE sku = ? AND status IN ('available', 'on-hold')`,
+        [sku]
+      );
+      actualSystemCount = sysRow?.total || 0;
+    }
+    const computedVariance = variance != null ? variance : (physical_count || 0) - actualSystemCount;
     const result = await db.run(
       `INSERT INTO planner_inventory_counts (count_date, sku, system_count, physical_count, variance, notes, counted_by, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [count_date || now.slice(0, 10), sku, system_count || 0, physical_count || 0, computedVariance, notes || '', counted_by || '', now]
+      [count_date || now.slice(0, 10), sku, actualSystemCount, physical_count || 0, computedVariance, notes || '', counted_by || '', now]
     );
     const created = await db.get('SELECT * FROM planner_inventory_counts WHERE id = ?', [result.lastInsertRowid]);
+
+    // Auto-adjust batch inventory to match physical count
+    if (computedVariance !== 0 && sku) {
+      await adjustBatchesForVariance(sku, computedVariance);
+    }
+
     res.status(201).json(created);
   } catch (err) {
     console.error('Planner POST /inventory/counts error:', err);
