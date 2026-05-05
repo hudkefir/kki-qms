@@ -1147,6 +1147,16 @@ CREATE TABLE IF NOT EXISTS inventory_counts (
       created_by TEXT DEFAULT '',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      session_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      context JSONB DEFAULT '{}',
+      created_at TIMESTAMP DEFAULT NOW()
+    );
   `);
 
   // Create indexes
@@ -1205,6 +1215,9 @@ CREATE INDEX IF NOT EXISTS idx_planner_batches_sku ON planner_batches(sku);
     CREATE INDEX IF NOT EXISTS idx_planner_pours_date ON planner_pours(pour_date);
     CREATE INDEX IF NOT EXISTS idx_planner_inventory_counts_date ON planner_inventory_counts(count_date);
     CREATE INDEX IF NOT EXISTS idx_planner_pick_records_po ON planner_pick_records(po_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_user_id ON chat_messages(user_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
   `);
 
   // Add missing columns to existing deviation_reports table

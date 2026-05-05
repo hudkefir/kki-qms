@@ -16,7 +16,6 @@ import AuditLogs from './pages/AuditLogs';
 import DocumentLibrary from './pages/DocumentLibrary';
 import BatchTesting from './pages/BatchTesting';
 import BatchTestDetail from './pages/BatchTestDetail';
-import DailyTasks from './pages/DailyTasks';
 import ChangeRequests from './pages/ChangeRequests';
 import ChangeRequestDetail from './pages/ChangeRequestDetail';
 import Deviations from './pages/Deviations';
@@ -33,18 +32,11 @@ import SupplierDetail from './pages/SupplierDetail';
 import RecallDetail from './pages/RecallDetail';
 import TraceabilityDetail from './pages/TraceabilityDetail';
 import CrisisDetail from './pages/CrisisDetail';
-import InventoryCounts from './pages/InventoryCounts';
-import InventoryCountDetail from './pages/InventoryCountDetail';
-import PickLists from './pages/PickLists';
-import PickListDetail from './pages/PickListDetail';
 import useWebSocket from './hooks/useWebSocket';
-import Planner from './pages/Planner';
-import PlannerBatchDetail from './pages/PlannerBatchDetail';
-import PlannerPODetail from './pages/PlannerPODetail';
-import Fermentation from './pages/Fermentation';
 import AccessDenied from "./components/AccessDenied";
 import ProtectedRoute from "./components/ProtectedRoute";
 import BuildVersion from "./components/BuildVersion";
+import ChatSidebar from "./components/ChatSidebar";
 
 
 
@@ -109,12 +101,7 @@ export default function App() {
     },
     { label: 'Production',
       items: [
-        { to: '/planner', icon: CalendarDays, label: 'Planner' },
-        { to: '/fermentation', icon: Beaker, label: 'Fermentation' },
         { to: '/batch-testing', icon: FlaskConical, label: 'Batch Testing' },
-        { to: '/daily-tasks', icon: ClipboardList, label: 'Daily Tasks' },
-        { to: '/inventory-counts', icon: Archive, label: 'Inventory Counts' },
-        { to: '/pick-lists', icon: ClipboardCheck, label: 'Pick Lists' },
         { to: '/equipment', icon: Cog, label: 'Equipment' },
         { to: '/maintenance', icon: Wrench, label: 'Maintenance' },
       ]
@@ -287,6 +274,9 @@ export default function App() {
           </Routes>
         </div>
       </main>
+
+      {/* Jarvis Chat Sidebar - available on all pages */}
+      <ChatSidebar />
     </div>
   );
 }

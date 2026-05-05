@@ -16,9 +16,8 @@ import fileRoutes from './fileRoutes.js';
 import simpleDocRoutes from './simpleDocRoutes.js';
 import adminRoutes from './adminRoutes.js';
 import batchTestRoutes from './batchTestRoutes.js';
-import dailyTaskRoutes from './dailyTaskRoutes.js';
 import formRoutes from './formRoutes.js';
-import taskboardRoutes from './taskboardRoutes.js';import plannerRoutes from './plannerRoutes.js';
+import taskboardRoutes from './taskboardRoutes.js';
 import changeControlRoutes from './changeControlRoutes.js';
 import maintenanceRoutes from './maintenanceRoutes.js';
 import recallRoutes from './recallRoutes.js';
@@ -28,8 +27,6 @@ import environmentalRoutes from './environmentalRoutes.js';
 import supplierRoutes from './supplierRoutes.js';
 import linkRoutes from './linkRoutes.js';
 import aiRoutes from './aiRoutes.js';
-import inventoryRoutes from './inventoryRoutes.js';
-import pickListRoutes from './pickListRoutes.js';
 import diagnosticsRoutes from './diagnosticsRoutes.js';
 import { setupWebSocket } from './websocket.js';
 import { requireAuth } from './authMiddleware.js';
@@ -123,18 +120,6 @@ app.use('/api/taskboard', (req, res, next) => {
 });
 app.use("/api/taskboard", (req, res, next) => { console.log("[TB]", req.method, req.path); next(); }, taskboardRoutes);
 
-// Planner routes (no auth — standalone Cloudflare Pages planner)
-app.use('/api/planner', (req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin && (origin.endsWith('.pages.dev') || origin.includes('localhost'))) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type');
-  }
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
-app.use('/api/planner', plannerRoutes);
 
 // Health endpoint (public — no auth, for Cloud Run probes)
 app.get('/api/health', async (req, res) => {
@@ -166,7 +151,6 @@ app.use('/api', requireAuth, simpleDocRoutes);
 app.use('/api', requireAuth, adminRoutes);
 app.use('/api', requireAuth, diagnosticsRoutes);
 app.use('/api', requireAuth, batchTestRoutes);
-app.use('/api', requireAuth, dailyTaskRoutes);
 app.use('/api', requireAuth, formRoutes);
 app.use('/api', requireAuth, changeControlRoutes);
 app.use('/api', requireAuth, maintenanceRoutes);
@@ -177,8 +161,6 @@ app.use('/api', requireAuth, environmentalRoutes);
 app.use('/api', requireAuth, supplierRoutes);
 app.use('/api', requireAuth, linkRoutes);
 app.use('/api', requireAuth, aiRoutes);
-app.use('/api', requireAuth, inventoryRoutes);
-app.use('/api', requireAuth, pickListRoutes);
 
 // Global error handler — prevent stack trace leaks
 app.use((err, req, res, _next) => {
