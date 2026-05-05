@@ -58,7 +58,7 @@ router.get('/complaints/analytics', async (req, res) => {
   try {
     const byProduct = await db.all(`
       SELECT product_name, product_sku, COUNT(*) as count
-      FROM complaints GROUP BY product_sku ORDER BY count DESC
+      FROM complaints GROUP BY product_name, product_sku ORDER BY count DESC
     `);
 
     const byIssueType = await db.all(`
@@ -83,12 +83,12 @@ router.get('/complaints/analytics', async (req, res) => {
 
     const byMonth = await db.all(`
       SELECT TO_CHAR(date_received::date, 'YYYY-MM') as month, COUNT(*) as count
-      FROM complaints GROUP BY month ORDER BY month
+      FROM complaints GROUP BY TO_CHAR(date_received::date, 'YYYY-MM') ORDER BY month
     `);
 
     const byLot = await db.all(`
       SELECT lot_number, product_name, product_sku, COUNT(*) as count, STRING_AGG(complaint_number, ',') as complaint_numbers
-      FROM complaints WHERE lot_number != '' GROUP BY lot_number ORDER BY count DESC
+      FROM complaints WHERE lot_number != '' GROUP BY lot_number, product_name, product_sku ORDER BY count DESC
     `);
 
     const totalOpenRow = await db.get("SELECT COUNT(*) as count FROM complaints WHERE status NOT IN ('resolved','closed')");
