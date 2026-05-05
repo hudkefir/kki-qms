@@ -64,7 +64,7 @@ router.post('/auth/logout', async (req, res) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to logout' });
     }
-    res.clearCookie('qms.sid');
+    res.clearCookie('kki.sid');
     res.json({ success: true });
   });
 });

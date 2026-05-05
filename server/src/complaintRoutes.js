@@ -34,13 +34,13 @@ router.get('/complaints', async (req, res) => {
     if (status) { query += ' AND status = ?'; params.push(status); }
     if (severity) { query += ' AND severity = ?'; params.push(severity); }
     if (product_sku) { query += ' AND product_sku = ?'; params.push(product_sku); }
-    if (source) { query += ' AND source LIKE ?'; params.push(`%${source}%`); }
+    if (source) { query += ' AND source ILIKE ?'; params.push(`%${source}%`); }
     if (issue_type) { query += ' AND issue_type = ?'; params.push(issue_type); }
     if (lot_number) { query += ' AND lot_number = ?'; params.push(lot_number); }
     if (date_from) { query += ' AND date_received >= ?'; params.push(date_from); }
     if (date_to) { query += ' AND date_received <= ?'; params.push(date_to); }
     if (search) {
-      query += ' AND (complaint_number LIKE ? OR description LIKE ? OR reporter LIKE ? OR store_location LIKE ? OR lot_number LIKE ? OR product_name LIKE ?)';
+      query += ' AND (complaint_number ILIKE ? OR description ILIKE ? OR reporter ILIKE ? OR store_location ILIKE ? OR lot_number ILIKE ? OR product_name ILIKE ?)';
       const s = `%${search}%`;
       params.push(s, s, s, s, s, s);
     }
@@ -166,7 +166,7 @@ router.post('/complaints', requireWriteAccess, async (req, res) => {
     // Generate complaint number
     const year = new Date(date_received).getFullYear();
     const lastInYear = await db.get(
-      "SELECT complaint_number FROM complaints WHERE complaint_number LIKE ? ORDER BY complaint_number DESC LIMIT 1", [`KK-CMP-${year}-%`]
+      "SELECT complaint_number FROM complaints WHERE complaint_number ILIKE ? ORDER BY complaint_number DESC LIMIT 1", [`KK-CMP-${year}-%`]
     );
 
     let seq = 1;
@@ -466,7 +466,7 @@ router.get('/ccrs', async (req, res) => {
 
     if (status) { query += ' AND status = ?'; params.push(status); }
     if (search) {
-      query += ' AND (ccr_number LIKE ? OR title LIKE ? OR recipient_company LIKE ?)';
+      query += ' AND (ccr_number ILIKE ? OR title ILIKE ? OR recipient_company ILIKE ?)';
       const s = `%${search}%`;
       params.push(s, s, s);
     }
@@ -474,18 +474,38 @@ router.get('/ccrs', async (req, res) => {
     query += ' ORDER BY date_created DESC';
     const ccrs = await db.all(query, params);
 
-    // Enrich with complaint count and action stats
-    const enriched = [];
-    for (const ccr of ccrs) {
-      const complaintCountRow = await db.get('SELECT COUNT(*) as count FROM ccr_complaints WHERE ccr_id = ?', [ccr.id]);
-      const complaintCount = complaintCountRow.count;
-      const actions = await db.all('SELECT * FROM corrective_actions WHERE ccr_id = ?', [ccr.id]);
-      const totalActions = actions.length;
-      const completedActions = actions.filter(a => a.status === 'completed').length;
-      const overdueActions = actions.filter(a => a.status === 'overdue' || (a.target_date && a.status !== 'completed' && new Date(a.target_date) < new Date())).length;
+    // Batch-fetch complaint counts and action stats instead of N+1
+    const ccrIds = ccrs.map(c => c.id);
+    let complaintCountMap = {};
+    let actionStatsMap = {};
 
-      enriched.push({ ...ccr, complaintCount, totalActions, completedActions, overdueActions });
+    if (ccrIds.length > 0) {
+      const ph = ccrIds.map((_, i) => `$${i + 1}`).join(',');
+
+      const complaintCounts = await db.all(
+        `SELECT ccr_id, COUNT(*) as count FROM ccr_complaints WHERE ccr_id IN (${ph}) GROUP BY ccr_id`, ccrIds);
+      for (const r of complaintCounts) { complaintCountMap[r.ccr_id] = parseInt(r.count); }
+
+      const actionRows = await db.all(
+        `SELECT ccr_id, status, target_date FROM corrective_actions WHERE ccr_id IN (${ph})`, ccrIds);
+      for (const a of actionRows) {
+        if (!actionStatsMap[a.ccr_id]) actionStatsMap[a.ccr_id] = { total: 0, completed: 0, overdue: 0 };
+        actionStatsMap[a.ccr_id].total++;
+        if (a.status === 'completed') actionStatsMap[a.ccr_id].completed++;
+        if (a.status === 'overdue' || (a.target_date && a.status !== 'completed' && new Date(a.target_date) < new Date())) actionStatsMap[a.ccr_id].overdue++;
+      }
     }
+
+    const enriched = ccrs.map(ccr => {
+      const stats = actionStatsMap[ccr.id] || { total: 0, completed: 0, overdue: 0 };
+      return {
+        ...ccr,
+        complaintCount: complaintCountMap[ccr.id] || 0,
+        totalActions: stats.total,
+        completedActions: stats.completed,
+        overdueActions: stats.overdue,
+      };
+    });
 
     res.json(enriched);
   } catch (err) {
@@ -534,7 +554,7 @@ router.post('/ccrs', requireWriteAccess, async (req, res) => {
 
     const year = new Date(date_created || Date.now()).getFullYear();
     const lastInYear = await db.get(
-      "SELECT ccr_number FROM ccrs WHERE ccr_number LIKE ? ORDER BY ccr_number DESC LIMIT 1", [`KK-CCR-${year}-%`]
+      "SELECT ccr_number FROM ccrs WHERE ccr_number ILIKE ? ORDER BY ccr_number DESC LIMIT 1", [`KK-CCR-${year}-%`]
     );
 
     let seq = 1;

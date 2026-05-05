@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 
 const router = Router();
 
@@ -26,9 +26,9 @@ const FIELD_PROMPTS = {
 
 router.post('/ai/suggest', async (req, res) => {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
-      return res.status(503).json({ error: 'AI assistant not configured. GEMINI_API_KEY is required.' });
+      return res.status(503).json({ error: 'AI assistant not configured. ANTHROPIC_API_KEY is required.' });
     }
 
     const { field, context, recordType } = req.body;
@@ -48,18 +48,15 @@ ${Object.entries(context)
 
 Task: ${fieldPrompt}`;
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      systemInstruction: SYSTEM_PROMPT,
+    const client = new Anthropic({ apiKey });
+    const message = await client.messages.create({
+      model: 'claude-sonnet-4-6-20250514',
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userMessage }],
     });
 
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: userMessage }] }],
-      generationConfig: { maxOutputTokens: 500 },
-    });
-
-    const suggestion = result.response.text() || '';
+    const suggestion = message.content[0]?.text || '';
     res.json({ suggestion });
   } catch (err) {
     console.error('AI suggest error:', err.message);

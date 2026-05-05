@@ -97,10 +97,26 @@ router.post('/environmental/sample-points', requireAuth, requireWriteAccess, asy
 // PUT /api/environmental/sample-points/:id
 router.put('/environmental/sample-points/:id', requireAuth, requireWriteAccess, async (req, res) => {
   try {
+    const existing = await db.get('SELECT * FROM env_sample_points WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Sample point not found' });
+
     const { name, location, description, test_frequency, active } = req.body;
-    await db.run('UPDATE env_sample_points SET name = ?, location = ?, description = ?, test_frequency = ?, active = ?, updated_at = datetime("now") WHERE id = ?',
+    await db.run('UPDATE env_sample_points SET name = ?, location = ?, description = ?, test_frequency = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [name, location || '', description || '', test_frequency || 'per_production_run', active !== undefined ? active : 1, req.params.id]);
     const point = await db.get('SELECT * FROM env_sample_points WHERE id = ?', [req.params.id]);
+
+    const oldValues = {};
+    const newValues = {};
+    for (const field of ['name', 'location', 'description', 'test_frequency', 'active']) {
+      if (req.body[field] !== undefined && req.body[field] !== existing[field]) {
+        oldValues[field] = existing[field];
+        newValues[field] = req.body[field];
+      }
+    }
+    if (Object.keys(oldValues).length > 0) {
+      logAudit(req, 'update', 'env_sample_point', req.params.id, point.name, { old_values: oldValues, new_values: newValues });
+    }
+
     res.json(point);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

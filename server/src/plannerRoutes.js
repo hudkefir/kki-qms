@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import db from './database-pg.js';
+import { logAudit } from './auditMiddleware.js';
 
 const router = Router();
 
@@ -164,6 +165,7 @@ router.post('/state', async (req, res) => {
       'INSERT INTO planner_state (id, data, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at',
       [data, now]
     );
+    logAudit(req, 'update', 'planner_state', 1, 'planner_state', {});
     res.json({ ok: true, updated_at: now });
   } catch (err) {
     console.error('Planner save state error:', err);
@@ -245,6 +247,7 @@ router.post('/batches', async (req, res) => {
       }
     }
 
+    logAudit(req, 'create', 'planner_batch', created.id, batch_number, { new_values: { batch_number, sku, production_date, bins, status: status || 'available' } });
     res.status(201).json(created);
   } catch (err) {
     console.error('Planner POST /batches error:', err);
@@ -263,6 +266,7 @@ router.put('/batches/:id', async (req, res) => {
     );
     const updated = await db.get('SELECT * FROM planner_batches WHERE id = ?', [req.params.id]);
     if (!updated) return res.status(404).json({ error: 'Batch not found' });
+    logAudit(req, 'update', 'planner_batch', req.params.id, batch_number, { new_values: { batch_number, sku, production_date, bins, status } });
     res.json(updated);
   } catch (err) {
     console.error('Planner PUT /batches/:id error:', err);

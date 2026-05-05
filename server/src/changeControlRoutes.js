@@ -62,7 +62,7 @@ router.get('/change-requests', async (req, res) => {
     if (classification) { query += ' AND classification = ?'; params.push(classification); }
     if (category) { query += ' AND category = ?'; params.push(category); }
     if (search) {
-      query += ' AND (request_id LIKE ? OR title LIKE ? OR description LIKE ? OR initiator LIKE ?)';
+      query += ' AND (request_id ILIKE ? OR title ILIKE ? OR description ILIKE ? OR initiator ILIKE ?)';
       const s = `%${search}%`;
       params.push(s, s, s, s);
     }
@@ -70,12 +70,20 @@ router.get('/change-requests', async (req, res) => {
     query += ' ORDER BY created_at DESC, id DESC';
     const rows = await db.all(query, params);
 
-    // Enrich with CAPA counts
-    const enriched = [];
-    for (const r of rows) {
-      const capaRow = await db.get("SELECT COUNT(*) as count FROM capas WHERE source_type = 'change_request' AND source_id = ?", [r.id]);
-      enriched.push({ ...r, capaCount: capaRow.count });
+    // Batch-fetch CAPA counts instead of N+1
+    let capaCounts = {};
+    const crIds = rows.map(r => r.id);
+    if (crIds.length > 0) {
+      const placeholders = crIds.map((_, i) => `$${i + 1}`).join(',');
+      const capaRows = await db.all(
+        `SELECT source_id, COUNT(*) as count FROM capas WHERE source_type = 'change_request' AND source_id IN (${placeholders}) GROUP BY source_id`,
+        crIds
+      );
+      for (const row of capaRows) {
+        capaCounts[row.source_id] = parseInt(row.count);
+      }
     }
+    const enriched = rows.map(r => ({ ...r, capaCount: capaCounts[r.id] || 0 }));
 
     res.json(enriched);
   } catch (err) {
@@ -302,7 +310,7 @@ router.get('/deviations', async (req, res) => {
     if (classification) { query += ' AND classification = ?'; params.push(classification); }
     if (category) { query += ' AND category = ?'; params.push(category); }
     if (search) {
-      query += ' AND (report_id LIKE ? OR title LIKE ? OR description LIKE ? OR discovered_by LIKE ?)';
+      query += ' AND (report_id ILIKE ? OR title ILIKE ? OR description ILIKE ? OR discovered_by ILIKE ?)';
       const s = `%${search}%`;
       params.push(s, s, s, s);
     }
@@ -310,11 +318,19 @@ router.get('/deviations', async (req, res) => {
     query += ' ORDER BY created_at DESC, id DESC';
     const rows = await db.all(query, params);
 
-    const enriched = [];
-    for (const r of rows) {
-      const capaRow = await db.get("SELECT COUNT(*) as count FROM capas WHERE source_type = 'deviation' AND source_id = ?", [r.id]);
-      enriched.push({ ...r, capaCount: capaRow.count });
+    const deviationIds = rows.map(r => r.id);
+    let capaCounts = {};
+    if (deviationIds.length > 0) {
+      const placeholders = deviationIds.map((_, i) => `$${i + 1}`).join(',');
+      const capaRows = await db.all(
+        `SELECT source_id, COUNT(*) as count FROM capas WHERE source_type = 'deviation' AND source_id IN (${placeholders}) GROUP BY source_id`,
+        deviationIds
+      );
+      for (const row of capaRows) {
+        capaCounts[row.source_id] = parseInt(row.count);
+      }
     }
+    const enriched = rows.map(r => ({ ...r, capaCount: capaCounts[r.id] || 0 }));
 
     res.json(enriched);
   } catch (err) {
@@ -541,7 +557,7 @@ router.get('/capas', async (req, res) => {
       query += " AND status NOT IN ('completed','closed') AND target_date < CURRENT_DATE";
     }
     if (search) {
-      query += ' AND (capa_id LIKE ? OR corrective_action LIKE ? OR preventive_action LIKE ? OR responsible_person LIKE ?)';
+      query += ' AND (capa_id ILIKE ? OR corrective_action ILIKE ? OR preventive_action ILIKE ? OR responsible_person ILIKE ?)';
       const s = `%${search}%`;
       params.push(s, s, s, s);
     }
@@ -549,20 +565,31 @@ router.get('/capas', async (req, res) => {
     query += ' ORDER BY created_at DESC, id DESC';
     const rows = await db.all(query, params);
 
-    // Enrich with source reference
-    const enriched = [];
-    for (const r of rows) {
-      let source_ref = '';
-      if (r.source_type === 'change_request') {
-        const cr = await db.get('SELECT request_id, title FROM change_requests WHERE id = ?', [r.source_id]);
-        source_ref = cr ? cr.request_id : '';
-      } else if (r.source_type === 'deviation') {
-        const dev = await db.get('SELECT report_id, title FROM deviation_reports WHERE id = ?', [r.source_id]);
-        source_ref = dev ? dev.report_id : '';
-      }
-      const isOverdue = !['completed', 'closed'].includes(r.status) && r.target_date && new Date(r.target_date) < new Date();
-      enriched.push({ ...r, source_ref, isOverdue });
+    // Batch-fetch source references instead of N+1
+    const crIds = [...new Set(rows.filter(r => r.source_type === 'change_request').map(r => r.source_id))];
+    const devIds = [...new Set(rows.filter(r => r.source_type === 'deviation').map(r => r.source_id))];
+
+    const crRefMap = {};
+    if (crIds.length > 0) {
+      const ph = crIds.map((_, i) => `$${i + 1}`).join(',');
+      const crRows = await db.all(`SELECT id, request_id FROM change_requests WHERE id IN (${ph})`, crIds);
+      for (const cr of crRows) { crRefMap[cr.id] = cr.request_id; }
     }
+
+    const devRefMap = {};
+    if (devIds.length > 0) {
+      const ph = devIds.map((_, i) => `$${i + 1}`).join(',');
+      const devRows = await db.all(`SELECT id, report_id FROM deviation_reports WHERE id IN (${ph})`, devIds);
+      for (const d of devRows) { devRefMap[d.id] = d.report_id; }
+    }
+
+    const enriched = rows.map(r => {
+      let source_ref = '';
+      if (r.source_type === 'change_request') source_ref = crRefMap[r.source_id] || '';
+      else if (r.source_type === 'deviation') source_ref = devRefMap[r.source_id] || '';
+      const isOverdue = !['completed', 'closed'].includes(r.status) && r.target_date && new Date(r.target_date) < new Date();
+      return { ...r, source_ref, isOverdue };
+    });
 
     res.json(enriched);
   } catch (err) {

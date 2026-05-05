@@ -273,6 +273,168 @@ router.get('/batch-tests/templates', requireAuth, (req, res) => {
   });
 });
 
+// GET /api/batch-tests/recommend-next - recommend which batch to test next
+router.get('/batch-tests/recommend-next', requireAuth, async (req, res) => {
+  try {
+    // 1. Get all planner batches that are active (available or hold)
+    const plannerBatches = await db.all(`
+      SELECT batch_number, sku, production_date, status, hold, bins, estimated_cases, notes
+      FROM planner_batches
+      WHERE status IN ('available', 'hold')
+      ORDER BY production_date ASC
+    `);
+
+    // 2. Get existing batch tests (most recent per batch_number)
+    const existingTests = await db.all(`
+      SELECT DISTINCT ON (batch_number) batch_number, test_date, status, test_profile, product_name, product_sku
+      FROM batch_tests
+      ORDER BY batch_number, test_date DESC
+    `);
+
+    const testMap = {};
+    for (const t of existingTests) {
+      testMap[t.batch_number] = t;
+    }
+
+    // 3. Score each planner batch
+    const now = new Date();
+    const recommendations = [];
+
+    // Priority SKUs (products requiring more frequent testing)
+    const HIGH_PRIORITY_SKUS = ['OG-946', 'OG-500', 'OG-250']; // Original kefir most volume
+    const MICRO_TEST_INTERVAL_DAYS = 30; // SOP: micro testing every 30 days minimum
+    const ROUTINE_TEST_INTERVAL_DAYS = 7; // SOP: routine QC within 7 days of production
+
+    for (const batch of plannerBatches) {
+      const lastTest = testMap[batch.batch_number];
+      const productionDate = new Date(batch.production_date);
+      const batchAgeDays = Math.floor((now - productionDate) / (1000 * 60 * 60 * 24));
+
+      let score = 0;
+      const reasons = [];
+
+      // Factor 1: Never tested (highest priority)
+      if (!lastTest) {
+        score += 100;
+        reasons.push('Never tested');
+      } else {
+        // Factor 2: Time since last test
+        const lastTestDate = new Date(lastTest.test_date);
+        const daysSinceTest = Math.floor((now - lastTestDate) / (1000 * 60 * 60 * 24));
+
+        if (daysSinceTest > MICRO_TEST_INTERVAL_DAYS) {
+          score += 80;
+          reasons.push(`${daysSinceTest} days since last test (exceeds ${MICRO_TEST_INTERVAL_DAYS}-day micro interval)`);
+        } else if (daysSinceTest > ROUTINE_TEST_INTERVAL_DAYS) {
+          score += 40;
+          reasons.push(`${daysSinceTest} days since last test`);
+        }
+
+        // Factor 3: Previous test failed
+        if (lastTest.status === 'fail') {
+          score += 60;
+          reasons.push('Previous test FAILED - retest required');
+        }
+
+        // Factor 4: Only routine profile done, needs micro
+        if (lastTest.test_profile === 'routine' && daysSinceTest > 14) {
+          score += 30;
+          reasons.push('Only routine QC done - micro panel recommended');
+        }
+      }
+
+      // Factor 5: Batch age (older batches approaching shelf life need priority)
+      if (batchAgeDays > 21) {
+        score += 50;
+        reasons.push(`Batch age: ${batchAgeDays} days (approaching shelf life)`);
+      } else if (batchAgeDays > 14) {
+        score += 25;
+        reasons.push(`Batch age: ${batchAgeDays} days`);
+      } else if (batchAgeDays > 7) {
+        score += 10;
+        reasons.push(`Batch age: ${batchAgeDays} days`);
+      }
+
+      // Factor 6: High-priority SKU
+      if (HIGH_PRIORITY_SKUS.includes(batch.sku)) {
+        score += 15;
+        reasons.push('High-volume SKU (priority testing)');
+      }
+
+      // Factor 7: Batch on hold (needs testing to release)
+      if (batch.hold) {
+        score += 70;
+        reasons.push('Batch ON HOLD - testing required for release');
+      }
+
+      // Factor 8: Large batch size (more product at risk)
+      if (batch.bins >= 20) {
+        score += 10;
+        reasons.push(`Large batch (${batch.bins} bins)`);
+      }
+
+      // Only recommend if there's a reason to test
+      if (score > 0) {
+        recommendations.push({
+          batch_number: batch.batch_number,
+          sku: batch.sku,
+          production_date: batch.production_date,
+          batch_age_days: batchAgeDays,
+          batch_status: batch.status,
+          on_hold: !!batch.hold,
+          bins: batch.bins,
+          estimated_cases: batch.estimated_cases,
+          last_test_date: lastTest?.test_date || null,
+          last_test_status: lastTest?.status || null,
+          last_test_profile: lastTest?.test_profile || null,
+          score,
+          reasons,
+          recommended_profile: !lastTest ? 'routine' :
+            (lastTest.test_profile === 'routine' ? 'cfia_micro' : 'routine'),
+        });
+      }
+    }
+
+    // Also check batch_tests that have pending status (tests started but not finished)
+    const pendingTests = await db.all(`
+      SELECT bt.*,
+        (SELECT COUNT(*) FROM batch_test_results WHERE batch_test_id = bt.id AND pass_fail = 'pending') as pending_count,
+        (SELECT COUNT(*) FROM batch_test_results WHERE batch_test_id = bt.id) as total_count
+      FROM batch_tests bt
+      WHERE bt.status = 'pending'
+      ORDER BY bt.test_date ASC
+    `);
+
+    const pendingReminders = pendingTests.map(t => ({
+      batch_number: t.batch_number,
+      batch_test_id: t.id,
+      test_date: t.test_date,
+      product_name: t.product_name,
+      product_sku: t.product_sku,
+      pending_results: t.pending_count,
+      total_results: t.total_count,
+      test_profile: t.test_profile,
+    }));
+
+    // Sort by score descending, return top 10
+    recommendations.sort((a, b) => b.score - a.score);
+
+    res.json({
+      recommendations: recommendations.slice(0, 10),
+      pending_completions: pendingReminders.slice(0, 5),
+      criteria: {
+        micro_test_interval_days: MICRO_TEST_INTERVAL_DAYS,
+        routine_test_interval_days: ROUTINE_TEST_INTERVAL_DAYS,
+        high_priority_skus: HIGH_PRIORITY_SKUS,
+      },
+      generated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Recommend next batch test error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/batch-tests/by-lot/:lot - find batch tests by lot/batch number
 router.get('/batch-tests/by-lot/:lot', requireAuth, async (req, res) => {
   try {

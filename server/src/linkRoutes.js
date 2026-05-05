@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import db from './database-pg.js';
+import { logAudit } from './auditMiddleware.js';
 
 const router = Router();
 
@@ -42,6 +43,7 @@ router.post('/links', async (req, res) => {
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id
     `, [source_type, source_id, target_type, target_id, link_reason || null, req.session?.user?.display_name || '']);
+    logAudit(req, 'create_link', 'record_links', result.id, `${source_type}:${source_id} -> ${target_type}:${target_id}`, { new_values: { source_type, source_id, target_type, target_id, link_reason } });
     res.json({ id: result.id, message: 'Link created' });
   } catch (err) {
     if (err.message?.includes('unique') || err.message?.includes('duplicate')) {
@@ -55,7 +57,9 @@ router.post('/links', async (req, res) => {
 // DELETE /api/links/:linkId — remove a link
 router.delete('/links/:linkId', async (req, res) => {
   try {
+    const link = await db.get('SELECT * FROM qms_record_links WHERE id = $1', [req.params.linkId]);
     await db.run('DELETE FROM qms_record_links WHERE id = $1', [req.params.linkId]);
+    logAudit(req, 'delete_link', 'record_links', req.params.linkId, link ? `${link.source_type}:${link.source_id} -> ${link.target_type}:${link.target_id}` : '', { old_values: link || {} });
     res.json({ message: 'Link removed' });
   } catch (err) {
     console.error('Error deleting link:', err);

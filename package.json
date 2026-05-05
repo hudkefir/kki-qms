@@ -8,6 +8,8 @@
     "client"
   ],
   "scripts": {
+    "version:generate": "node -e \"const {execSync}=require('child_process');const commit=execSync('git rev-parse --short HEAD').toString().trim();const buildTime=new Date().toISOString();require('fs').writeFileSync('version.json',JSON.stringify({commit,buildTime}))\"",
+    "prebuild": "npm run version:generate",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "npm run dev -w server",
     "dev:client": "npm run dev -w client",

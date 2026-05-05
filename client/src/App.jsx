@@ -44,6 +44,7 @@ import PlannerPODetail from './pages/PlannerPODetail';
 import Fermentation from './pages/Fermentation';
 import AccessDenied from "./components/AccessDenied";
 import ProtectedRoute from "./components/ProtectedRoute";
+import BuildVersion from "./components/BuildVersion";
 
 
 
@@ -221,6 +222,7 @@ export default function App() {
               {connected ? 'Live updates active' : 'Reconnecting...'}
             </span>
           </div>
+          <BuildVersion />
         </div>
       </nav>
 

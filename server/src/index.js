@@ -6,6 +6,7 @@ import pgSession from 'connect-pg-simple';
 import { createServer } from 'http';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { readFileSync } from 'fs';
 import db, { checkDbHealth } from './database-pg.js';
 import routes from './routes.js';
 import complaintRoutes from './complaintRoutes.js';
@@ -29,6 +30,7 @@ import linkRoutes from './linkRoutes.js';
 import aiRoutes from './aiRoutes.js';
 import inventoryRoutes from './inventoryRoutes.js';
 import pickListRoutes from './pickListRoutes.js';
+import diagnosticsRoutes from './diagnosticsRoutes.js';
 import { setupWebSocket } from './websocket.js';
 import { requireAuth } from './authMiddleware.js';
 import { auditApiMiddleware } from './auditMiddleware.js';
@@ -37,6 +39,15 @@ import { validateNumericParams } from './validateId.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Load build version info (generated at Docker build time or by prebuild script)
+let versionInfo = { commit: 'dev', buildTime: 'unknown' };
+try {
+  const versionPath = join(__dirname, '..', '..', 'version.json');
+  versionInfo = JSON.parse(readFileSync(versionPath, 'utf8'));
+} catch {
+  // version.json not found — running locally without a build step
+}
 
 const app = express();
 const server = createServer(app);
@@ -59,22 +70,23 @@ app.use(requestLogger);
 // Trust proxy for correct IP in audit logs
 app.set('trust proxy', 1);
 
-// Session middleware — Postgres-backed
+// Session middleware — Postgres-backed (shared cookie across *.kefirkultures.com)
 app.use(session({
   store: new PgStore({
     pool: db.pool,
     tableName: 'sessions',
     pruneSessionInterval: 900, // Clear expired sessions every 15 min (seconds)
   }),
-  secret: process.env.SESSION_SECRET || 'kki-qms-session-secret-2026',
-  name: 'qms.sid',
+  secret: process.env.SESSION_SECRET || 'kki-shared-session-secret-2026',
+  name: 'kki.sid',
   resave: false,
   saveUninitialized: false,
   cookie: {
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     httpOnly: true,
-    secure: false, // Set to true in production with HTTPS
+    secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
+    domain: process.env.COOKIE_DOMAIN || undefined,
   },
 }));
 
@@ -128,10 +140,15 @@ app.use('/api/planner', plannerRoutes);
 app.get('/api/health', async (req, res) => {
   try {
     await checkDbHealth();
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), version: versionInfo });
   } catch (err) {
     res.status(503).json({ status: 'unhealthy', error: err.message });
   }
+});
+
+// Version endpoint (public — for frontend footer)
+app.get('/api/version', (req, res) => {
+  res.json(versionInfo);
 });
 
 // Auth routes (no auth required for login)
@@ -147,6 +164,7 @@ app.use('/api', requireAuth, auditRoutes);
 app.use('/api', requireAuth, fileRoutes);
 app.use('/api', requireAuth, simpleDocRoutes);
 app.use('/api', requireAuth, adminRoutes);
+app.use('/api', requireAuth, diagnosticsRoutes);
 app.use('/api', requireAuth, batchTestRoutes);
 app.use('/api', requireAuth, dailyTaskRoutes);
 app.use('/api', requireAuth, formRoutes);
