@@ -553,14 +553,25 @@ router.post('/ccrs', requireWriteAccess, async (req, res) => {
     if (!title) return res.status(400).json({ error: 'title is required' });
 
     const year = new Date(date_created || Date.now()).getFullYear();
-    const lastInYear = await db.get(
-      "SELECT ccr_number FROM ccrs WHERE ccr_number ILIKE ? ORDER BY ccr_number DESC LIMIT 1", [`KK-CCR-${year}-%`]
-    );
 
-    let seq = 1;
-    if (lastInYear) {
-      const parts = lastInYear.ccr_number.split('-');
-      seq = parseInt(parts[3], 10) + 1;
+    // Use qms_sequence table for gap-free numbering (same pattern as change_requests, deviations, capas)
+    const seqRow = await db.get('SELECT next_number FROM qms_sequence WHERE type = ? AND year = ?', ['complaint_ccr', year]);
+    let seq;
+    if (seqRow) {
+      seq = seqRow.next_number;
+      await db.run('UPDATE qms_sequence SET next_number = ? WHERE type = ? AND year = ?', [seq + 1, 'complaint_ccr', year]);
+    } else {
+      // First CCR this year — seed from existing max to avoid collisions with legacy records
+      const maxRow = await db.get(
+        "SELECT ccr_number FROM ccrs WHERE ccr_number ILIKE ? ORDER BY ccr_number DESC LIMIT 1", [`KK-CCR-${year}-%`]
+      );
+      if (maxRow) {
+        const parts = maxRow.ccr_number.split('-');
+        seq = parseInt(parts[3], 10) + 1;
+      } else {
+        seq = 1;
+      }
+      await db.run('INSERT INTO qms_sequence (type, year, next_number) VALUES (?, ?, ?)', ['complaint_ccr', year, seq + 1]);
     }
     const ccr_number = `KK-CCR-${year}-${String(seq).padStart(3, '0')}`;
 

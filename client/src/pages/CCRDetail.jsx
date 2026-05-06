@@ -395,12 +395,20 @@ export default function CCRDetail() {
           </div>
 
           {/* Notes */}
-          {ccr.notes && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-3">Notes</h2>
-              <p className="text-sm text-gray-700 leading-relaxed">{ccr.notes}</p>
-            </div>
-          )}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-3">Notes</h2>
+            {editing ? (
+              <textarea
+                rows={4}
+                value={formData.notes || ''}
+                onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                placeholder="Add notes about this CCR..."
+                className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2"
+              />
+            ) : (
+              <p className="text-sm text-gray-700 leading-relaxed">{ccr.notes || 'No notes yet.'}</p>
+            )}
+          </div>
         </div>
       )}
 

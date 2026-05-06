@@ -123,7 +123,7 @@ router.post('/ai/chat', async (req, res) => {
 
     const client = new Anthropic({ apiKey });
     const stream = client.messages.stream({
-      model: 'claude-sonnet-4-6-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 2048,
       system: systemPrompt,
       messages: session.messages,
@@ -271,7 +271,7 @@ Task: ${fieldPrompt}`;
 
     const client = new Anthropic({ apiKey });
     const message = await client.messages.create({
-      model: 'claude-sonnet-4-6-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
