@@ -386,6 +386,12 @@ router.post('/suppliers/:id/checklist', requireWriteAccess, async (req, res) => 
   try {
     const supplier = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
     if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+
+    // Fix SERIAL sequence if out of sync (migrated from SQLite)
+    try {
+      await db.run("SELECT setval('supplier_checklist_id_seq', COALESCE((SELECT MAX(id) FROM supplier_checklist), 0) + 1, false)");
+    } catch (seqErr) { /* sequence may not exist or already correct */ }
+
     const items = Array.isArray(req.body) ? req.body : [req.body];
     const created = [];
     for (const item of items) {
