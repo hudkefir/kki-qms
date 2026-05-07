@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
-import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker } from 'lucide-react';
+import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -41,6 +41,8 @@ import SupplierDetail from './pages/SupplierDetail';
 import RecallDetail from './pages/RecallDetail';
 import TraceabilityDetail from './pages/TraceabilityDetail';
 import CrisisDetail from './pages/CrisisDetail';
+import Journal from './pages/Journal';
+import EmailScan from './pages/EmailScan';
 import useWebSocket from './hooks/useWebSocket';
 import AccessDenied from "./components/AccessDenied";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -126,6 +128,12 @@ export default function App() {
       items: [
         { to: '/recalls', icon: AlertTriangle, label: 'Recall Center' },
         { to: '/analytics', icon: BarChart3, label: 'Analytics' },
+      ]
+    },
+    { label: 'Tools',
+      items: [
+        { to: '/journal', icon: BookOpen, label: 'Journal' },
+        { to: '/email-scan', icon: Mail, label: 'Email Scan' },
       ]
     },
     ...(hasRole('admin') ? [{ label: 'Admin',
@@ -261,6 +269,8 @@ export default function App() {
             <Route path="/recalls/:id" element={<RecallDetail />} />
             <Route path="/traceability-exercises/:id" element={<TraceabilityDetail />} />
             <Route path="/crisis-events/:id" element={<CrisisDetail />} />
+            <Route path="/journal" element={<Journal />} />
+            <Route path="/email-scan" element={<EmailScan />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/users" element={
               <ProtectedRoute roles={["admin"]} label="Admin">
