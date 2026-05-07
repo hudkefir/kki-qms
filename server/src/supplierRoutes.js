@@ -381,6 +381,30 @@ router.get("/suppliers/:id/checklist", async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
+// POST /api/suppliers/:id/checklist — create checklist items (bulk or single)
+router.post('/suppliers/:id/checklist', requireWriteAccess, async (req, res) => {
+  try {
+    const supplier = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+    const items = Array.isArray(req.body) ? req.body : [req.body];
+    const created = [];
+    for (const item of items) {
+      const { item_name, item_category = 'documentation', required = true, completed = false, completed_date = null, notes = '' } = item;
+      if (!item_name) continue;
+      const info = await db.run(
+        'INSERT INTO supplier_checklist (supplier_id, item_name, item_category, required, completed, completed_date, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [req.params.id, item_name, item_category, required ? 1 : 0, completed ? 1 : 0, completed_date, notes]
+      );
+      const row = await db.get('SELECT * FROM supplier_checklist WHERE id = ?', [info.lastInsertRowid]);
+      created.push(row);
+    }
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('Create checklist items error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // PATCH /api/suppliers/:id/checklist/:itemId
 router.patch("/suppliers/:id/checklist/:itemId", requireWriteAccess, async (req, res) => {
   try {
