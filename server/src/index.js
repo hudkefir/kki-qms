@@ -142,6 +142,37 @@ app.get('/api/version', (req, res) => {
 // Auth routes (no auth required for login)
 app.use('/api', authRoutes);
 
+// Supplier external activity endpoint (Jarvis auto-log, no session auth — uses API key)
+app.post('/api/suppliers/activities/external', async (req, res) => {
+  try {
+    const apiKey = process.env.QMS_API_KEY;
+    if (apiKey && req.headers['x-api-key'] !== apiKey) {
+      return res.status(401).json({ error: 'Invalid API key' });
+    }
+    const { default: db } = await import('./database-pg.js');
+    const { broadcast } = await import('./websocket.js');
+    const { supplier_id, supplier_name, activity_type = 'system', title, description = '' } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title is required' });
+    let resolvedId = supplier_id;
+    if (!resolvedId && supplier_name) {
+      const supplier = await db.get('SELECT id FROM suppliers WHERE LOWER(name) = LOWER(?)', [supplier_name]);
+      if (!supplier) return res.status(404).json({ error: 'Supplier not found by name: ' + supplier_name });
+      resolvedId = supplier.id;
+    }
+    if (!resolvedId) return res.status(400).json({ error: 'supplier_id or supplier_name is required' });
+    const info = await db.run(
+      'INSERT INTO supplier_activities (supplier_id, activity_type, title, description, source, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+      [resolvedId, activity_type, title, description, 'jarvis', 'Jarvis']
+    );
+    const created = await db.get('SELECT * FROM supplier_activities WHERE id = ?', [info.lastInsertRowid]);
+    broadcast('supplier_activity_created', created);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('External supplier activity error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Audit API middleware (auto-logs mutations)
 app.use('/api', auditApiMiddleware);
 
@@ -161,14 +192,6 @@ app.use('/api', requireAuth, recallRoutes);
 app.use('/api', requireAuth, sosRoutes);
 app.use('/api', printRoutes);
 app.use('/api', requireAuth, environmentalRoutes);
-// Supplier external activity endpoint (Jarvis auto-log, no session auth - uses API key)
-app.post('/api/suppliers/activities/external', (req, res, next) => {
-  const apiKey = process.env.QMS_API_KEY;
-  if (apiKey && req.headers['x-api-key'] !== apiKey) {
-    return res.status(401).json({ error: 'Invalid API key' });
-  }
-  next();
-}, supplierRoutes);
 app.use('/api', requireAuth, supplierRoutes);
 app.use('/api', requireAuth, linkRoutes);
 app.use('/api', requireAuth, aiRoutes);
