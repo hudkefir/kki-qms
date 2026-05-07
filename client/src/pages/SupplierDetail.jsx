@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit, Save, Building2, User, Mail, Phone, MapPin, Package, Calendar, Clock, Shield, AlertTriangle, CheckCircle, XCircle, Plus, Star, FileText, X, Trash2, Upload, Download } from 'lucide-react';
+import { ArrowLeft, Edit, Save, Building2, User, Mail, Phone, MapPin, Package, Calendar, Clock, Shield, AlertTriangle, CheckCircle, XCircle, Plus, Star, FileText, X, Trash2, Upload, Download, MessageSquare, Send, Bot, UserCircle, Activity } from 'lucide-react';
 import { useFetch, apiPut, apiPost, apiPatch, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -43,6 +43,54 @@ export default function SupplierDetail() {
 
   const { data: supplier, loading, error, refetch } = useFetch(`/api/suppliers/${id}`);
   const { data: checklist, loading: checklistLoading, refetch: refetchChecklist } = useFetch(`/api/suppliers/${id}/checklist`);
+  const { data: activities, loading: activitiesLoading, refetch: refetchActivities } = useFetch(`/api/suppliers/${id}/activities`);
+
+  const [activityForm, setActivityForm] = useState({ activity_type: 'note', title: '', description: '' });
+  const [addingActivity, setAddingActivity] = useState(false);
+
+  const handleAddActivity = async (e) => {
+    e.preventDefault();
+    if (!activityForm.title.trim()) return;
+    setAddingActivity(true);
+    try {
+      await apiPost(`/api/suppliers/${id}/activities`, activityForm);
+      setActivityForm({ activity_type: 'note', title: '', description: '' });
+      refetchActivities();
+    } catch (err) { alert('Failed: ' + err.message); }
+    finally { setAddingActivity(false); }
+  };
+
+  const handleDeleteActivity = async (activityId) => {
+    if (!confirm('Delete this activity?')) return;
+    try {
+      await apiDelete(`/api/suppliers/${id}/activities/${activityId}`);
+      refetchActivities();
+    } catch (err) { alert('Failed: ' + err.message); }
+  };
+
+  const ACTIVITY_TYPE_CONFIG = {
+    note: { label: 'Note', color: 'bg-blue-100 text-blue-700 border-blue-200', dotColor: 'bg-blue-500', icon: MessageSquare },
+    email_sent: { label: 'Email Sent', color: 'bg-purple-100 text-purple-700 border-purple-200', dotColor: 'bg-purple-500', icon: Send },
+    document_received: { label: 'Document Received', color: 'bg-green-100 text-green-700 border-green-200', dotColor: 'bg-green-500', icon: Download },
+    document_requested: { label: 'Document Requested', color: 'bg-amber-100 text-amber-700 border-amber-200', dotColor: 'bg-amber-500', icon: Upload },
+    status_change: { label: 'Status Change', color: 'bg-amber-100 text-amber-700 border-amber-200', dotColor: 'bg-amber-500', icon: Shield },
+    review: { label: 'Review', color: 'bg-indigo-100 text-indigo-700 border-indigo-200', dotColor: 'bg-indigo-500', icon: Star },
+    system: { label: 'System', color: 'bg-gray-100 text-gray-600 border-gray-200', dotColor: 'bg-gray-400', icon: Activity },
+  };
+
+  const timeAgo = (dateStr) => {
+    const now = new Date();
+    const date = new Date(dateStr);
+    const diffMs = now - date;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return diffMin + 'm ago';
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return diffHr + 'h ago';
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 7) return diffDay + 'd ago';
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
   const [updatingItem, setUpdatingItem] = useState(null);
 
   const handleToggleItem = async (itemId, currentCompleted) => {
@@ -568,7 +616,126 @@ export default function SupplierDetail() {
         )}
       </div>
 
-            {/* Review History */}
+            {/* Activity Timeline */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Activity Timeline</h3>
+          <span className="text-xs text-gray-400">{Array.isArray(activities) ? activities.length : 0} entries</span>
+        </div>
+
+        {/* Add Activity Form */}
+        {canWrite() && (
+          <form onSubmit={handleAddActivity} className="border border-gray-200 rounded-lg p-4 mb-5 bg-gray-50 space-y-3">
+            <div className="flex gap-3">
+              <select
+                value={activityForm.activity_type}
+                onChange={e => setActivityForm(f => ({ ...f, activity_type: e.target.value }))}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-navy-500 shrink-0"
+              >
+                <option value="note">📝 Note</option>
+                <option value="email_sent">📧 Email Sent</option>
+                <option value="document_received">📥 Document Received</option>
+                <option value="document_requested">📤 Document Requested</option>
+                <option value="status_change">🔄 Status Change</option>
+                <option value="review">⭐ Review</option>
+                <option value="system">⚙️ System</option>
+              </select>
+              <input
+                type="text"
+                value={activityForm.title}
+                onChange={e => setActivityForm(f => ({ ...f, title: e.target.value }))}
+                placeholder="What happened?"
+                className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500"
+                required
+              />
+            </div>
+            <textarea
+              value={activityForm.description}
+              onChange={e => setActivityForm(f => ({ ...f, description: e.target.value }))}
+              placeholder="Additional details (optional)"
+              rows={2}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500 resize-none"
+            />
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={addingActivity || !activityForm.title.trim()}
+                className="flex items-center gap-2 px-4 py-2 bg-navy-800 text-white rounded-lg text-sm font-medium hover:bg-navy-700 disabled:bg-navy-400"
+              >
+                <Plus className="w-4 h-4" /> {addingActivity ? 'Adding...' : 'Add Entry'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Timeline */}
+        {activitiesLoading ? (
+          <p className="text-sm text-gray-400 text-center py-8">Loading timeline...</p>
+        ) : !Array.isArray(activities) || activities.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-8">No activity recorded yet</p>
+        ) : (
+          <div className="relative">
+            {/* Vertical line */}
+            <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
+
+            <div className="space-y-4">
+              {activities.map(a => {
+                const cfg = ACTIVITY_TYPE_CONFIG[a.activity_type] || ACTIVITY_TYPE_CONFIG.system;
+                const TypeIcon = cfg.icon;
+                const isJarvis = a.source === 'jarvis';
+                return (
+                  <div key={a.id} className="relative flex gap-4 pl-1">
+                    {/* Timeline dot */}
+                    <div className={`relative z-10 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${cfg.dotColor} text-white shadow-sm`}>
+                      <TypeIcon className="w-4 h-4" />
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0 pb-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-gray-900">{a.title}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${cfg.color}`}>{cfg.label}</span>
+                            {isJarvis ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 text-[10px] font-medium border border-violet-200">
+                                <Bot className="w-3 h-3" /> Jarvis
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-50 text-sky-600 text-[10px] font-medium border border-sky-200">
+                                <UserCircle className="w-3 h-3" /> {a.created_by || 'Manual'}
+                              </span>
+                            )}
+                          </div>
+                          {a.description && (
+                            <p className="text-sm text-gray-500 mt-1 whitespace-pre-wrap">{a.description}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-xs text-gray-400 whitespace-nowrap" title={new Date(a.created_at).toLocaleString()}>
+                            {timeAgo(a.created_at)}
+                          </span>
+                          {hasRole('admin') && (
+                            <button
+                              onClick={() => handleDeleteActivity(a.id)}
+                              className="p-1 text-gray-300 hover:text-red-500 rounded hover:bg-red-50 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Review History */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Supplier Reviews</h3>

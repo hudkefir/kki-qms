@@ -53,6 +53,17 @@ try {
       next_review TEXT,
       created_at TEXT DEFAULT (CURRENT_TIMESTAMP)
     );
+
+    CREATE TABLE IF NOT EXISTS supplier_activities (
+      id SERIAL PRIMARY KEY,
+      supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+      activity_type TEXT NOT NULL DEFAULT 'note',
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      source TEXT DEFAULT 'manual',
+      created_by TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `);
 } catch (e) {
   console.log('Supplier tables already exist or migration error:', e.message);
@@ -88,7 +99,7 @@ router.get('/suppliers/summary', async (req, res) => {
     const conditional = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE status = 'conditional'")).count;
     const suspended = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE status = 'suspended'")).count;
     const pending = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE status = 'pending'")).count;
-    const overdue = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE next_review_date < CURRENT_DATE AND status != 'suspended'")).count;
+    const overdue = (await db.get("SELECT COUNT(*) as count FROM suppliers WHERE next_review_date < date('now') AND status != 'suspended'")).count;
     res.json({ total, approved, conditional, suspended, pending, overdue });
   } catch (err) {
     console.error('Supplier summary error:', err); res.status(500).json({ error: 'Internal server error' });
@@ -194,7 +205,7 @@ router.patch('/suppliers/:id/status', requireRole('admin'), async (req, res) => 
 
     const user = req.session?.user;
     await db.run("UPDATE suppliers SET status = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [status, user?.display_name || user?.username || '', req.params.id]);
-    if (status === 'approved' && !supplier.approval_date) await db.run("UPDATE suppliers SET approval_date = CURRENT_DATE WHERE id = ?", [req.params.id]);
+    if (status === 'approved' && !supplier.approval_date) await db.run("UPDATE suppliers SET approval_date = date('now') WHERE id = ?", [req.params.id]);
 
     const updated = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
     logAudit(req, 'update_supplier_status', 'suppliers', req.params.id, supplier.name, { old_values: { status: supplier.status }, new_values: { status } });
@@ -350,6 +361,101 @@ router.patch("/suppliers/:id/checklist/:itemId", requireWriteAccess, async (req,
     await db.run("UPDATE supplier_checklist SET " + updates.join(", ") + " WHERE id = ?", params);
     res.json(await db.get("SELECT * FROM supplier_checklist WHERE id = ?", [req.params.itemId]));
   } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
+// ==================== ACTIVITY TIMELINE ====================
+
+// GET /api/suppliers/:id/activities
+router.get('/suppliers/:id/activities', async (req, res) => {
+  try {
+    const supplier = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+    const activities = await db.all(
+      'SELECT * FROM supplier_activities WHERE supplier_id = ? ORDER BY created_at DESC',
+      [req.params.id]
+    );
+    res.json(activities);
+  } catch (err) {
+    console.error('Get supplier activities error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/suppliers/:id/activities
+router.post('/suppliers/:id/activities', requireWriteAccess, async (req, res) => {
+  try {
+    const supplier = await db.get('SELECT * FROM suppliers WHERE id = ?', [req.params.id]);
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+
+    const sanitized = sanitizeBody(req.body);
+    const { activity_type = 'note', title, description = '', source = 'manual' } = sanitized;
+    if (!title) return res.status(400).json({ error: 'Title is required' });
+
+    const user = req.session?.user;
+    const created_by = user?.display_name || user?.username || '';
+
+    const info = await db.run(
+      'INSERT INTO supplier_activities (supplier_id, activity_type, title, description, source, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+      [req.params.id, activity_type, title, description, source, created_by]
+    );
+
+    const created = await db.get('SELECT * FROM supplier_activities WHERE id = ?', [info.lastInsertRowid]);
+    broadcast('supplier_activity_created', { ...created, supplier_name: supplier.name });
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('Create supplier activity error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/suppliers/:id/activities/:activityId (admin only)
+router.delete('/suppliers/:id/activities/:activityId', requireRole('admin'), async (req, res) => {
+  try {
+    const activity = await db.get(
+      'SELECT * FROM supplier_activities WHERE id = ? AND supplier_id = ?',
+      [req.params.activityId, req.params.id]
+    );
+    if (!activity) return res.status(404).json({ error: 'Activity not found' });
+
+    await db.run('DELETE FROM supplier_activities WHERE id = ?', [req.params.activityId]);
+    res.json({ success: true, message: 'Activity deleted' });
+  } catch (err) {
+    console.error('Delete supplier activity error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/suppliers/activities/external — Jarvis / external system endpoint
+router.post('/suppliers/activities/external', async (req, res) => {
+  try {
+    const apiKey = process.env.QMS_API_KEY;
+    if (apiKey && req.headers['x-api-key'] !== apiKey) {
+      return res.status(401).json({ error: 'Invalid API key' });
+    }
+
+    const { supplier_id, supplier_name, activity_type = 'system', title, description = '' } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title is required' });
+
+    let resolvedId = supplier_id;
+    if (!resolvedId && supplier_name) {
+      const supplier = await db.get('SELECT id FROM suppliers WHERE LOWER(name) = LOWER(?)', [supplier_name]);
+      if (!supplier) return res.status(404).json({ error: 'Supplier not found by name: ' + supplier_name });
+      resolvedId = supplier.id;
+    }
+    if (!resolvedId) return res.status(400).json({ error: 'supplier_id or supplier_name is required' });
+
+    const info = await db.run(
+      'INSERT INTO supplier_activities (supplier_id, activity_type, title, description, source, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+      [resolvedId, activity_type, title, description, 'jarvis', 'Jarvis']
+    );
+
+    const created = await db.get('SELECT * FROM supplier_activities WHERE id = ?', [info.lastInsertRowid]);
+    broadcast('supplier_activity_created', created);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('External supplier activity error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 export default router;

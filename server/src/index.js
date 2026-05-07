@@ -29,6 +29,7 @@ import linkRoutes from './linkRoutes.js';
 import aiRoutes from './aiRoutes.js';
 import aiChatRoutes from './aiChatRoutes.js';
 import journalRoutes from './journalRoutes.js';
+import emailRoutes from './emailRoutes.js';
 import diagnosticsRoutes from './diagnosticsRoutes.js';
 import { setupWebSocket } from './websocket.js';
 import { requireAuth } from './authMiddleware.js';
@@ -165,6 +166,7 @@ app.use('/api', requireAuth, linkRoutes);
 app.use('/api', requireAuth, aiRoutes);
 app.use('/api', requireAuth, aiChatRoutes);
 app.use('/api', requireAuth, journalRoutes);
+app.use('/api', requireAuth, emailRoutes);
 
 // Global error handler — prevent stack trace leaks
 app.use((err, req, res, _next) => {
