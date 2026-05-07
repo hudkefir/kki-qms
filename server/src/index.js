@@ -161,6 +161,14 @@ app.use('/api', requireAuth, recallRoutes);
 app.use('/api', requireAuth, sosRoutes);
 app.use('/api', printRoutes);
 app.use('/api', requireAuth, environmentalRoutes);
+// Supplier external activity endpoint (Jarvis auto-log, no session auth - uses API key)
+app.post('/api/suppliers/activities/external', (req, res, next) => {
+  const apiKey = process.env.QMS_API_KEY;
+  if (apiKey && req.headers['x-api-key'] !== apiKey) {
+    return res.status(401).json({ error: 'Invalid API key' });
+  }
+  next();
+}, supplierRoutes);
 app.use('/api', requireAuth, supplierRoutes);
 app.use('/api', requireAuth, linkRoutes);
 app.use('/api', requireAuth, aiRoutes);
