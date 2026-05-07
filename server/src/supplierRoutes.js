@@ -91,6 +91,40 @@ router.get('/suppliers', async (req, res) => {
   }
 });
 
+// POST /api/suppliers/activities/external — Jarvis / external system endpoint
+// MUST be before /:id routes so 'activities' isn't parsed as an ID
+router.post('/suppliers/activities/external', async (req, res) => {
+  try {
+    const apiKey = process.env.QMS_API_KEY;
+    if (apiKey && req.headers['x-api-key'] !== apiKey) {
+      return res.status(401).json({ error: 'Invalid API key' });
+    }
+
+    const { supplier_id, supplier_name, activity_type = 'system', title, description = '' } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title is required' });
+
+    let resolvedId = supplier_id;
+    if (!resolvedId && supplier_name) {
+      const supplier = await db.get('SELECT id FROM suppliers WHERE LOWER(name) = LOWER(?)', [supplier_name]);
+      if (!supplier) return res.status(404).json({ error: 'Supplier not found by name: ' + supplier_name });
+      resolvedId = supplier.id;
+    }
+    if (!resolvedId) return res.status(400).json({ error: 'supplier_id or supplier_name is required' });
+
+    const info = await db.run(
+      'INSERT INTO supplier_activities (supplier_id, activity_type, title, description, source, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+      [resolvedId, activity_type, title, description, 'jarvis', 'Jarvis']
+    );
+
+    const created = await db.get('SELECT * FROM supplier_activities WHERE id = ?', [info.lastInsertRowid]);
+    broadcast('supplier_activity_created', created);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('External supplier activity error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/suppliers/summary
 router.get('/suppliers/summary', async (req, res) => {
   try {
@@ -421,39 +455,6 @@ router.delete('/suppliers/:id/activities/:activityId', requireRole('admin'), asy
     res.json({ success: true, message: 'Activity deleted' });
   } catch (err) {
     console.error('Delete supplier activity error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// POST /api/suppliers/activities/external — Jarvis / external system endpoint
-router.post('/suppliers/activities/external', async (req, res) => {
-  try {
-    const apiKey = process.env.QMS_API_KEY;
-    if (apiKey && req.headers['x-api-key'] !== apiKey) {
-      return res.status(401).json({ error: 'Invalid API key' });
-    }
-
-    const { supplier_id, supplier_name, activity_type = 'system', title, description = '' } = req.body;
-    if (!title) return res.status(400).json({ error: 'Title is required' });
-
-    let resolvedId = supplier_id;
-    if (!resolvedId && supplier_name) {
-      const supplier = await db.get('SELECT id FROM suppliers WHERE LOWER(name) = LOWER(?)', [supplier_name]);
-      if (!supplier) return res.status(404).json({ error: 'Supplier not found by name: ' + supplier_name });
-      resolvedId = supplier.id;
-    }
-    if (!resolvedId) return res.status(400).json({ error: 'supplier_id or supplier_name is required' });
-
-    const info = await db.run(
-      'INSERT INTO supplier_activities (supplier_id, activity_type, title, description, source, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-      [resolvedId, activity_type, title, description, 'jarvis', 'Jarvis']
-    );
-
-    const created = await db.get('SELECT * FROM supplier_activities WHERE id = ?', [info.lastInsertRowid]);
-    broadcast('supplier_activity_created', created);
-    res.status(201).json(created);
-  } catch (err) {
-    console.error('External supplier activity error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
