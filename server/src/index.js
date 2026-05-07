@@ -174,6 +174,9 @@ app.post('/api/suppliers/activities/external', async (req, res) => {
   }
 });
 
+// Planner routes (no auth — shared planner accessed from kki-planner Cloud Run)
+app.use('/api/planner', plannerRoutes);
+
 // Audit API middleware (auto-logs mutations)
 app.use('/api', auditApiMiddleware);
 
@@ -199,7 +202,7 @@ app.use('/api', requireAuth, aiRoutes);
 app.use('/api', requireAuth, aiChatRoutes);
 app.use('/api', requireAuth, journalRoutes);
 app.use('/api', requireAuth, emailRoutes);
-app.use('/api/planner', plannerRoutes);
+
 
 // Global error handler — prevent stack trace leaks
 app.use((err, req, res, _next) => {
