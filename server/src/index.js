@@ -32,6 +32,10 @@ import journalRoutes from './journalRoutes.js';
 import emailRoutes from './emailRoutes.js';
 import diagnosticsRoutes from './diagnosticsRoutes.js';
 import plannerRoutes from './plannerRoutes.js';
+import dailyTaskRoutes from './dailyTaskRoutes.js';
+import inventoryRoutes from './inventoryRoutes.js';
+import pickListRoutes from './pickListRoutes.js';
+import documentRoutes from './documentRoutes.js';
 import { setupWebSocket } from './websocket.js';
 import { requireAuth } from './authMiddleware.js';
 import { auditApiMiddleware } from './auditMiddleware.js';
@@ -202,6 +206,10 @@ app.use('/api', requireAuth, aiRoutes);
 app.use('/api', requireAuth, aiChatRoutes);
 app.use('/api', requireAuth, journalRoutes);
 app.use('/api', requireAuth, emailRoutes);
+app.use('/api', requireAuth, dailyTaskRoutes);
+app.use('/api', requireAuth, inventoryRoutes);
+app.use('/api', requireAuth, pickListRoutes);
+app.use('/api', requireAuth, documentRoutes);
 
 
 // Global error handler — prevent stack trace leaks
