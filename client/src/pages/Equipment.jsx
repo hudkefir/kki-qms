@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Cog, Plus, Search, ChevronDown, ChevronUp, AlertTriangle, CheckCircle, XCircle
+  Cog, Plus, Search, ChevronDown, ChevronUp, AlertTriangle, CheckCircle, XCircle, Trash2
 } from 'lucide-react';
-import { useFetch, apiPost } from '../hooks/useApi';
+import { useFetch, apiPost, apiDelete } from '../hooks/useApi';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Modal from '../components/Modal';
 
@@ -46,6 +46,22 @@ export default function Equipment() {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ pm_frequency: 'monthly' });
   const [submitting, setSubmitting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await apiDelete(`/api/equipment/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      refetch();
+    } catch (err) {
+      alert('Error deleting equipment: ' + err.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     if (!items) return [];
@@ -168,6 +184,7 @@ export default function Equipment() {
                   { field: 'is_critical', label: 'Critical' },
                   { field: 'pm_frequency', label: 'PM Frequency' },
                   { field: 'status', label: 'Status' },
+                  { field: '_actions', label: '' },
                 ].map(col => (
                   <th
                     key={col.field}
@@ -185,7 +202,7 @@ export default function Equipment() {
             <tbody className="divide-y divide-gray-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-gray-500">No equipment found</td>
+                  <td colSpan={7} className="px-4 py-12 text-center text-gray-500">No equipment found</td>
                 </tr>
               ) : (
                 filtered.map(eq => (
@@ -208,6 +225,15 @@ export default function Equipment() {
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{FREQUENCY_LABELS[eq.pm_frequency] || eq.pm_frequency}</td>
                     <td className="px-4 py-3"><EquipmentStatusBadge status={eq.status} /></td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(eq); }}
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -215,6 +241,29 @@ export default function Equipment() {
           </table>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <Modal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete Equipment">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 p-2 bg-red-100 rounded-lg">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-900 font-medium">Are you sure you want to delete this equipment?</p>
+              <p className="text-sm text-gray-500 mt-1">
+                <span className="font-medium">{deleteTarget?.equipment_id}</span> — {deleteTarget?.name} will be permanently removed.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={() => setDeleteTarget(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">Cancel</button>
+            <button type="button" onClick={handleDelete} disabled={deleting} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50">
+              {deleting ? 'Deleting...' : 'Delete Equipment'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Create Modal */}
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Add Equipment">
