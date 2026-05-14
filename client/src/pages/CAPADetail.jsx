@@ -34,6 +34,51 @@ const ROOT_CAUSE_LABELS = {
   pareto: 'Pareto Analysis', fmea: 'FMEA', timeline: 'Timeline Analysis', other: 'Other',
 };
 
+const ROOT_CAUSE_DESCRIPTIONS = {
+  '5_whys': {
+    summary: 'Keep asking "Why?" until you find the real cause.',
+    detail: 'Start with the problem and ask "Why did this happen?" For each answer, ask "Why?" again. Usually 5 rounds gets you to the root cause. Best for simple, single-cause problems.',
+    example: 'Problem: Kefir over-fermented → Why? Batch left too long → Why? Timer wasn\'t set → Why? No SOP for timer step → Root cause: Missing SOP step.',
+    best_for: 'Simple problems with a single root cause',
+  },
+  fishbone: {
+    summary: 'Map all possible causes across categories (People, Process, Equipment, Materials, Environment).',
+    detail: 'Draw the problem at the "head" and brainstorm causes along category "bones." Helps teams see the full picture instead of jumping to one cause. Also called Cause & Effect or Ishikawa diagram.',
+    example: 'Problem: Off-taste batch → People: new operator → Process: no pH check → Equipment: thermometer uncalibrated → Materials: new milk supplier.',
+    best_for: 'Complex problems where multiple factors could contribute',
+  },
+  fault_tree: {
+    summary: 'Work backwards from the failure using AND/OR logic gates.',
+    detail: 'Start with the unwanted event at the top, then map out all the things that had to go wrong (AND) or any one thing that could cause it (OR). Good for understanding how failures combine.',
+    example: 'Contamination event → (culture exposed AND sanitizer failed) → culture exposed because (lid left off OR seal broken).',
+    best_for: 'Safety-critical failures or when multiple things failed simultaneously',
+  },
+  pareto: {
+    summary: 'Rank causes by frequency — fix the top 20% that cause 80% of problems.',
+    detail: 'Collect data on all occurrences, sort by frequency, and focus on the most common causes first. Uses the 80/20 rule — a few causes usually account for most problems.',
+    example: 'Last 50 deviations: 22 = labeling errors, 12 = temperature, 8 = equipment, 8 = other → Fix labeling first.',
+    best_for: 'Recurring problems where you have historical data',
+  },
+  fmea: {
+    summary: 'Rate each potential failure by Severity × Occurrence × Detection to prioritize risks.',
+    detail: 'List every way something could fail, score each on severity (1-10), how often it occurs (1-10), and how likely you\'d catch it (1-10). Multiply for a Risk Priority Number (RPN). Fix the highest RPNs first.',
+    example: 'Failure: wrong label on case → Severity: 8 → Occurrence: 3 → Detection: 2 → RPN: 48 (moderate priority).',
+    best_for: 'Proactive risk assessment or when designing new processes',
+  },
+  timeline: {
+    summary: 'Map out exactly what happened and when to find where things went wrong.',
+    detail: 'Create a chronological timeline of all events, decisions, and actions. Compare what actually happened vs. what should have happened. The gap reveals the root cause.',
+    example: '8:00 batch started → 8:30 temp logged OK → 10:00 shift change (no handoff) → 12:00 batch discovered overfermented → Gap: no handoff procedure.',
+    best_for: 'Incidents where timing and sequence of events matter',
+  },
+  other: {
+    summary: 'Use a different method not listed above.',
+    detail: 'Document which method you used and why in the investigation details below.',
+    example: '',
+    best_for: 'When the standard methods don\'t fit your situation',
+  },
+};
+
 const SOURCE_COLORS = {
   change_request: 'bg-blue-50 text-blue-700',
   deviation: 'bg-amber-50 text-amber-700',
@@ -1342,29 +1387,57 @@ export default function CAPADetail() {
             badge={capa.root_cause_method ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">{ROOT_CAUSE_LABELS[capa.root_cause_method] || capa.root_cause_method}</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">No method</span>}
           >
             <div className="mb-4">
-              <label className="text-sm font-medium text-gray-600 mb-0.5 block">Investigation Method</label>
+              <label className="text-sm font-medium text-gray-600 mb-1 block">Investigation Method</label>
               <FieldHelp text={GMP_HELP.capa.fields.root_cause_method} />
               {canEditContent ? (
-                <select
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                  value={capa.root_cause_method || ""}
-                  onChange={async (e) => {
-                    try {
-                      await apiPut(`/api/capas/${capa.id}`, { root_cause_method: e.target.value });
-                      refetch();
-                    } catch(err) { alert(err.message); }
-                  }}
-                >
-                  <option value="">— Select method —</option>
-                  <option value="5_whys">5 Whys</option>
-                  <option value="fishbone">Fishbone / Ishikawa</option>
-                  <option value="fault_tree">Fault Tree Analysis</option>
-                  <option value="pareto">Pareto Analysis</option>
-                  <option value="fmea">Failure Mode Effects Analysis (FMEA)</option>
-                  <option value="other">Other</option>
-                </select>
+                <div className="space-y-2 mt-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {Object.entries(ROOT_CAUSE_DESCRIPTIONS).map(([key, info]) => (
+                      <button
+                        key={key}
+                        onClick={async () => {
+                          try {
+                            await apiPut(`/api/capas/${capa.id}`, { root_cause_method: key });
+                            refetch();
+                          } catch(err) { alert(err.message); }
+                        }}
+                        className={`text-left p-3 rounded-lg border-2 transition-all ${
+                          capa.root_cause_method === key
+                            ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-200'
+                            : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          {capa.root_cause_method === key && <CheckCircle className="w-4 h-4 text-indigo-600 flex-shrink-0" />}
+                          <span className={`text-sm font-semibold ${capa.root_cause_method === key ? 'text-indigo-700' : 'text-gray-800'}`}>
+                            {ROOT_CAUSE_LABELS[key]}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 leading-relaxed">{info.summary}</p>
+                      </button>
+                    ))}
+                  </div>
+                  {capa.root_cause_method && ROOT_CAUSE_DESCRIPTIONS[capa.root_cause_method] && (
+                    <div className="mt-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <h4 className="text-sm font-semibold text-blue-800 mb-1">How to use: {ROOT_CAUSE_LABELS[capa.root_cause_method]}</h4>
+                      <p className="text-sm text-blue-700 mb-2">{ROOT_CAUSE_DESCRIPTIONS[capa.root_cause_method].detail}</p>
+                      {ROOT_CAUSE_DESCRIPTIONS[capa.root_cause_method].example && (
+                        <div className="bg-white/60 rounded p-2 mb-2">
+                          <p className="text-xs font-medium text-blue-600 mb-0.5">Example:</p>
+                          <p className="text-xs text-blue-700 italic">{ROOT_CAUSE_DESCRIPTIONS[capa.root_cause_method].example}</p>
+                        </div>
+                      )}
+                      <p className="text-xs text-blue-600"><span className="font-medium">Best for:</span> {ROOT_CAUSE_DESCRIPTIONS[capa.root_cause_method].best_for}</p>
+                    </div>
+                  )}
+                </div>
               ) : (
-                <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">{ROOT_CAUSE_LABELS[capa.root_cause_method] || capa.root_cause_method || "Not specified"}</p>
+                <div>
+                  <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3 font-medium">{ROOT_CAUSE_LABELS[capa.root_cause_method] || capa.root_cause_method || "Not specified"}</p>
+                  {capa.root_cause_method && ROOT_CAUSE_DESCRIPTIONS[capa.root_cause_method] && (
+                    <p className="text-xs text-gray-500 mt-1 px-1">{ROOT_CAUSE_DESCRIPTIONS[capa.root_cause_method].summary}</p>
+                  )}
+                </div>
               )}
             </div>
             <FieldHelp text={GMP_HELP.capa.fields.root_cause_analysis} />
