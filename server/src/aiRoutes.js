@@ -110,6 +110,39 @@ router.post('/ai/chat', async (req, res) => {
       systemPrompt += `\n\n## Current Context\nThe user is currently on: ${context.page || 'unknown page'}`;
       if (context.recordType) systemPrompt += `\nRecord type: ${context.recordType}`;
       if (context.recordId) systemPrompt += `\nRecord ID: ${context.recordId}`;
+
+      // Fetch actual record data from the database so Jarvis can see what the user is looking at
+      if (context.recordType && context.recordId) {
+        const tableMap = {
+          'complaints': 'complaints',
+          'deviations': 'deviation_reports',
+          'capas': 'capas',
+          'batch-tests': 'batch_tests',
+          'suppliers': 'suppliers',
+          'environmental': 'environmental_samples',
+          'ccrs': 'ccrs',
+          'change-control': 'change_requests',
+          'equipment': 'equipment',
+          'recalls': 'recalls',
+          'sops': 'sops',
+          'work-orders': 'work_orders',
+          'daily-tasks': 'daily_tasks',
+          'pick-lists': 'pick_lists',
+          'inventory-counts': 'inventory_counts',
+        };
+        const tableName = tableMap[context.recordType];
+        if (tableName) {
+          try {
+            const record = await db.get(`SELECT * FROM ${tableName} WHERE id = $1`, [context.recordId]);
+            if (record) {
+              systemPrompt += `\n\nThe user is currently viewing this record:\n${JSON.stringify(record, null, 2)}`;
+            }
+          } catch (dbErr) {
+            console.error('Failed to fetch record data for AI context:', dbErr.message);
+            // Non-fatal — continue without record data
+          }
+        }
+      }
     }
     const userName = req.session?.user?.display_name || req.session?.user?.username || 'Operator';
     systemPrompt += `\n\nThe current user is: ${userName} (role: ${req.session?.user?.role || 'unknown'})`;
