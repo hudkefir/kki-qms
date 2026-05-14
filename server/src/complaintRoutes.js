@@ -820,7 +820,7 @@ router.get('/qa-dashboard', async (req, res) => {
     `);
 
     const complaintsByProduct = await db.all(`
-      SELECT product_name, product_sku, COUNT(*) as count FROM complaints GROUP BY product_sku ORDER BY count DESC
+      SELECT MAX(product_name) as product_name, product_sku, COUNT(*) as count FROM complaints GROUP BY product_sku ORDER BY count DESC
     `);
 
     // Trend data - last 6 months
@@ -846,7 +846,7 @@ router.get('/qa-dashboard', async (req, res) => {
 
     // Top affected lots
     const topLots = await db.all(`
-      SELECT lot_number, product_name, COUNT(*) as count
+      SELECT lot_number, MAX(product_name) as product_name, COUNT(*) as count
       FROM complaints WHERE lot_number != ''
       GROUP BY lot_number ORDER BY count DESC LIMIT 5
     `);
