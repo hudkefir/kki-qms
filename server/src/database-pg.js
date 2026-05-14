@@ -1224,6 +1224,22 @@ CREATE INDEX IF NOT EXISTS idx_planner_batches_sku ON planner_batches(sku);
   await pool.query(`ALTER TABLE deviation_reports ADD COLUMN IF NOT EXISTS linked_complaints_json TEXT DEFAULT '[]'`);
   await pool.query(`ALTER TABLE deviation_reports ADD COLUMN IF NOT EXISTS linked_sops_json TEXT DEFAULT '[]'`);
   await pool.query(`ALTER TABLE deviation_reports ADD COLUMN IF NOT EXISTS linked_batch_tests_json TEXT DEFAULT '[]'`);
+
+  // Add missing columns to capas table (needed for investigation method, root cause, etc.)
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS root_cause_method TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS root_cause_analysis TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS investigation_details TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS containment_action TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS verification_method TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS risk_assessment TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS classification TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS priority TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS initiated_by TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS department TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS category TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS title TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS description TEXT`);
+  await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS linked_complaints_json TEXT DEFAULT '[]'`);
 }
 
 // ─── Initialize on import ────────────────────────────────────────────────────
