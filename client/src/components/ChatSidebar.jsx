@@ -54,7 +54,29 @@ export default function ChatSidebar() {
       context.recordType = segments[0];
       context.recordId = segments[1];
     } else if (segments.length === 1) {
-      context.page = segments[0];
+      context.recordType = segments[0];
+    }
+
+    // Scrape current form data (captures unsaved edits)
+    const formData = {};
+    document.querySelectorAll('input[name], textarea[name], select[name]').forEach(el => {
+      const name = el.name;
+      if (el.type === 'checkbox') {
+        formData[name] = el.checked;
+      } else if (el.type === 'radio') {
+        if (el.checked) formData[name] = el.value;
+      } else if (el.value) {
+        formData[name] = el.value;
+      }
+    });
+    document.querySelectorAll('[data-field]').forEach(el => {
+      const name = el.getAttribute('data-field');
+      const val = el.textContent || el.innerText || el.value || '';
+      if (val.trim()) formData[name] = val.trim();
+    });
+
+    if (Object.keys(formData).length > 0) {
+      context.formData = formData;
     }
 
     return context;

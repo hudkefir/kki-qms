@@ -136,12 +136,177 @@ router.post('/ai/chat', async (req, res) => {
             const record = await db.get(`SELECT * FROM ${tableName} WHERE id = $1`, [context.recordId]);
             if (record) {
               systemPrompt += `\n\nThe user is currently viewing this record:\n${JSON.stringify(record, null, 2)}`;
+
+              // Fetch related records
+              try {
+                const relatedRecords = {};
+
+                // Type-specific relationships
+                if (context.recordType === 'deviations') {
+                  try {
+                    const capas = await db.all(`SELECT id, title, status, source_type FROM capas WHERE source_type = 'deviation' AND source_id = $1`, [context.recordId]);
+                    if (capas?.length) relatedRecords.capas = capas;
+                  } catch (e) { /* non-fatal */ }
+
+                  // Parse linked JSON arrays
+                  const jsonFields = ['linked_complaints_json', 'linked_batch_tests_json', 'linked_sops_json'];
+                  for (const field of jsonFields) {
+                    if (record[field]) {
+                      try {
+                        const ids = typeof record[field] === 'string' ? JSON.parse(record[field]) : record[field];
+                        if (Array.isArray(ids) && ids.length > 0) {
+                          const fieldTableMap = {
+                            'linked_complaints_json': 'complaints',
+                            'linked_batch_tests_json': 'batch_tests',
+                            'linked_sops_json': 'sops',
+                          };
+                          const ft = fieldTableMap[field];
+                          if (ft) {
+                            const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+                            const linked = await db.all(`SELECT * FROM ${ft} WHERE id IN (${placeholders})`, ids);
+                            if (linked?.length) relatedRecords[field.replace('_json', '')] = linked;
+                          }
+                        }
+                      } catch (e) { /* non-fatal JSON parse */ }
+                    }
+                  }
+                } else if (context.recordType === 'capas') {
+                  if (record.source_type && record.source_id) {
+                    try {
+                      const sourceTable = tableMap[record.source_type] || tableMap[record.source_type + 's'];
+                      if (sourceTable) {
+                        const sourceRecord = await db.get(`SELECT * FROM ${sourceTable} WHERE id = $1`, [record.source_id]);
+                        if (sourceRecord) relatedRecords.sourceRecord = { type: record.source_type, ...sourceRecord };
+                      }
+                    } catch (e) { /* non-fatal */ }
+                  }
+                  if (record.linked_change_request_id) {
+                    try {
+                      const cr = await db.get(`SELECT * FROM change_requests WHERE id = $1`, [record.linked_change_request_id]);
+                      if (cr) relatedRecords.changeRequest = cr;
+                    } catch (e) { /* non-fatal */ }
+                  }
+                } else if (context.recordType === 'complaints') {
+                  if (record.linked_ccr_id) {
+                    try {
+                      const ccr = await db.get(`SELECT * FROM ccrs WHERE id = $1`, [record.linked_ccr_id]);
+                      if (ccr) relatedRecords.ccr = ccr;
+                    } catch (e) { /* non-fatal */ }
+                  }
+                  try {
+                    const capas = await db.all(`SELECT id, title, status, source_type FROM capas WHERE source_type = 'complaint' AND source_id = $1`, [context.recordId]);
+                    if (capas?.length) relatedRecords.capas = capas;
+                  } catch (e) { /* non-fatal */ }
+                  try {
+                    const devs = await db.all(`SELECT id, title, status FROM deviation_reports WHERE linked_complaints_json::text LIKE $1`, [`%${context.recordId}%`]);
+                    if (devs?.length) relatedRecords.deviations = devs;
+                  } catch (e) { /* non-fatal */ }
+                } else if (context.recordType === 'ccrs') {
+                  try {
+                    const complaints = await db.all(`SELECT c.* FROM complaints c JOIN ccr_complaints cc ON c.id = cc.complaint_id WHERE cc.ccr_id = $1`, [context.recordId]);
+                    if (complaints?.length) relatedRecords.complaints = complaints;
+                  } catch (e) { /* non-fatal */ }
+                } else if (context.recordType === 'change-control') {
+                  try {
+                    const capas = await db.all(`SELECT id, title, status FROM capas WHERE linked_change_request_id = $1 OR (source_type = 'change_request' AND source_id = $1)`, [context.recordId]);
+                    if (capas?.length) relatedRecords.capas = capas;
+                  } catch (e) { /* non-fatal */ }
+                } else if (context.recordType === 'equipment') {
+                  try {
+                    const workOrders = await db.all(`SELECT * FROM work_orders WHERE equipment_id = $1`, [context.recordId]);
+                    if (workOrders?.length) relatedRecords.workOrders = workOrders;
+                  } catch (e) { /* non-fatal */ }
+                } else if (context.recordType === 'environmental') {
+                  if (record.linked_deviation_id) {
+                    try {
+                      const dev = await db.get(`SELECT * FROM deviation_reports WHERE id = $1`, [record.linked_deviation_id]);
+                      if (dev) relatedRecords.deviation = dev;
+                    } catch (e) { /* non-fatal */ }
+                  }
+                } else if (context.recordType === 'work-orders') {
+                  if (record.equipment_id) {
+                    try {
+                      const eq = await db.get(`SELECT * FROM equipment WHERE id = $1`, [record.equipment_id]);
+                      if (eq) relatedRecords.equipment = eq;
+                    } catch (e) { /* non-fatal */ }
+                  }
+                  if (record.linked_deviation_id) {
+                    try {
+                      const dev = await db.get(`SELECT * FROM deviation_reports WHERE id = $1`, [record.linked_deviation_id]);
+                      if (dev) relatedRecords.deviation = dev;
+                    } catch (e) { /* non-fatal */ }
+                  }
+                }
+
+                // Universal: qms_record_links for all types
+                try {
+                  const links = await db.all(
+                    `SELECT * FROM qms_record_links WHERE (source_type = $1 AND source_id = $2) OR (target_type = $1 AND target_id = $2)`,
+                    [context.recordType, context.recordId]
+                  );
+                  if (links?.length) relatedRecords.recordLinks = links;
+                } catch (e) { /* non-fatal */ }
+
+                if (Object.keys(relatedRecords).length > 0) {
+                  systemPrompt += `\n\n## Related Records\n${JSON.stringify(relatedRecords, null, 2)}`;
+                }
+              } catch (relErr) {
+                console.error('Failed to fetch related records for AI context:', relErr.message);
+              }
             }
           } catch (dbErr) {
             console.error('Failed to fetch record data for AI context:', dbErr.message);
             // Non-fatal — continue without record data
           }
+        } else if (context.recordType && !context.recordId) {
+          // User is on a list page (e.g. /deviations) — fetch recent records summary
+          const listTableMap = {
+            'complaints': 'complaints',
+            'deviations': 'deviation_reports',
+            'capas': 'capas',
+            'batch-tests': 'batch_tests',
+            'suppliers': 'suppliers',
+            'environmental': 'environmental_samples',
+            'ccrs': 'ccrs',
+            'change-control': 'change_requests',
+            'equipment': 'equipment',
+            'recalls': 'recalls',
+            'sops': 'sops',
+            'work-orders': 'work_orders',
+            'daily-tasks': 'daily_tasks',
+            'pick-lists': 'pick_lists',
+            'inventory-counts': 'inventory_counts',
+          };
+          const listTable = listTableMap[context.recordType];
+          if (listTable) {
+            const titleColumnMap = {
+              'complaints': 'complaint_number',
+              'ccrs': 'ccr_number',
+              'equipment': 'name',
+              'suppliers': 'name',
+              'sops': 'title',
+              'batch-tests': 'batch_id',
+              'environmental': 'location',
+              'daily-tasks': 'task_name',
+              'pick-lists': 'order_number',
+              'inventory-counts': 'location',
+            };
+            const titleCol = titleColumnMap[context.recordType] || 'title';
+            try {
+              const records = await db.all(`SELECT id, ${titleCol} as title, status, created_at FROM ${listTable} ORDER BY created_at DESC LIMIT 15`);
+              if (records?.length) {
+                systemPrompt += `\n\nThe user is viewing the ${context.recordType} list. Recent records:\n${JSON.stringify(records, null, 2)}`;
+              }
+            } catch (dbErr) {
+              console.error('Failed to fetch list records for AI context:', dbErr.message);
+            }
+          }
         }
+      }
+
+      // Append form data if the client sent current form state
+      if (context && context.formData && Object.keys(context.formData).length > 0) {
+        systemPrompt += `\n\n## Current Form State (includes unsaved edits)\n${JSON.stringify(context.formData, null, 2)}`;
       }
     }
     const userName = req.session?.user?.display_name || req.session?.user?.username || 'Operator';
