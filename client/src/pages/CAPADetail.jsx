@@ -29,6 +29,11 @@ const STATUS_COLORS = {
 
 const STATUS_OPTIONS = ['open', 'investigating', 'action_defined', 'in_progress', 'pending_review', 'closed'];
 
+const ROOT_CAUSE_LABELS = {
+  '5_whys': '5 Whys', fishbone: 'Fishbone / Ishikawa', fault_tree: 'Fault Tree Analysis',
+  pareto: 'Pareto Analysis', fmea: 'FMEA', timeline: 'Timeline Analysis', other: 'Other',
+};
+
 const SOURCE_COLORS = {
   change_request: 'bg-blue-50 text-blue-700',
   deviation: 'bg-amber-50 text-amber-700',
@@ -1334,7 +1339,7 @@ export default function CAPADetail() {
             iconColor="text-amber-500"
             title="Root Cause Investigation"
             defaultOpen={capa.status === 'investigating'}
-            badge={capa.root_cause_method ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">{capa.root_cause_method}</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">No method</span>}
+            badge={capa.root_cause_method ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">{ROOT_CAUSE_LABELS[capa.root_cause_method] || capa.root_cause_method}</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">No method</span>}
           >
             <div className="mb-4">
               <label className="text-sm font-medium text-gray-600 mb-0.5 block">Investigation Method</label>
@@ -1351,15 +1356,15 @@ export default function CAPADetail() {
                   }}
                 >
                   <option value="">— Select method —</option>
-                  <option value="5 Whys">5 Whys</option>
-                  <option value="Fishbone / Ishikawa">Fishbone / Ishikawa</option>
-                  <option value="Fault Tree Analysis">Fault Tree Analysis</option>
-                  <option value="Pareto Analysis">Pareto Analysis</option>
-                  <option value="Failure Mode Effects Analysis">Failure Mode Effects Analysis (FMEA)</option>
-                  <option value="Other">Other</option>
+                  <option value="5_whys">5 Whys</option>
+                  <option value="fishbone">Fishbone / Ishikawa</option>
+                  <option value="fault_tree">Fault Tree Analysis</option>
+                  <option value="pareto">Pareto Analysis</option>
+                  <option value="fmea">Failure Mode Effects Analysis (FMEA)</option>
+                  <option value="other">Other</option>
                 </select>
               ) : (
-                <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">{capa.root_cause_method || "Not specified"}</p>
+                <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">{ROOT_CAUSE_LABELS[capa.root_cause_method] || capa.root_cause_method || "Not specified"}</p>
               )}
             </div>
             <FieldHelp text={GMP_HELP.capa.fields.root_cause_analysis} />
