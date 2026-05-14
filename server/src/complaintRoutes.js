@@ -838,7 +838,7 @@ router.get('/qa-dashboard', async (req, res) => {
 
     const overdueActions = (await db.get(`
       SELECT COUNT(*) as count FROM corrective_actions
-      WHERE status NOT IN ('completed') AND target_date < CURRENT_DATE
+      WHERE status NOT IN ('completed') AND target_date::date < CURRENT_DATE
     `)).count;
 
     const totalActions = (await db.get('SELECT COUNT(*) as count FROM corrective_actions')).count;
