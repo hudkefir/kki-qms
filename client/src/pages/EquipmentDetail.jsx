@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
-  ArrowLeft, Edit2, Save, X, Plus, Clock, CheckCircle, AlertTriangle, Wrench
+  ArrowLeft, Edit2, Save, X, Plus, Clock, CheckCircle, AlertTriangle, Wrench, Trash2
 } from 'lucide-react';
-import { useFetch, apiPut, apiPost } from '../hooks/useApi';
+import { useFetch, apiPut, apiPost, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Modal from '../components/Modal';
@@ -60,6 +60,8 @@ export default function EquipmentDetail() {
   const [completingScheduleId, setCompletingScheduleId] = useState(null);
   const [showWOModal, setShowWOModal] = useState(false);
   const [woForm, setWOForm] = useState({ type: 'preventive', priority: 'routine' });
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   if (loading) return <LoadingSpinner message="Loading Equipment..." />;
   if (error) return <div className="text-center py-16 text-red-600">{error}</div>;
@@ -113,6 +115,18 @@ export default function EquipmentDetail() {
     } catch (err) { alert('Error: ' + err.message); }
   };
 
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await apiDelete(`/api/equipment/${id}`);
+      navigate('/equipment');
+    } catch (err) {
+      alert('Error deleting equipment: ' + err.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const schedules = equip.schedules || [];
   const workOrders = equip.workOrders || [];
   const associatedSops = typeof equip.associated_sops === 'string' ? JSON.parse(equip.associated_sops || '[]') : (equip.associated_sops || []);
@@ -156,9 +170,14 @@ export default function EquipmentDetail() {
                 </button>
               </>
             ) : (
-              <button onClick={startEdit} className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
-                <Edit2 className="w-4 h-4" /> Edit
-              </button>
+              <>
+                <button onClick={startEdit} className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+                  <Edit2 className="w-4 h-4" /> Edit
+                </button>
+                <button onClick={() => setShowDeleteModal(true)} className="flex items-center gap-2 px-3 py-2 border border-red-300 rounded-lg text-sm text-red-600 hover:bg-red-50">
+                  <Trash2 className="w-4 h-4" /> Delete
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -438,6 +457,31 @@ export default function EquipmentDetail() {
             <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm">Record Completion</button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="Delete Equipment">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 p-2 bg-red-100 rounded-lg">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-900 font-medium">Are you sure you want to delete this equipment?</p>
+              <p className="text-sm text-gray-500 mt-1">
+                <span className="font-medium">{equip.equipment_id}</span> — {equip.name} will be permanently removed. This action cannot be undone.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={() => setShowDeleteModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+              Cancel
+            </button>
+            <button type="button" onClick={handleDelete} disabled={deleting} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50">
+              {deleting ? 'Deleting...' : 'Delete Equipment'}
+            </button>
+          </div>
+        </div>
       </Modal>
 
       {/* Create Work Order Modal */}
