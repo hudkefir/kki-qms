@@ -639,6 +639,9 @@ router.get('/capas/:id', async (req, res) => {
     } catch(e) {}
     capa.linked_complaints = linkedComplaints;
 
+    // Get action items
+    capa.action_items = await db.all('SELECT * FROM capa_action_items WHERE capa_id = ? ORDER BY created_at ASC', [capa.id]);
+
     res.json(capa);
   } catch (err) {
     console.error('Get CAPA error:', err);
@@ -1056,6 +1059,98 @@ router.get('/change-control/dashboard', async (req, res) => {
     ].sort((a, b) => b.created_at?.localeCompare(a.created_at)).slice(0, 10);
 
     res.json({ openCCs, openDEVs, overdueCAPAs, recentActivity, countsByClassification });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==================== CAPA ACTION ITEMS ====================
+
+// GET /api/capas/:id/action-items
+router.get('/capas/:id/action-items', async (req, res) => {
+  try {
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
+    if (!capa) return res.status(404).json({ error: 'CAPA not found' });
+    const items = await db.all('SELECT * FROM capa_action_items WHERE capa_id = ? ORDER BY created_at ASC', [req.params.id]);
+    res.json(items);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/capas/:id/action-items
+router.post('/capas/:id/action-items', requireWriteAccess, async (req, res) => {
+  try {
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
+    if (!capa) return res.status(404).json({ error: 'CAPA not found' });
+
+    const { title, description, assigned_to, due_date } = req.body;
+    if (!title || !assigned_to) return res.status(400).json({ error: 'title and assigned_to are required' });
+
+    const info = await db.run(
+      `INSERT INTO capa_action_items (capa_id, title, description, assigned_to, due_date) VALUES (?, ?, ?, ?, ?)`,
+      [req.params.id, title, description || null, assigned_to, due_date || null]
+    );
+
+    const created = await db.get('SELECT * FROM capa_action_items WHERE id = ?', [info.lastInsertRowid]);
+    logAudit(req, 'create_capa_action_item', 'capa_action_items', created.id, capa.capa_id, { new_values: { title, assigned_to, due_date } });
+    broadcast('capa_action_item_created', { ...created, capa_id: Number(req.params.id) });
+    res.status(201).json(created);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/capas/:id/action-items/:itemId
+router.put('/capas/:id/action-items/:itemId', requireWriteAccess, async (req, res) => {
+  try {
+    const item = await db.get('SELECT * FROM capa_action_items WHERE id = ? AND capa_id = ?', [req.params.itemId, req.params.id]);
+    if (!item) return res.status(404).json({ error: 'Action item not found' });
+
+    const fields = ['title', 'description', 'assigned_to', 'due_date', 'status'];
+    const updates = [];
+    const params = [];
+    for (const field of fields) {
+      if (req.body[field] !== undefined) {
+        updates.push(`${field} = ?`);
+        params.push(req.body[field]);
+      }
+    }
+
+    // Set completed_at when status changes to completed
+    if (req.body.status === 'completed' && item.status !== 'completed') {
+      updates.push('completed_at = CURRENT_TIMESTAMP');
+    } else if (req.body.status && req.body.status !== 'completed') {
+      updates.push('completed_at = NULL');
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    if (updates.length === 1) return res.json(item);
+
+    params.push(req.params.itemId);
+    await db.run(`UPDATE capa_action_items SET ${updates.join(', ')} WHERE id = ?`, params);
+
+    const updated = await db.get('SELECT * FROM capa_action_items WHERE id = ?', [req.params.itemId]);
+    const capa = await db.get('SELECT capa_id FROM capas WHERE id = ?', [req.params.id]);
+    logAudit(req, 'update_capa_action_item', 'capa_action_items', req.params.itemId, capa?.capa_id, { old_values: { status: item.status }, new_values: req.body });
+    broadcast('capa_action_item_updated', { ...updated, capa_id: Number(req.params.id) });
+    res.json(updated);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/capas/:id/action-items/:itemId
+router.delete('/capas/:id/action-items/:itemId', requireWriteAccess, async (req, res) => {
+  try {
+    const item = await db.get('SELECT * FROM capa_action_items WHERE id = ? AND capa_id = ?', [req.params.itemId, req.params.id]);
+    if (!item) return res.status(404).json({ error: 'Action item not found' });
+
+    await db.run('DELETE FROM capa_action_items WHERE id = ?', [req.params.itemId]);
+    const capa = await db.get('SELECT capa_id FROM capas WHERE id = ?', [req.params.id]);
+    logAudit(req, 'delete_capa_action_item', 'capa_action_items', req.params.itemId, capa?.capa_id, { deleted: item.title });
+    broadcast('capa_action_item_deleted', { id: Number(req.params.itemId), capa_id: Number(req.params.id) });
+    res.json({ success: true });
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
   }

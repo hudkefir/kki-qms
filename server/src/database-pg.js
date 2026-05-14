@@ -1240,6 +1240,23 @@ CREATE INDEX IF NOT EXISTS idx_planner_batches_sku ON planner_batches(sku);
   await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS title TEXT`);
   await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS description TEXT`);
   await pool.query(`ALTER TABLE capas ADD COLUMN IF NOT EXISTS linked_complaints_json TEXT DEFAULT '[]'`);
+
+  // CAPA Action Items table
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS capa_action_items (
+      id SERIAL PRIMARY KEY,
+      capa_id INTEGER NOT NULL REFERENCES capas(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT,
+      assigned_to TEXT NOT NULL,
+      due_date TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed', 'overdue')),
+      completed_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_capa_action_items_capa_id ON capa_action_items(capa_id)`);
 }
 
 // ─── Initialize on import ────────────────────────────────────────────────────

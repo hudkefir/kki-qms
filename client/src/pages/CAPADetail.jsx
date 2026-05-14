@@ -13,6 +13,7 @@ import {
   User, Pencil, X, FlaskConical, MessageSquare,
   RefreshCw, Activity, Tag, Paperclip, Trash2,
   ChevronDown, ChevronRight, ArrowDownCircle, Zap, Upload, Download, Filter,
+  ListTodo,
 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -277,6 +278,196 @@ function CollapsibleSection({ icon: Icon, iconColor, title, defaultOpen = false,
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Action Items Section ──────────────────────────────────────────────────
+
+const ACTION_STATUS_COLORS = {
+  pending: 'bg-amber-100 text-amber-700 border-amber-200',
+  in_progress: 'bg-blue-100 text-blue-700 border-blue-200',
+  completed: 'bg-green-100 text-green-700 border-green-200',
+  overdue: 'bg-red-100 text-red-700 border-red-200',
+};
+
+const ACTION_STATUS_NEXT = {
+  pending: 'in_progress',
+  in_progress: 'completed',
+  completed: 'pending',
+};
+
+function ActionItemsSection({ capaId, actionItems, canEdit, onRefetch }) {
+  const [showForm, setShowForm] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [form, setForm] = useState({ title: '', description: '', assigned_to: '', due_date: '' });
+  const [saving, setSaving] = useState(false);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    if (!form.title.trim() || !form.assigned_to.trim()) return;
+    setSaving(true);
+    try {
+      await apiPost(`/api/capas/${capaId}/action-items`, form);
+      setForm({ title: '', description: '', assigned_to: '', due_date: '' });
+      setShowForm(false);
+      onRefetch();
+    } catch (err) { alert('Error: ' + err.message); }
+    setSaving(false);
+  };
+
+  const toggleStatus = async (item) => {
+    const nextStatus = ACTION_STATUS_NEXT[item.status] || 'pending';
+    try {
+      await apiPut(`/api/capas/${capaId}/action-items/${item.id}`, { status: nextStatus });
+      onRefetch();
+    } catch (err) { alert('Error: ' + err.message); }
+  };
+
+  const handleDelete = async (item) => {
+    if (!confirm(`Delete action item "${item.title}"?`)) return;
+    try {
+      await apiDelete(`/api/capas/${capaId}/action-items/${item.id}`);
+      onRefetch();
+    } catch (err) { alert('Error: ' + err.message); }
+  };
+
+  const completedCount = actionItems.filter(i => i.status === 'completed').length;
+  const badge = actionItems.length > 0
+    ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700">{completedCount}/{actionItems.length}</span>
+    : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">None</span>;
+
+  return (
+    <CollapsibleSection
+      icon={ListTodo}
+      iconColor="text-indigo-500"
+      title="Action Items"
+      defaultOpen={actionItems.length > 0}
+      badge={badge}
+    >
+      <div className="space-y-3">
+        {actionItems.length === 0 && !showForm && (
+          <p className="text-sm text-gray-500 italic">No action items assigned yet.</p>
+        )}
+
+        {actionItems.map(item => (
+          <div key={item.id} className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 transition-colors">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <button
+                  onClick={() => toggleStatus(item)}
+                  className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-semibold border cursor-pointer transition-colors ${ACTION_STATUS_COLORS[item.status]}`}
+                  title="Click to advance status"
+                  disabled={!canEdit}
+                >
+                  {item.status.replace(/_/g, ' ')}
+                </button>
+                <span
+                  className={`text-sm font-medium truncate cursor-pointer ${item.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-800'}`}
+                  onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                >
+                  {item.title}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {item.due_date && (
+                  <span className="text-xs text-gray-500 flex items-center gap-1">
+                    <CalendarDays className="w-3 h-3" />
+                    {item.due_date}
+                  </span>
+                )}
+                <span className="text-xs text-gray-500 flex items-center gap-1">
+                  <User className="w-3 h-3" />
+                  {item.assigned_to}
+                </span>
+                {canEdit && (
+                  <button onClick={() => handleDelete(item)} className="text-gray-400 hover:text-red-500 transition-colors" title="Delete">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+            {expandedId === item.id && item.description && (
+              <div className="mt-2 pl-2 text-sm text-gray-600 border-l-2 border-gray-200">
+                {item.description}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {showForm && (
+          <form onSubmit={handleAdd} className="border border-indigo-200 rounded-lg p-4 bg-indigo-50/30 space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Title *</label>
+              <input
+                type="text"
+                value={form.title}
+                onChange={e => setForm({ ...form, title: e.target.value })}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                placeholder="What needs to be done?"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
+              <textarea
+                value={form.description}
+                onChange={e => setForm({ ...form, description: e.target.value })}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                rows={2}
+                placeholder="Optional details..."
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Assigned To *</label>
+                <input
+                  type="text"
+                  value={form.assigned_to}
+                  onChange={e => setForm({ ...form, assigned_to: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                  placeholder="Name or role"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Due Date</label>
+                <input
+                  type="date"
+                  value={form.due_date}
+                  onChange={e => setForm({ ...form, due_date: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : 'Add Item'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowForm(false); setForm({ title: '', description: '', assigned_to: '', due_date: '' }); }}
+                className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        {canEdit && !showForm && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
+          >
+            <Plus className="w-4 h-4" /> Add Action Item
+          </button>
+        )}
+      </div>
+    </CollapsibleSection>
   );
 }
 
@@ -1495,6 +1686,8 @@ export default function CAPADetail() {
               aiSuggestProps={{ field: 'preventive_action', recordType: 'capa', context: capa }}
             />
           </CollapsibleSection>
+
+          <ActionItemsSection capaId={capa.id} actionItems={capa.action_items || []} canEdit={canEditContent} onRefetch={refetch} />
 
           <CollapsibleSection
             icon={Activity}
