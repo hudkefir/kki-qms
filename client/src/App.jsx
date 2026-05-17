@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
-import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail } from 'lucide-react';
+import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail, ListTodo, LayoutDashboard } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -43,6 +43,8 @@ import TraceabilityDetail from './pages/TraceabilityDetail';
 import CrisisDetail from './pages/CrisisDetail';
 import Journal from './pages/Journal';
 import EmailScan from './pages/EmailScan';
+import OperatorDashboard from './pages/OperatorDashboard';
+import OperatorTasksAdmin from './pages/OperatorTasksAdmin';
 import useWebSocket from './hooks/useWebSocket';
 import AccessDenied from "./components/AccessDenied";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -132,12 +134,14 @@ export default function App() {
     },
     { label: 'Tools',
       items: [
+        { to: '/my-tasks', icon: LayoutDashboard, label: 'My Dashboard' },
         { to: '/journal', icon: BookOpen, label: 'Journal' },
         { to: '/email-scan', icon: Mail, label: 'Email Scan' },
       ]
     },
     ...(hasRole('admin') ? [{ label: 'Admin',
       items: [
+        { to: '/admin/tasks', icon: ListTodo, label: 'Task Admin' },
         { to: '/users', icon: Users, label: 'Users' },
         { to: '/audit-logs', icon: ScrollText, label: 'Audit Log' },
       ]
@@ -270,11 +274,17 @@ export default function App() {
             <Route path="/traceability-exercises/:id" element={<TraceabilityDetail />} />
             <Route path="/crisis-events/:id" element={<CrisisDetail />} />
             <Route path="/journal" element={<Journal />} />
+            <Route path="/my-tasks" element={<OperatorDashboard />} />
             <Route path="/email-scan" element={<EmailScan />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/users" element={
               <ProtectedRoute roles={["admin"]} label="Admin">
                 <UserManagement />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/tasks" element={
+              <ProtectedRoute roles={["admin"]} label="Admin">
+                <OperatorTasksAdmin />
               </ProtectedRoute>
             } />
             <Route path="/audit-logs" element={

@@ -36,6 +36,8 @@ import dailyTaskRoutes from './dailyTaskRoutes.js';
 import inventoryRoutes from './inventoryRoutes.js';
 import pickListRoutes from './pickListRoutes.js';
 import documentRoutes from './documentRoutes.js';
+import operatorTaskRoutes from './operatorTaskRoutes.js';
+import operatorDashboardRoutes from './operatorDashboardRoutes.js';
 import { setupWebSocket } from './websocket.js';
 import { requireAuth } from './authMiddleware.js';
 import { auditApiMiddleware } from './auditMiddleware.js';
@@ -101,12 +103,12 @@ app.use('/api', (req, res, next) => {
   // Extract path segments and check common ID patterns
   const segments = req.path.split('/').filter(Boolean);
   // Check segments that follow known resource names (sops, complaints, ccrs, users, documents, audit, files)
-  const resources = ['sops', 'complaints', 'ccrs', 'users', 'documents', 'audit', 'files', 'corrective-actions', 'batch-tests', 'daily-tasks', 'sop-forms', 'change-requests', 'deviations', 'capas', 'change-control', 'equipment', 'pm-schedules', 'work-orders', 'recalls', 'traceability-exercises', 'crisis-events', 'recall', 'suppliers', 'links', 'inventory', 'picklists'];
+  const resources = ['sops', 'complaints', 'ccrs', 'users', 'documents', 'audit', 'files', 'corrective-actions', 'batch-tests', 'daily-tasks', 'sop-forms', 'change-requests', 'deviations', 'capas', 'change-control', 'equipment', 'pm-schedules', 'work-orders', 'recalls', 'traceability-exercises', 'crisis-events', 'recall', 'suppliers', 'links', 'inventory', 'picklists', 'operator-tasks', 'operator-dashboard'];
   for (let i = 0; i < segments.length - 1; i++) {
     if (resources.includes(segments[i])) {
       const idSegment = segments[i + 1];
       // Skip known sub-paths that aren't IDs
-      if (['analytics', 'upload', 'by-lot', 'bulk-read-content', 'status', 'admin', 'completions', 'templates', 'results', 'verify', 'bulk', 'summary', 'fields', 'entries', 'forms', 'operators', 'export', 'admin-override', 'unlock', 'load', 'classify', 'approve', 'reject', 'effectiveness', 'investigate', 'disposition', 'dashboard', 'overdue', 'upcoming', 'complete', 'hold', 'notify-cfia', 'notify-customers', 'distribution', 'close', 'resolve', 'parse-coa-multi', 'print', 'environmental', 'updates', 'link-batch', 'link-complaint', 'available-complaints', 'available-batches', 'audit-trail', 'suggest-links', 'import', 'reviews', 'checklist', 'search', 'suggestions', 'capa', 'deviation', 'complaint', 'ccr', 'change_request', 'batch_test', 'sop', 'counts', 'skus', 'sos', 'activities'].includes(idSegment)) continue;
+      if (['analytics', 'upload', 'by-lot', 'bulk-read-content', 'status', 'admin', 'completions', 'templates', 'results', 'verify', 'bulk', 'summary', 'fields', 'entries', 'forms', 'operators', 'export', 'admin-override', 'unlock', 'load', 'classify', 'approve', 'reject', 'effectiveness', 'investigate', 'disposition', 'dashboard', 'overdue', 'upcoming', 'complete', 'hold', 'notify-cfia', 'notify-customers', 'distribution', 'close', 'resolve', 'parse-coa-multi', 'print', 'environmental', 'updates', 'link-batch', 'link-complaint', 'available-complaints', 'available-batches', 'audit-trail', 'suggest-links', 'import', 'reviews', 'checklist', 'search', 'suggestions', 'capa', 'deviation', 'complaint', 'ccr', 'change_request', 'batch_test', 'sop', 'counts', 'skus', 'sos', 'activities', 'my', 'by-module', 'comments', 'unified', 'preferences'].includes(idSegment)) continue;
       if (!/^\d+$/.test(idSegment)) {
         return res.status(400).json({ error: `Invalid ID '${idSegment}': must be a numeric value` });
       }
@@ -210,6 +212,8 @@ app.use('/api', requireAuth, dailyTaskRoutes);
 app.use('/api', requireAuth, inventoryRoutes);
 app.use('/api', requireAuth, pickListRoutes);
 app.use('/api', requireAuth, documentRoutes);
+app.use('/api', requireAuth, operatorTaskRoutes);
+app.use('/api', requireAuth, operatorDashboardRoutes);
 
 
 // Global error handler — prevent stack trace leaks
