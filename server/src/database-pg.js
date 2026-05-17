@@ -1257,6 +1257,42 @@ CREATE INDEX IF NOT EXISTS idx_planner_batches_sku ON planner_batches(sku);
     );
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_capa_action_items_capa_id ON capa_action_items(capa_id)`);
+
+  // Operator Tasks (universal task management)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS operator_tasks (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      assigned_to TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      due_date TEXT,
+      priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'critical')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed', 'overdue')),
+      linked_module TEXT NOT NULL,
+      linked_record_id INTEGER NOT NULL,
+      completed_at TEXT,
+      completed_by TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS operator_task_comments (
+      id SERIAL PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES operator_tasks(id) ON DELETE CASCADE,
+      author TEXT NOT NULL,
+      comment TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_operator_tasks_assigned_to ON operator_tasks(assigned_to)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_operator_tasks_status ON operator_tasks(status)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_operator_tasks_linked ON operator_tasks(linked_module, linked_record_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_operator_tasks_due_date ON operator_tasks(due_date)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_operator_task_comments_task ON operator_task_comments(task_id)`);
 }
 
 // ─── Initialize on import ────────────────────────────────────────────────────

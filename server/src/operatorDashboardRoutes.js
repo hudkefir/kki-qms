@@ -97,17 +97,17 @@ router.get('/operator-dashboard/unified', requireAuth, async (req, res) => {
       // 7. Pick Lists assigned to this user
       db.all(
         `SELECT *, 'pick_list' as source_type FROM pick_lists
-         WHERE (assigned_to = $1 OR assigned_to = $2) AND status NOT IN ('shipped', 'cancelled')
-         ORDER BY target_date ASC NULLS LAST`,
+         WHERE (picked_by = $1 OR picked_by = $2) AND status NOT IN ('shipped', 'cancelled')
+         ORDER BY pick_date ASC NULLS LAST`,
         [username, displayName]
       ),
 
-      // 8. Planner batches assigned to this operator
+      // 8. Planner batches (recent non-completed)
       db.all(
         `SELECT *, 'planner_batch' as source_type FROM planner_batches
-         WHERE (assigned_operator = $1 OR assigned_operator = $2) AND status NOT IN ('completed', 'cancelled')
-         ORDER BY date_planned ASC`,
-        [username, displayName]
+         WHERE status NOT IN ('completed', 'cancelled')
+         ORDER BY production_date ASC
+         LIMIT 10`
       ),
 
       // 9. Recent activity by this user (last 50 actions)
@@ -162,7 +162,7 @@ router.get('/operator-dashboard/unified', requireAuth, async (req, res) => {
         ...workOrders.filter(wo => wo.priority === 'emergency'),
       ].length,
       due_this_week: allActive.filter(t => {
-        const d = t.due_date || t.next_due_date || t.target_date || t.date_planned;
+        const d = t.due_date || t.next_due_date || t.pick_date || t.production_date;
         return d && d >= today && d <= weekFromNow;
       }).length,
       completed_today: [

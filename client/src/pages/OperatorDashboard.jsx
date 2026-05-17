@@ -331,10 +331,10 @@ function PickListsWidget({ lists, navigate }) {
             <Package className="w-3.5 h-3.5 text-teal-600" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">{pl.pick_list_number}</p>
+            <p className="text-sm font-medium text-gray-900 truncate">{pl.sales_order_number}</p>
             <div className="flex items-center gap-2 mt-0.5">
-              {pl.destination && <span className="text-[11px] text-gray-500">{pl.destination}</span>}
-              {pl.target_date && <span className="text-[11px] text-gray-500">Target: {formatDate(pl.target_date)}</span>}
+              {pl.customer_name && <span className="text-[11px] text-gray-500">{pl.customer_name}</span>}
+              {pl.pick_date && <span className="text-[11px] text-gray-500">Pick: {formatDate(pl.pick_date)}</span>}
             </div>
           </div>
           <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_COLORS[pl.status] || 'bg-gray-100 text-gray-600'}`}>{pl.status}</span>
@@ -359,10 +359,10 @@ function BatchesWidget({ batches, navigate }) {
             <Beaker className="w-3.5 h-3.5 text-pink-600" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">{b.batch_number} — {b.product_name}</p>
+            <p className="text-sm font-medium text-gray-900 truncate">{b.batch_number} — {b.sku}</p>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-[11px] text-gray-500">Planned: {formatDate(b.date_planned)}</span>
-              {b.expected_yield_liters && <span className="text-[11px] text-gray-500">{b.expected_yield_liters}L</span>}
+              <span className="text-[11px] text-gray-500">Production: {formatDate(b.production_date)}</span>
+              {b.estimated_cases && <span className="text-[11px] text-gray-500">{b.estimated_cases} cases</span>}
             </div>
           </div>
           <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_COLORS[b.status] || 'bg-gray-100 text-gray-600'}`}>{b.status?.replace('_', ' ')}</span>

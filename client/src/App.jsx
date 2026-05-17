@@ -101,8 +101,9 @@ export default function App() {
     return <Login />;
   }
 
+  const isOperator = user.role === 'operator';
   const navGroups = [
-    { items: [{ to: '/', icon: Home, label: 'Dashboard', end: true }] },
+    { items: [{ to: '/', icon: isOperator ? LayoutDashboard : Home, label: isOperator ? 'My Dashboard' : 'Dashboard', end: true }] },
     { label: 'Quality & Compliance',
       items: [
         { to: '/complaints', icon: AlertCircle, label: 'Complaints' },
@@ -134,7 +135,7 @@ export default function App() {
     },
     { label: 'Tools',
       items: [
-        { to: '/my-tasks', icon: LayoutDashboard, label: 'My Dashboard' },
+        ...(!isOperator ? [{ to: '/my-tasks', icon: LayoutDashboard, label: 'My Dashboard' }] : []),
         { to: '/journal', icon: BookOpen, label: 'Journal' },
         { to: '/email-scan', icon: Mail, label: 'Email Scan' },
       ]
@@ -238,7 +239,7 @@ export default function App() {
       <main className="main-content ml-64 min-h-screen">
         <div className="p-8">
           <Routes>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={user.role === 'operator' ? <OperatorDashboard /> : <Dashboard />} />
             <Route path="/sops" element={<SOPLibrary />} />
             <Route path="/sops/:id" element={<SOPDetail />} />
             <Route path="/complaints" element={<Complaints />} />

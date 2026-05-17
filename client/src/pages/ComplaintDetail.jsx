@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Archive, ArrowLeft, Edit2, Save, X, AlertCircle, ExternalLink, Camera, Trash2,
   MessageSquare, Send, User, FlaskConical, Package, RefreshCw, CheckCircle, XCircle, Clock, Loader2,
-  History, GitCommit, ArrowRight, Mail
+  History, GitCommit, ArrowRight, Mail, ClipboardList, Plus
 } from 'lucide-react';
 import LinkedDocuments from '../components/LinkedDocuments';
 import RecordLinker from '../components/RecordLinker';
@@ -28,6 +28,12 @@ export default function ComplaintDetail() {
   const [pendingStatus, setPendingStatus] = useState(null);
   const [statusReason, setStatusReason] = useState('');
   const [statusChanging, setStatusChanging] = useState(false);
+
+  // Create Task modal
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [taskForm, setTaskForm] = useState({ task: '', operator: '', notes: '', section: 'Quality' });
+  const [creatingTask, setCreatingTask] = useState(false);
+  const [taskSuccess, setTaskSuccess] = useState(false);
 
   // Status history
   const { data: statusHistory, refetch: refetchHistory } = useFetch(`/api/complaints/${id}/status-history`);
@@ -93,6 +99,40 @@ export default function ComplaintDetail() {
       refetch();
     } catch (err) {
       alert('Failed to delete comment: ' + err.message);
+    }
+  };
+
+  const openTaskModal = () => {
+    setTaskForm({
+      task: `Follow up on ${complaint?.complaint_number || 'complaint'}: ${complaint?.issue_type || 'issue'} — ${complaint?.reporter || 'unknown reporter'}`,
+      operator: complaint?.assigned_to || currentUser?.display_name || '',
+      notes: `Linked to complaint ${complaint?.complaint_number}. ${complaint?.description?.slice(0, 200) || ''}`,
+      section: 'Quality',
+    });
+    setTaskSuccess(false);
+    setShowTaskModal(true);
+  };
+
+  const handleCreateTask = async () => {
+    if (!taskForm.task.trim()) return;
+    setCreatingTask(true);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      await apiPost(`/api/taskboard/v2/tasks/${today}`, {
+        task: taskForm.task,
+        operator: taskForm.operator,
+        section: taskForm.section,
+        zone: 'Office',
+        notes: taskForm.notes,
+        status: 'todo',
+        sort_order: 0,
+      });
+      setTaskSuccess(true);
+      setTimeout(() => { setShowTaskModal(false); setTaskSuccess(false); }, 1500);
+    } catch (err) {
+      alert('Failed to create task: ' + err.message);
+    } finally {
+      setCreatingTask(false);
     }
   };
 
@@ -600,6 +640,38 @@ export default function ComplaintDetail() {
             </div>
           )}
 
+          {/* Quick Actions */}
+          {!editing && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Quick Actions</h3>
+              <div className="space-y-2">
+                <button
+                  onClick={openTaskModal}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <ClipboardList className="w-4 h-4 text-navy-600" />
+                  Create Task
+                </button>
+                <button
+                  onClick={() => document.querySelector('textarea[placeholder*="investigation"]')?.focus()}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <MessageSquare className="w-4 h-4 text-navy-600" />
+                  Add Comment
+                </button>
+                {!complaint.linkedCCR && (
+                  <Link
+                    to={`/ccrs/new?complaint_id=${id}&complaint_number=${complaint.complaint_number}`}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <Plus className="w-4 h-4 text-navy-600" />
+                    Create CCR
+                  </Link>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Linked CCR */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <h3 className="text-sm font-semibold text-gray-900 mb-3">Linked CCR</h3>
@@ -689,6 +761,91 @@ export default function ComplaintDetail() {
           </div>
         </div>
       </div>
+
+      {/* Create Task Modal */}
+      {showTaskModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            {taskSuccess ? (
+              <div className="text-center py-6">
+                <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                <p className="text-lg font-semibold text-gray-900">Task Created</p>
+                <p className="text-sm text-gray-500 mt-1">Added to today's taskboard</p>
+              </div>
+            ) : (
+              <>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  <ClipboardList className="w-5 h-5 text-navy-600" />
+                  Create Task from Complaint
+                </h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Task</label>
+                    <input
+                      type="text"
+                      value={taskForm.task}
+                      onChange={e => setTaskForm({ ...taskForm, task: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2 focus:ring-2 focus:ring-navy-500 focus:border-navy-500"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Assign To</label>
+                      <input
+                        type="text"
+                        value={taskForm.operator}
+                        onChange={e => setTaskForm({ ...taskForm, operator: e.target.value })}
+                        placeholder="e.g., Hudson, Jimmy"
+                        className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2 focus:ring-2 focus:ring-navy-500 focus:border-navy-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
+                      <select
+                        value={taskForm.section}
+                        onChange={e => setTaskForm({ ...taskForm, section: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2 focus:ring-2 focus:ring-navy-500 focus:border-navy-500"
+                      >
+                        <option value="Quality">Quality</option>
+                        <option value="Production">Production</option>
+                        <option value="Lab">Lab</option>
+                        <option value="Shipping">Shipping</option>
+                        <option value="Office">Office</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                    <textarea
+                      rows={3}
+                      value={taskForm.notes}
+                      onChange={e => setTaskForm({ ...taskForm, notes: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2 resize-none focus:ring-2 focus:ring-navy-500 focus:border-navy-500"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-4">
+                  <button
+                    onClick={() => setShowTaskModal(false)}
+                    className="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleCreateTask}
+                    disabled={creatingTask || !taskForm.task.trim()}
+                    className="px-4 py-2 text-sm bg-navy-800 text-white rounded-lg hover:bg-navy-700 disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" />
+                    {creatingTask ? 'Creating...' : 'Create Task'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Status Change Modal */}
       {showStatusModal && pendingStatus && (

@@ -7,6 +7,7 @@ import FormattedText from '../components/FormattedText';
 import RecordLinker from '../components/RecordLinker';
 import { FieldHelp, RecordInfoTooltip, GMP_HELP } from '../components/GmpFieldHelp';
 import AiSuggestButton from '../components/AiSuggestButton';
+import TaskCreator from '../components/TaskCreator';
 import {
   ArrowLeft, Save, Printer, Shield, Clock, CheckCircle, XCircle,
   AlertTriangle, FileText, Plus, Send, CalendarDays,
@@ -1688,6 +1689,8 @@ export default function CAPADetail() {
           </CollapsibleSection>
 
           <ActionItemsSection capaId={capa.id} actionItems={capa.action_items || []} canEdit={canEditContent} onRefetch={refetch} />
+
+          <TaskCreator linkedModule="capa" linkedRecordId={capa.id} canEdit={canEditContent} />
 
           <CollapsibleSection
             icon={Activity}
