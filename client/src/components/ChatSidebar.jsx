@@ -157,16 +157,32 @@ export default function ChatSidebar() {
                 return updated;
               });
             } else if (event.type === 'tool_start') {
-              // Show inline notification that Jarvis is editing
-              const fieldLabel = (event.field || '').replace(/_/g, ' ');
-              fullText += `\n\n> ✏️ *Updating ${fieldLabel}...*\n\n`;
+              // Show inline notification based on tool type
+              if (event.tool === 'create_action_item') {
+                fullText += `\n\n> 📋 *Creating action item...*\n\n`;
+              } else {
+                const fieldLabel = (event.field || '').replace(/_/g, ' ');
+                fullText += `\n\n> ✏️ *Updating ${fieldLabel}...*\n\n`;
+              }
               setMessages(prev => {
                 const updated = [...prev];
                 updated[updated.length - 1] = { role: 'assistant', content: fullText };
                 return updated;
               });
             } else if (event.type === 'tool_result') {
-              if (event.result?.success) {
+              if (event.tool === 'create_action_item') {
+                if (event.result?.success) {
+                  fullText = fullText.replace(
+                    /> 📋 \*Creating action item\.\.\.\*\n\n$/,
+                    `> ✅ **Task created:** "${event.result.title}" → ${event.result.assigned_to}${event.result.due_date && event.result.due_date !== 'not set' ? ` (due ${event.result.due_date})` : ''}\n\n`
+                  );
+                } else {
+                  fullText = fullText.replace(
+                    /> 📋 \*Creating action item\.\.\.\*\n\n$/,
+                    `> ❌ **Task creation failed:** ${event.result?.error || 'Unknown error'}\n\n`
+                  );
+                }
+              } else if (event.result?.success) {
                 const fieldLabel = (event.result.field || '').replace(/_/g, ' ');
                 fullText = fullText.replace(
                   /> ✏️ \*Updating.*?\.\.\.\*\n\n$/,

@@ -65,6 +65,36 @@ const AI_TOOLS = [
       required: ['record_type', 'record_id', 'field', 'value'],
     },
   },
+  {
+    name: 'create_action_item',
+    description: `Create a task/action item on the CAPA the user is currently viewing. Use this when the user asks you to add a task, create an action item, assign work, or break down corrective/preventive actions into steps. You can create multiple action items by calling this tool multiple times.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        capa_id: {
+          type: 'string',
+          description: 'The ID of the CAPA to add the action item to (from the current context)',
+        },
+        title: {
+          type: 'string',
+          description: 'Short, clear title for the action item (e.g., "Retrain staff on SOP-042", "Calibrate pH meter")',
+        },
+        description: {
+          type: 'string',
+          description: 'Detailed description of what needs to be done. Write in professional GMP style.',
+        },
+        assigned_to: {
+          type: 'string',
+          description: 'Name or role of the person responsible (e.g., "QA Manager", "Production Lead", "Hudson"). If unknown, use "Unassigned".',
+        },
+        due_date: {
+          type: 'string',
+          description: 'Due date in YYYY-MM-DD format. If not specified by user, set a reasonable deadline based on urgency (7 days for routine, 2 days for critical).',
+        },
+      },
+      required: ['capa_id', 'title', 'assigned_to'],
+    },
+  },
 ];
 
 // Execute AI tool calls
@@ -125,6 +155,48 @@ async function executeToolCall(toolName, toolInput, userId) {
       message: `Updated "${field}" on ${record_type} record.`,
       field,
       old_value: oldValue ? oldValue.substring(0, 100) + (oldValue.length > 100 ? '...' : '') : '(empty)',
+    };
+  }
+
+  if (toolName === 'create_action_item') {
+    const { capa_id, title, description, assigned_to, due_date } = toolInput;
+
+    // Verify the CAPA exists
+    const capa = await db.get('SELECT id, capa_id, title as capa_title, status FROM capas WHERE id = $1', [capa_id]);
+    if (!capa) {
+      return { success: false, error: `CAPA #${capa_id} not found` };
+    }
+
+    // Insert the action item
+    const result = await db.run(
+      `INSERT INTO capa_action_items (capa_id, title, description, assigned_to, due_date, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [capa_id, title, description || '', assigned_to, due_date || null]
+    );
+
+    // Log audit
+    try {
+      await db.run(
+        `INSERT INTO audit_log (action, table_name, record_id, record_identifier, user_id, details) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          'ai_create_action_item',
+          'capa_action_items',
+          capa_id,
+          capa.capa_id || capa_id,
+          userId || 'jarvis-ai',
+          JSON.stringify({ title, description, assigned_to, due_date, source: 'jarvis_ai' }),
+        ]
+      );
+    } catch (auditErr) {
+      console.error('AI audit log failed:', auditErr.message);
+    }
+
+    return {
+      success: true,
+      message: `Created action item "${title}" assigned to ${assigned_to}${due_date ? ` (due ${due_date})` : ''}.`,
+      title,
+      assigned_to,
+      due_date: due_date || 'not set',
     };
   }
 
@@ -192,6 +264,19 @@ When editing, write in professional GMP documentation style:
 - Do NOT fabricate data not present in the record
 
 After editing a field, tell the user what you wrote and that they should refresh the page to see the updated value.
+
+## Creating Action Items / Tasks
+When viewing a CAPA, you can also **create action items** using the create_action_item tool. Use this when:
+- The user asks you to add tasks, create action items, or assign work
+- The user asks you to break down corrective or preventive actions into steps
+- The user asks "what tasks should we create for this CAPA?"
+- You recommend specific actions and the user says "add those as tasks"
+
+When creating action items:
+- Use clear, actionable titles (verb + object, e.g., "Retrain staff on SOP-042")
+- Set realistic due dates based on urgency (2 days for critical, 7 days for routine, 14-30 days for systemic changes)
+- Assign to specific people if known, otherwise use role titles (e.g., "QA Manager", "Production Lead")
+- You can create multiple action items in sequence to break down complex corrective actions
 
 ## Important Rules
 - Never fabricate lot numbers, batch IDs, test results, or specific KKI data
@@ -327,6 +412,11 @@ router.post('/ai/chat', async (req, res) => {
                       if (cr) relatedRecords.changeRequest = cr;
                     } catch (e) { /* non-fatal */ }
                   }
+                  // Fetch existing action items so Jarvis knows what tasks already exist
+                  try {
+                    const actionItems = await db.all(`SELECT id, title, description, assigned_to, due_date, status, created_at FROM capa_action_items WHERE capa_id = $1 ORDER BY created_at ASC`, [context.recordId]);
+                    if (actionItems?.length) relatedRecords.actionItems = actionItems;
+                  } catch (e) { /* non-fatal */ }
                 } else if (context.recordType === 'complaints') {
                   if (record.linked_ccr_id) {
                     try {
