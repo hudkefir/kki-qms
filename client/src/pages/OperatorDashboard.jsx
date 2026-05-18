@@ -189,7 +189,7 @@ function OperatorTasksWidget({ tasks, onStatusChange, navigate }) {
 }
 
 // ─── CAPA Action Items Widget ───────────────────────────────────────────────
-function CAPAItemsWidget({ items, navigate }) {
+function CAPAItemsWidget({ items, onStatusChange, navigate }) {
   const active = (items || []).filter(t => t.status !== 'completed');
   if (active.length === 0) return <EmptyWidget message="No active CAPA action items" />;
 
@@ -197,7 +197,16 @@ function CAPAItemsWidget({ items, navigate }) {
     <div className="space-y-2">
       {active.slice(0, 8).map(item => (
         <div key={item.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group">
-          <div className={`w-2 h-8 rounded-full flex-shrink-0 ${item.computed_overdue ? 'bg-red-400' : item.status === 'in_progress' ? 'bg-blue-400' : 'bg-gray-300'}`} />
+          {item.status === 'pending' && (
+            <button onClick={() => onStatusChange(item.capa_id, item.id, 'in_progress')} className="p-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 flex-shrink-0" title="Start">
+              <Play className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {(item.status === 'in_progress' || item.computed_overdue) && (
+            <button onClick={() => onStatusChange(item.capa_id, item.id, 'completed')} className="p-1 rounded bg-green-50 text-green-600 hover:bg-green-100 flex-shrink-0" title="Complete">
+              <CheckCircle className="w-3.5 h-3.5" />
+            </button>
+          )}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
             <div className="flex items-center gap-2 mt-0.5">
@@ -541,6 +550,15 @@ export default function OperatorDashboard() {
     }
   };
 
+  const handleCAPAItemStatusChange = async (capaId, itemId, newStatus) => {
+    try {
+      await apiPut(`/api/capas/${capaId}/action-items/${itemId}`, { status: newStatus });
+      refetch();
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await refetch();
@@ -609,7 +627,7 @@ export default function OperatorDashboard() {
 
         {isVisible('capa_items') && (
           <WidgetCard id="capa_items" config={WIDGET_CONFIG.capa_items}>
-            <CAPAItemsWidget items={capa_action_items} navigate={navigate} />
+            <CAPAItemsWidget items={capa_action_items} onStatusChange={handleCAPAItemStatusChange} navigate={navigate} />
           </WidgetCard>
         )}
 
