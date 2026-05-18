@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import {
   FileText, CheckCircle, AlertTriangle, XCircle, Clock,
-  ChevronRight, Shield, TrendingUp, AlertCircle, FileCheck, BarChart3, Users, Activity,
+  ChevronRight, Shield, TrendingUp, AlertCircle, FileCheck, BarChart3, Users,
   GitPullRequest, AlertOctagon
 } from 'lucide-react';
 import {
@@ -107,7 +107,7 @@ export default function Dashboard() {
       {/* Header */}
       <div className="mb-8">
         <p className="text-sm text-gray-500 font-medium">Welcome to</p>
-        <h1 className="text-3xl font-bold text-gray-900">QMS Dashboard</h1>
+        <h1 className="text-3xl font-bold text-gray-900">QMS Overview</h1>
       </div>
 
 
@@ -409,13 +409,13 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Activity Feed */}
+        {/* System Alerts (security only — full activity in Audit Log) */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <div className="flex items-center gap-3 mb-4">
             <div className="bg-navy-50 p-2.5 rounded-lg">
-              <Activity className="w-5 h-5 text-navy-600" />
+              <Shield className="w-5 h-5 text-navy-600" />
             </div>
-            <h2 className="text-lg font-semibold text-gray-900">Activity Feed</h2>
+            <h2 className="text-lg font-semibold text-gray-900">System Alerts</h2>
           </div>
 
           {/* Active Users */}
@@ -430,8 +430,8 @@ export default function Dashboard() {
           )}
 
           {/* Failed Login Alerts */}
-          {(auditStats?.failedLogins || []).length > 0 && (
-            <div className="bg-red-50 border border-red-100 rounded-lg p-2.5 mb-3">
+          {(auditStats?.failedLogins || []).length > 0 ? (
+            <div className="bg-red-50 border border-red-100 rounded-lg p-2.5">
               <div className="flex items-center gap-1.5 mb-1">
                 <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
                 <span className="text-xs font-semibold text-red-700">Failed Login Attempts (24h)</span>
@@ -442,30 +442,12 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
+          ) : (
+            <div className="text-center py-4">
+              <CheckCircle className="w-8 h-8 text-green-400 mx-auto mb-1.5" />
+              <p className="text-sm text-gray-500">No security alerts</p>
+            </div>
           )}
-
-          {/* Recent Actions */}
-          <div className="space-y-1.5 max-h-56 overflow-y-auto">
-            {(auditStats?.recentActivity || []).map(a => {
-              const isLogin = a.action === 'login' || a.action === 'logout';
-              const isCreate = a.action.startsWith('create_');
-              const isUpdate = a.action.startsWith('update_');
-              const isDelete = a.action.startsWith('delete_');
-              const iconColor = isLogin ? 'text-green-500' : isCreate ? 'text-blue-500' : isUpdate ? 'text-amber-500' : isDelete ? 'text-red-500' : 'text-gray-400';
-
-              return (
-                <div key={a.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Activity className={`w-3 h-3 flex-shrink-0 ${iconColor}`} />
-                    <span className="text-xs font-medium text-gray-700">{a.username}</span>
-                    <span className="text-xs text-gray-500">{a.action.replace(/_/g, ' ')}</span>
-                    {a.resource_name && <span className="text-xs text-gray-400 truncate max-w-[150px]">{a.resource_name}</span>}
-                  </div>
-                  <span className="text-[10px] text-gray-400 whitespace-nowrap ml-2">{a.timestamp?.slice(11, 16)}</span>
-                </div>
-              );
-            })}
-          </div>
         </div>
       </div>
 
