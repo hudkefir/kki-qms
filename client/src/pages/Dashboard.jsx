@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import {
   FileText, CheckCircle, AlertTriangle, XCircle, Clock,
-  ChevronRight, Shield, TrendingUp, AlertCircle, FileCheck, BarChart3, Users,
+  ChevronRight, Shield, TrendingUp, AlertCircle, FileCheck, BarChart3, Users, Activity,
   GitPullRequest, AlertOctagon
 } from 'lucide-react';
 import {
