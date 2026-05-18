@@ -160,6 +160,8 @@ export default function ChatSidebar() {
               // Show inline notification based on tool type
               if (event.tool === 'create_action_item') {
                 fullText += `\n\n> 📋 *Creating action item...*\n\n`;
+              } else if (event.tool === 'update_action_item_status') {
+                fullText += `\n\n> 🔄 *Updating task status...*\n\n`;
               } else {
                 const fieldLabel = (event.field || '').replace(/_/g, ' ');
                 fullText += `\n\n> ✏️ *Updating ${fieldLabel}...*\n\n`;
@@ -180,6 +182,19 @@ export default function ChatSidebar() {
                   fullText = fullText.replace(
                     /> 📋 \*Creating action item\.\.\.\*\n\n$/,
                     `> ❌ **Task creation failed:** ${event.result?.error || 'Unknown error'}\n\n`
+                  );
+                }
+              } else if (event.tool === 'update_action_item_status') {
+                if (event.result?.success) {
+                  const statusEmoji = event.result.new_status === 'completed' ? '✅' : event.result.new_status === 'in_progress' ? '🔵' : '🟡';
+                  fullText = fullText.replace(
+                    /> 🔄 \*Updating task status\.\.\.\*\n\n$/,
+                    `> ${statusEmoji} **"${event.result.title}"** → ${event.result.new_status.replace('_', ' ')} — refresh to see changes.\n\n`
+                  );
+                } else {
+                  fullText = fullText.replace(
+                    /> 🔄 \*Updating task status\.\.\.\*\n\n$/,
+                    `> ❌ **Task update failed:** ${event.result?.error || 'Unknown error'}\n\n`
                   );
                 }
               } else if (event.result?.success) {

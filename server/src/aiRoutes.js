@@ -66,6 +66,29 @@ const AI_TOOLS = [
     },
   },
   {
+    name: 'update_action_item_status',
+    description: `Update the status of an existing action item/task on a CAPA. Use this when the user asks you to complete a task, mark something as done, start a task, or reopen a task. You can also update the description or assigned person.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        action_item_id: {
+          type: 'integer',
+          description: 'The ID of the action item to update',
+        },
+        status: {
+          type: 'string',
+          enum: ['pending', 'in_progress', 'completed'],
+          description: 'The new status for the action item',
+        },
+        notes: {
+          type: 'string',
+          description: 'Optional completion notes or update reason',
+        },
+      },
+      required: ['action_item_id', 'status'],
+    },
+  },
+  {
     name: 'create_action_item',
     description: `Create a task/action item on the CAPA the user is currently viewing. Use this when the user asks you to add a task, create an action item, assign work, or break down corrective/preventive actions into steps. You can create multiple action items by calling this tool multiple times.`,
     input_schema: {
@@ -200,6 +223,64 @@ async function executeToolCall(toolName, toolInput, userId) {
     };
   }
 
+  if (toolName === 'update_action_item_status') {
+    const { action_item_id, status, notes } = toolInput;
+
+    // Fetch the action item
+    const item = await db.get('SELECT ai.*, c.capa_id as capa_identifier FROM capa_action_items ai JOIN capas c ON ai.capa_id = c.id WHERE ai.id = $1', [action_item_id]);
+    if (!item) {
+      return { success: false, error: `Action item #${action_item_id} not found` };
+    }
+
+    const oldStatus = item.status;
+
+    // Build update query
+    let updateFields = ['status = $1', 'updated_at = CURRENT_TIMESTAMP'];
+    let params = [status];
+    let paramIdx = 2;
+
+    if (status === 'completed') {
+      updateFields.push(`completed_at = CURRENT_TIMESTAMP`);
+    }
+
+    if (notes) {
+      updateFields.push(`description = COALESCE(description, '') || $${paramIdx}`);
+      params.push(`\n\n[AI Note: ${notes}]`);
+      paramIdx++;
+    }
+
+    params.push(action_item_id);
+    await db.run(
+      `UPDATE capa_action_items SET ${updateFields.join(', ')} WHERE id = $${paramIdx}`,
+      params
+    );
+
+    // Audit log
+    try {
+      await db.run(
+        `INSERT INTO audit_log (action, table_name, record_id, record_identifier, user_id, details) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          'ai_update_action_item',
+          'capa_action_items',
+          item.capa_id,
+          item.capa_identifier || item.capa_id,
+          userId || 'jarvis-ai',
+          JSON.stringify({ action_item_id, title: item.title, old_status: oldStatus, new_status: status, notes, source: 'jarvis_ai' }),
+        ]
+      );
+    } catch (auditErr) {
+      console.error('AI audit log failed:', auditErr.message);
+    }
+
+    return {
+      success: true,
+      message: `Task "${item.title}" status changed from ${oldStatus} to ${status}.`,
+      title: item.title,
+      old_status: oldStatus,
+      new_status: status,
+    };
+  }
+
   return { success: false, error: `Unknown tool: ${toolName}` };
 }
 
@@ -277,6 +358,15 @@ When creating action items:
 - Set realistic due dates based on urgency (2 days for critical, 7 days for routine, 14-30 days for systemic changes)
 - Assign to specific people if known, otherwise use role titles (e.g., "QA Manager", "Production Lead")
 - You can create multiple action items in sequence to break down complex corrective actions
+
+## Completing / Updating Tasks
+When viewing a CAPA, you can also **update action item status** using the update_action_item_status tool. Use this when:
+- The user says "mark task X as done" or "complete that task"
+- The user says "start working on task 2" (set to in_progress)
+- The user says "reopen task 3" (set back to pending)
+- The user references a task by its title or number and asks to change its status
+
+The action items for the current CAPA are shown in your context under Related Records → actionItems. Match the user's request to the correct action_item_id from that list.
 
 ## Important Rules
 - Never fabricate lot numbers, batch IDs, test results, or specific KKI data
