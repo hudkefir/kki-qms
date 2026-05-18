@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
-import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail, ListTodo, LayoutDashboard } from 'lucide-react';
+import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail, ListTodo, LayoutDashboard, HelpCircle } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -45,6 +45,7 @@ import Journal from './pages/Journal';
 import EmailScan from './pages/EmailScan';
 import OperatorDashboard from './pages/OperatorDashboard';
 import OperatorTasksAdmin from './pages/OperatorTasksAdmin';
+import DocumentGuide from './pages/DocumentGuide';
 import useWebSocket from './hooks/useWebSocket';
 import AccessDenied from "./components/AccessDenied";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -109,6 +110,7 @@ export default function App() {
     ] },
     { label: 'Quality & Compliance',
       items: [
+        { to: '/document-guide', icon: HelpCircle, label: 'Document Guide' },
         { to: '/complaints', icon: AlertCircle, label: 'Complaints' },
         { to: '/ccrs', icon: FileCheck, label: 'CCRs' },
         { to: '/deviations', icon: AlertOctagon, label: 'Deviations' },
@@ -245,6 +247,7 @@ export default function App() {
             <Route path="/overview" element={<Dashboard />} />
             <Route path="/sops" element={<SOPLibrary />} />
             <Route path="/sops/:id" element={<SOPDetail />} />
+            <Route path="/document-guide" element={<DocumentGuide />} />
             <Route path="/complaints" element={<Complaints />} />
             <Route path="/complaints/:id" element={<ComplaintDetail />} />
             <Route path="/ccrs" element={<CCRs />} />
