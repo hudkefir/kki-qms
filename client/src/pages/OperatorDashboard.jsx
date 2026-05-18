@@ -276,10 +276,12 @@ function ConfirmCompleteDialog({ title, onConfirm, onCancel }) {
 
 // ─── Undo Toast ────────────────────────────────────────────────────────────
 function UndoToast({ message, onUndo, onDismiss }) {
+  const dismissRef = React.useRef(onDismiss);
+  dismissRef.current = onDismiss;
   useEffect(() => {
-    const timer = setTimeout(onDismiss, 6000);
+    const timer = setTimeout(() => dismissRef.current(), 6000);
     return () => clearTimeout(timer);
-  }, [onDismiss]);
+  }, []);
 
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] bg-gray-900 text-white px-4 py-2.5 rounded-lg shadow-xl flex items-center gap-3 animate-slide-up">
@@ -330,12 +332,17 @@ function CAPAItemsWidget({ items, onStatusChange, navigate }) {
       {active.slice(0, 8).map(item => (
         <div key={item.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group">
           <div className="relative flex-shrink-0">
-            {item.status === 'pending' && (
+            {item.status === 'pending' && !item.computed_overdue && (
               <button onClick={() => handleStatusSelect(item, 'in_progress')} className="p-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100" title="Start">
                 <Play className="w-3.5 h-3.5" />
               </button>
             )}
-            {(item.status === 'in_progress' || item.computed_overdue) && (
+            {(item.status === 'pending' && item.computed_overdue) && (
+              <button onClick={() => handleStatusSelect(item, 'in_progress')} className="p-1 rounded bg-red-50 text-red-600 hover:bg-red-100" title="Start (overdue)">
+                <Play className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {item.status === 'in_progress' && (
               <button onClick={() => setConfirmItem(item)} className="p-1 rounded bg-green-50 text-green-600 hover:bg-green-100" title="Complete">
                 <CheckCircle className="w-3.5 h-3.5" />
               </button>

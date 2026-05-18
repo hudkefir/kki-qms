@@ -241,6 +241,8 @@ async function executeToolCall(toolName, toolInput, userId) {
 
     if (status === 'completed') {
       updateFields.push(`completed_at = CURRENT_TIMESTAMP`);
+    } else {
+      updateFields.push(`completed_at = NULL`);
     }
 
     if (notes) {
