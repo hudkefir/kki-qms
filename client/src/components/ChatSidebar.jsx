@@ -352,9 +352,12 @@ export default function ChatSidebar() {
                         h2: ({ children }) => <h3 className="font-bold text-sm mb-1">{children}</h3>,
                         h3: ({ children }) => <h3 className="font-semibold text-sm mb-1">{children}</h3>,
                         strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                        code: ({ inline, children }) => inline
-                          ? <code className="bg-gray-200 px-1 py-0.5 rounded text-xs font-mono">{children}</code>
-                          : <pre className="bg-gray-200 p-2 rounded text-xs font-mono overflow-x-auto my-1"><code>{children}</code></pre>,
+                        code: ({ node, children, ...props }) => {
+                          const isBlock = node?.position?.start?.column === 1 && String(children).includes('\n');
+                          return isBlock
+                            ? <pre className="bg-gray-200 p-2 rounded text-xs font-mono overflow-x-auto my-1"><code>{children}</code></pre>
+                            : <code className="bg-gray-200 px-1 py-0.5 rounded text-xs font-mono">{children}</code>;
+                        },
                         hr: () => <hr className="my-2 border-gray-300" />,
                         a: ({ href, children }) => <a href={href} className="text-navy-600 underline" target="_blank" rel="noopener noreferrer">{children}</a>,
                         blockquote: ({ children }) => <blockquote className="border-l-2 border-gray-300 pl-2 my-1 text-gray-600">{children}</blockquote>,
