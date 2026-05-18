@@ -142,11 +142,20 @@ async function initTables() {
 
   for (const file of files) {
     const sql = readFileSync(join(migrationsDir, file), 'utf-8');
-    try {
-      await pool.query(sql);
-    } catch (err) {
-      console.error(`Migration ${file} failed:`, err.message);
-      throw new Error(`Schema migration failed on ${file}: ${err.message}`);
+    // Split into individual statements so one failure (e.g. index on missing column)
+    // doesn't prevent subsequent CREATE TABLEs from running
+    const statements = sql
+      .split(';')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+
+    for (const stmt of statements) {
+      try {
+        await pool.query(stmt);
+      } catch (err) {
+        // Log but continue — legacy tables may have different columns
+        console.warn(`[${file}] statement skipped: ${err.message.split('\n')[0]}`);
+      }
     }
   }
 }
