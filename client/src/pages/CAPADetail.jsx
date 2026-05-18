@@ -2496,6 +2496,26 @@ export default function CAPADetail() {
           </CollapsibleSection>
 
           <CollapsibleSection
+            icon={FlaskConical}
+            iconColor="text-blue-500"
+            title="Investigation Details"
+            defaultOpen={capa.status === 'investigating'}
+            badge={capa.investigation_details ? <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Filled</span> : <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">Empty</span>}
+          >
+            <EditableCard
+              icon={FlaskConical}
+              iconColor="text-blue-500"
+              title="Investigation Details / Evidence"
+              value={<FormattedText text={capa.investigation_details} />}
+              rawValue={capa.investigation_details || ""}
+              placeholder="Document evidence gathered, observations, interviews conducted, data reviewed, and any other investigation details..."
+              isAdmin={canEditContent}
+              onSave={saveTextCard('investigation_details')}
+              aiSuggestProps={{ field: 'investigation_details', recordType: 'capa', context: capa }}
+            />
+          </CollapsibleSection>
+
+          <CollapsibleSection
             icon={Shield}
             iconColor="text-red-500"
             title="Corrective Action"
