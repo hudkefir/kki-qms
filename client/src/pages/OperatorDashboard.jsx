@@ -7,7 +7,8 @@ import {
   LayoutDashboard, ListTodo, ShieldCheck, Wrench, ClipboardList, CalendarDays,
   Package, Beaker, Clock, AlertTriangle, CheckCircle, Play, ChevronDown,
   ChevronRight, Settings, Eye, EyeOff, GripVertical, Activity, Send,
-  ArrowRight, RefreshCw, Star, Filter, Zap, BarChart3, TrendingUp
+  ArrowRight, RefreshCw, Star, Filter, Zap, BarChart3, TrendingUp,
+  Undo, Circle, X
 } from 'lucide-react';
 
 const PRIORITY_COLORS = {
@@ -142,20 +143,46 @@ function ModuleBreakdown({ stats }) {
 
 // ─── Operator Tasks Widget ──────────────────────────────────────────────────
 function OperatorTasksWidget({ tasks, onStatusChange, navigate }) {
+  const [dropdownOpen, setDropdownOpen] = useState(null);
+  const [confirmTask, setConfirmTask] = useState(null);
+  const [undoInfo, setUndoInfo] = useState(null);
   const active = (tasks || []).filter(t => t.status !== 'completed');
   if (active.length === 0) return <EmptyWidget message="No active tasks" />;
+
+  const handleStatusSelect = (task, newStatus) => {
+    setDropdownOpen(null);
+    if (newStatus === 'completed') {
+      setConfirmTask(task);
+    } else {
+      onStatusChange(task.id, newStatus);
+    }
+  };
+
+  const handleConfirmComplete = () => {
+    const task = confirmTask;
+    setConfirmTask(null);
+    const prevStatus = task.status;
+    onStatusChange(task.id, 'completed');
+    setUndoInfo({ task, prevStatus, message: `"${task.title}" completed` });
+  };
+
+  const handleUndo = () => {
+    if (!undoInfo) return;
+    onStatusChange(undoInfo.task.id, undoInfo.prevStatus);
+    setUndoInfo(null);
+  };
 
   return (
     <div className="space-y-2">
       {active.slice(0, 10).map(task => (
         <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group">
           {task.status === 'pending' && (
-            <button onClick={() => onStatusChange(task.id, 'in_progress')} className="p-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 flex-shrink-0">
+            <button onClick={() => handleStatusSelect(task, 'in_progress')} className="p-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 flex-shrink-0" title="Start">
               <Play className="w-3.5 h-3.5" />
             </button>
           )}
           {(task.status === 'in_progress' || task.status === 'overdue') && (
-            <button onClick={() => onStatusChange(task.id, 'completed')} className="p-1 rounded bg-green-50 text-green-600 hover:bg-green-100 flex-shrink-0">
+            <button onClick={() => setConfirmTask(task)} className="p-1 rounded bg-green-50 text-green-600 hover:bg-green-100 flex-shrink-0" title="Complete">
               <CheckCircle className="w-3.5 h-3.5" />
             </button>
           )}
@@ -174,7 +201,15 @@ function OperatorTasksWidget({ tasks, onStatusChange, navigate }) {
           </div>
           <div className="flex items-center gap-1.5">
             <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${PRIORITY_COLORS[task.priority] || ''}`}>{task.priority}</span>
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_COLORS[task.status] || ''}`}>{task.status?.replace('_', ' ')}</span>
+            <div className="relative">
+              <button onClick={() => setDropdownOpen(dropdownOpen === task.id ? null : task.id)}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${STATUS_COLORS[task.status] || 'bg-gray-100 text-gray-600'}`}>
+                {task.status?.replace('_', ' ')} ▾
+              </button>
+              {dropdownOpen === task.id && (
+                <StatusDropdown current={task.status} onSelect={(s) => handleStatusSelect(task, s)} onClose={() => setDropdownOpen(null)} />
+              )}
+            </div>
           </div>
           {MODULE_PATHS[task.linked_module] && (
             <button onClick={() => navigate(`${MODULE_PATHS[task.linked_module]}/${task.linked_record_id}`)} className="p-1 text-gray-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -184,35 +219,143 @@ function OperatorTasksWidget({ tasks, onStatusChange, navigate }) {
         </div>
       ))}
       {active.length > 10 && <p className="text-xs text-gray-500 text-center pt-2">+{active.length - 10} more tasks</p>}
+      {confirmTask && <ConfirmCompleteDialog title={confirmTask.title} onConfirm={handleConfirmComplete} onCancel={() => setConfirmTask(null)} />}
+      {undoInfo && <UndoToast message={undoInfo.message} onUndo={handleUndo} onDismiss={() => setUndoInfo(null)} />}
+    </div>
+  );
+}
+
+// ─── Status Dropdown (shared) ──────────────────────────────────────────────
+const ALL_STATUSES = [
+  { value: 'pending', label: 'Pending', icon: Circle, color: 'text-amber-600', bg: 'bg-amber-50 hover:bg-amber-100' },
+  { value: 'in_progress', label: 'In Progress', icon: Play, color: 'text-blue-600', bg: 'bg-blue-50 hover:bg-blue-100' },
+  { value: 'completed', label: 'Completed', icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50 hover:bg-green-100' },
+];
+
+function StatusDropdown({ current, onSelect, onClose }) {
+  const ref = React.useRef(null);
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  return (
+    <div ref={ref} className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[140px]">
+      {ALL_STATUSES.filter(s => s.value !== current).map(s => {
+        const Icon = s.icon;
+        return (
+          <button key={s.value} onClick={() => onSelect(s.value)}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium ${s.color} hover:bg-gray-50 transition-colors`}>
+            <Icon className="w-3.5 h-3.5" />
+            {s.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Confirm Complete Dialog ───────────────────────────────────────────────
+function ConfirmCompleteDialog({ title, onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30" onClick={onCancel}>
+      <div className="bg-white rounded-xl shadow-xl p-5 max-w-sm mx-4" onClick={e => e.stopPropagation()}>
+        <p className="text-sm font-semibold text-gray-900 mb-1">Complete this task?</p>
+        <p className="text-xs text-gray-600 mb-4 truncate">"{title}"</p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+          <button onClick={onConfirm} className="px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 flex items-center gap-1">
+            <CheckCircle className="w-3.5 h-3.5" /> Complete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Undo Toast ────────────────────────────────────────────────────────────
+function UndoToast({ message, onUndo, onDismiss }) {
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 6000);
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] bg-gray-900 text-white px-4 py-2.5 rounded-lg shadow-xl flex items-center gap-3 animate-slide-up">
+      <span className="text-sm">{message}</span>
+      <button onClick={onUndo} className="flex items-center gap-1 text-sm font-semibold text-amber-400 hover:text-amber-300">
+        <Undo className="w-3.5 h-3.5" /> Undo
+      </button>
+      <button onClick={onDismiss} className="text-gray-400 hover:text-white ml-1">
+        <X className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }
 
 // ─── CAPA Action Items Widget ───────────────────────────────────────────────
 function CAPAItemsWidget({ items, onStatusChange, navigate }) {
+  const [dropdownOpen, setDropdownOpen] = useState(null);
+  const [confirmItem, setConfirmItem] = useState(null);
+  const [undoInfo, setUndoInfo] = useState(null);
   const active = (items || []).filter(t => t.status !== 'completed');
   if (active.length === 0) return <EmptyWidget message="No active CAPA action items" />;
+
+  const handleStatusSelect = (item, newStatus) => {
+    setDropdownOpen(null);
+    if (newStatus === 'completed') {
+      setConfirmItem(item);
+    } else {
+      onStatusChange(item.capa_id, item.id, newStatus);
+    }
+  };
+
+  const handleConfirmComplete = () => {
+    const item = confirmItem;
+    setConfirmItem(null);
+    const prevStatus = item.status;
+    onStatusChange(item.capa_id, item.id, 'completed');
+    setUndoInfo({ item, prevStatus, message: `"${item.title}" completed` });
+  };
+
+  const handleUndo = () => {
+    if (!undoInfo) return;
+    onStatusChange(undoInfo.item.capa_id, undoInfo.item.id, undoInfo.prevStatus);
+    setUndoInfo(null);
+  };
 
   return (
     <div className="space-y-2">
       {active.slice(0, 8).map(item => (
         <div key={item.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group">
-          {item.status === 'pending' && (
-            <button onClick={() => onStatusChange(item.capa_id, item.id, 'in_progress')} className="p-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 flex-shrink-0" title="Start">
-              <Play className="w-3.5 h-3.5" />
-            </button>
-          )}
-          {(item.status === 'in_progress' || item.computed_overdue) && (
-            <button onClick={() => onStatusChange(item.capa_id, item.id, 'completed')} className="p-1 rounded bg-green-50 text-green-600 hover:bg-green-100 flex-shrink-0" title="Complete">
-              <CheckCircle className="w-3.5 h-3.5" />
-            </button>
-          )}
+          <div className="relative flex-shrink-0">
+            {item.status === 'pending' && (
+              <button onClick={() => handleStatusSelect(item, 'in_progress')} className="p-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100" title="Start">
+                <Play className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {(item.status === 'in_progress' || item.computed_overdue) && (
+              <button onClick={() => setConfirmItem(item)} className="p-1 rounded bg-green-50 text-green-600 hover:bg-green-100" title="Complete">
+                <CheckCircle className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-[11px] text-emerald-600 font-medium">{item.capa_number}</span>
               <span className="text-[11px] text-gray-500 truncate">{item.capa_title}</span>
             </div>
+          </div>
+          <div className="relative flex-shrink-0">
+            <button onClick={() => setDropdownOpen(dropdownOpen === item.id ? null : item.id)}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${STATUS_COLORS[item.status] || 'bg-gray-100 text-gray-600'}`}>
+              {item.status?.replace('_', ' ')} ▾
+            </button>
+            {dropdownOpen === item.id && (
+              <StatusDropdown current={item.status} onSelect={(s) => handleStatusSelect(item, s)} onClose={() => setDropdownOpen(null)} />
+            )}
           </div>
           {item.due_date && (
             <span className={`text-[11px] whitespace-nowrap ${item.computed_overdue ? 'text-red-600 font-bold' : 'text-gray-500'}`}>
@@ -225,6 +368,8 @@ function CAPAItemsWidget({ items, onStatusChange, navigate }) {
         </div>
       ))}
       {active.length > 8 && <p className="text-xs text-gray-500 text-center pt-2">+{active.length - 8} more items</p>}
+      {confirmItem && <ConfirmCompleteDialog title={confirmItem.title} onConfirm={handleConfirmComplete} onCancel={() => setConfirmItem(null)} />}
+      {undoInfo && <UndoToast message={undoInfo.message} onUndo={handleUndo} onDismiss={() => setUndoInfo(null)} />}
     </div>
   );
 }
