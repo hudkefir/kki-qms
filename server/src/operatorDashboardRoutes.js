@@ -80,7 +80,7 @@ router.get('/operator-dashboard/unified', requireAuth, async (req, res) => {
       // 5. Daily Tasks assigned to this user
       db.all(
         `SELECT *, 'daily_task' as source_type FROM daily_tasks
-         WHERE (assigned_to = $1 OR assigned_to = $2) AND is_active = 1
+         WHERE (assigned_to = $1 OR assigned_to = $2) AND is_active = true
          ORDER BY sort_order ASC, task_name ASC`,
         [username, displayName]
       ),
@@ -89,8 +89,8 @@ router.get('/operator-dashboard/unified', requireAuth, async (req, res) => {
       db.all(
         `SELECT dtc.*, dt.task_name, dt.category
          FROM daily_task_completions dtc
-         JOIN daily_tasks dt ON dt.id = dtc.daily_task_id
-         WHERE dtc.completed_by = $1 AND dtc.date = $2`,
+         JOIN daily_tasks dt ON dt.id = dtc.task_id
+         WHERE dtc.operator_id = $1 AND dtc.completion_date = $2`,
         [username, today]
       ),
 
