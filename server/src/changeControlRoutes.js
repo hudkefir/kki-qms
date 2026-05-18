@@ -703,7 +703,8 @@ router.put('/capas/:id', requireContentAccess, async (req, res) => { console.log
     const contentFields = [
       'corrective_action', 'preventive_action', 'description',
       'root_cause_analysis', 'investigation_details', 'containment_action',
-      'root_cause_method', 'verification_method', 'effectiveness_notes', 'risk_assessment'
+      'root_cause_method', 'verification_method', 'effectiveness_notes', 'risk_assessment',
+      'root_cause_structured'
     ];
     // Admin-only fields
     const adminFields = [
@@ -720,7 +721,10 @@ router.put('/capas/:id', requireContentAccess, async (req, res) => { console.log
     for (const field of fields) {
       if (sanitized[field] !== undefined) {
         updates.push(`${field} = ?`);
-        params.push(sanitized[field]);
+        // JSONB fields must be stringified for pg parameterized queries
+        params.push(field === 'root_cause_structured' && typeof sanitized[field] === 'object'
+          ? JSON.stringify(sanitized[field])
+          : sanitized[field]);
       }
     }
 

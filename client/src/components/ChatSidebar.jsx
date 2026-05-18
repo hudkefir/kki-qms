@@ -44,6 +44,20 @@ export default function ChatSidebar() {
     }
   }, [isOpen]);
 
+  // Track context changes — show indicator when page changes during active chat
+  const [contextChanged, setContextChanged] = useState(false);
+  const prevPathRef = useRef(location.pathname);
+
+  useEffect(() => {
+    if (prevPathRef.current !== location.pathname && messages.length > 0) {
+      setContextChanged(true);
+      const timer = setTimeout(() => setContextChanged(false), 5000);
+      prevPathRef.current = location.pathname;
+      return () => clearTimeout(timer);
+    }
+    prevPathRef.current = location.pathname;
+  }, [location.pathname]);
+
   // Build context from current page
   const getContext = useCallback(() => {
     const path = location.pathname;
@@ -226,6 +240,31 @@ export default function ChatSidebar() {
             <Trash2 className="w-4 h-4 text-navy-300 hover:text-white" />
           </button>
         </div>
+
+        {/* Context indicator */}
+        {(() => {
+          const path = location.pathname;
+          const segments = path.split('/').filter(Boolean);
+          if (segments.length >= 2) {
+            return (
+              <div className="px-4 py-1.5 bg-blue-50 border-b border-blue-100 text-[11px] text-blue-600 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+                Jarvis can see the {segments[0].replace(/-/g, ' ')} record you're viewing (live data)
+              </div>
+            );
+          }
+          return null;
+        })()}
+
+        {/* Context changed banner */}
+        {contextChanged && (
+          <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-700 flex items-center justify-between">
+            <span>You navigated to a new page. Jarvis will use the updated context.</span>
+            <button onClick={() => setContextChanged(false)} className="text-amber-500 hover:text-amber-700">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-[200px] max-h-[50vh]">

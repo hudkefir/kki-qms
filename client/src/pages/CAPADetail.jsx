@@ -782,6 +782,683 @@ function AuditTrailSection({ capaId }) {
   );
 }
 
+// ── Structured Root Cause Analysis Forms ──────────────────────────────────
+
+function RootCauseStructuredForm({ method, data, onSave, canEdit }) {
+  const [draft, setDraft] = useState(data || {});
+  const [saving, setSaving] = useState(false);
+  const hasData = data && Object.keys(data).some(k => {
+    const v = data[k];
+    if (Array.isArray(v)) return v.length > 0;
+    return v && String(v).trim().length > 0;
+  });
+  const [editing, setEditing] = useState(canEdit && !hasData);
+
+  useEffect(() => { setDraft(data || {}); }, [data]);
+
+  useEffect(() => {
+    const hasExistingData = data && Object.keys(data).some(k => {
+      const v = data[k];
+      if (Array.isArray(v)) return v.length > 0;
+      return v && String(v).trim().length > 0;
+    });
+    if (canEdit && !hasExistingData) {
+      setEditing(true);
+    }
+  }, [method]); // re-open when method changes
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(draft);
+      setEditing(false);
+    } catch (err) {
+      alert('Failed to save: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setDraft(data || {});
+    setEditing(false);
+  };
+
+  const updateField = (key, value) => setDraft(prev => ({ ...prev, [key]: value }));
+
+  // Dynamic list helpers (for fault_tree, pareto, timeline)
+  const addListItem = (key, template) => {
+    const list = [...(draft[key] || []), template];
+    setDraft(prev => ({ ...prev, [key]: list }));
+  };
+  const removeListItem = (key, idx) => {
+    const list = (draft[key] || []).filter((_, i) => i !== idx);
+    setDraft(prev => ({ ...prev, [key]: list }));
+  };
+  const updateListItem = (key, idx, field, value) => {
+    const list = [...(draft[key] || [])];
+    list[idx] = { ...list[idx], [field]: value };
+    setDraft(prev => ({ ...prev, [key]: list }));
+  };
+
+  // Read-only display for non-editors
+  if (!canEdit && !editing) {
+    return <StructuredReadOnly method={method} data={data} />;
+  }
+
+  // No structured form for "other" method
+  if (!method || method === 'other') return null;
+
+  const inputCls = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white";
+  const labelCls = "block text-sm font-medium text-gray-600 mb-1";
+  const numberCls = "w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-center";
+
+  const renderForm = () => {
+    switch (method) {
+      case '5_whys':
+        return (
+          <div className="space-y-3">
+            {[1, 2, 3, 4, 5].map(n => (
+              <div key={n}>
+                <label className={labelCls}>Why #{n}</label>
+                <textarea
+                  value={draft[`why_${n}`] || ''}
+                  onChange={(e) => updateField(`why_${n}`, e.target.value)}
+                  rows={2}
+                  className={inputCls}
+                  placeholder={n === 1 ? 'Why did the problem occur?' : `Why did the above happen?`}
+                  disabled={!editing}
+                />
+              </div>
+            ))}
+            <div>
+              <label className={labelCls}>Root Cause Summary</label>
+              <textarea
+                value={draft.root_cause_summary || ''}
+                onChange={(e) => updateField('root_cause_summary', e.target.value)}
+                rows={3}
+                className={inputCls}
+                placeholder="Based on the 5 Whys analysis, the root cause is..."
+                disabled={!editing}
+              />
+            </div>
+          </div>
+        );
+
+      case 'fishbone':
+        return (
+          <div className="space-y-3">
+            {['People', 'Process', 'Equipment', 'Materials', 'Environment', 'Measurement'].map(cat => (
+              <div key={cat}>
+                <label className={labelCls}>{cat}</label>
+                <textarea
+                  value={draft[cat.toLowerCase()] || ''}
+                  onChange={(e) => updateField(cat.toLowerCase(), e.target.value)}
+                  rows={2}
+                  className={inputCls}
+                  placeholder={`What ${cat.toLowerCase()}-related factors may have contributed?`}
+                  disabled={!editing}
+                />
+              </div>
+            ))}
+            <div>
+              <label className={labelCls}>Root Cause Summary</label>
+              <textarea
+                value={draft.root_cause_summary || ''}
+                onChange={(e) => updateField('root_cause_summary', e.target.value)}
+                rows={3}
+                className={inputCls}
+                placeholder="Based on the Fishbone analysis, the root cause is..."
+                disabled={!editing}
+              />
+            </div>
+          </div>
+        );
+
+      case 'fault_tree':
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Top Event</label>
+              <input
+                type="text"
+                value={draft.top_event || ''}
+                onChange={(e) => updateField('top_event', e.target.value)}
+                className={inputCls}
+                placeholder="The unwanted event or failure"
+                disabled={!editing}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Contributing Factors</label>
+              <div className="space-y-2">
+                {(draft.contributing_factors || []).map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={item.description || ''}
+                      onChange={(e) => updateListItem('contributing_factors', idx, 'description', e.target.value)}
+                      className={`flex-1 ${inputCls}`}
+                      placeholder={`Factor ${idx + 1}`}
+                      disabled={!editing}
+                    />
+                    {editing && (
+                      <button
+                        onClick={() => removeListItem('contributing_factors', idx)}
+                        className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Remove"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {editing && (
+                  <button
+                    onClick={() => addListItem('contributing_factors', { description: '' })}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors font-medium"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Factor
+                  </button>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Root Cause Summary</label>
+              <textarea
+                value={draft.root_cause_summary || ''}
+                onChange={(e) => updateField('root_cause_summary', e.target.value)}
+                rows={3}
+                className={inputCls}
+                placeholder="Based on the Fault Tree analysis, the root cause is..."
+                disabled={!editing}
+              />
+            </div>
+          </div>
+        );
+
+      case 'pareto':
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Data Collection Period</label>
+              <input
+                type="text"
+                value={draft.data_collection_period || ''}
+                onChange={(e) => updateField('data_collection_period', e.target.value)}
+                className={inputCls}
+                placeholder="e.g., Jan 2026 - May 2026"
+                disabled={!editing}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Issue Categories</label>
+              <div className="space-y-2">
+                {(draft.issue_categories || []).map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={item.category || ''}
+                      onChange={(e) => updateListItem('issue_categories', idx, 'category', e.target.value)}
+                      className={`flex-1 ${inputCls}`}
+                      placeholder="Issue category"
+                      disabled={!editing}
+                    />
+                    <input
+                      type="number"
+                      value={item.count ?? ''}
+                      onChange={(e) => updateListItem('issue_categories', idx, 'count', parseInt(e.target.value) || 0)}
+                      className={numberCls}
+                      placeholder="Count"
+                      min="0"
+                      disabled={!editing}
+                    />
+                    {editing && (
+                      <button
+                        onClick={() => removeListItem('issue_categories', idx)}
+                        className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Remove"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {editing && (
+                  <button
+                    onClick={() => addListItem('issue_categories', { category: '', count: 0 })}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors font-medium"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Category
+                  </button>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Vital Few (Top Causes)</label>
+              <textarea
+                value={draft.vital_few || ''}
+                onChange={(e) => updateField('vital_few', e.target.value)}
+                rows={2}
+                className={inputCls}
+                placeholder="The top 20% of causes that account for 80% of the problem..."
+                disabled={!editing}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Root Cause Summary</label>
+              <textarea
+                value={draft.root_cause_summary || ''}
+                onChange={(e) => updateField('root_cause_summary', e.target.value)}
+                rows={3}
+                className={inputCls}
+                placeholder="Based on the Pareto analysis, the root cause is..."
+                disabled={!editing}
+              />
+            </div>
+          </div>
+        );
+
+      case 'fmea': {
+        const severity = parseInt(draft.severity) || 0;
+        const occurrence = parseInt(draft.occurrence) || 0;
+        const detection = parseInt(draft.detection) || 0;
+        const rpn = severity * occurrence * detection;
+        const rpnColor = rpn >= 200 ? 'text-red-700 bg-red-50' : rpn >= 100 ? 'text-amber-700 bg-amber-50' : rpn > 0 ? 'text-green-700 bg-green-50' : 'text-gray-500 bg-gray-50';
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Failure Mode</label>
+              <input
+                type="text"
+                value={draft.failure_mode || ''}
+                onChange={(e) => updateField('failure_mode', e.target.value)}
+                className={inputCls}
+                placeholder="What could go wrong?"
+                disabled={!editing}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Potential Effects</label>
+              <textarea
+                value={draft.potential_effects || ''}
+                onChange={(e) => updateField('potential_effects', e.target.value)}
+                rows={2}
+                className={inputCls}
+                placeholder="What would happen if this failure occurs?"
+                disabled={!editing}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className={labelCls}>Severity (1-10)</label>
+                <input
+                  type="number"
+                  value={draft.severity ?? ''}
+                  onChange={(e) => updateField('severity', Math.min(10, Math.max(0, parseInt(e.target.value) || 0)))}
+                  className={inputCls}
+                  min="1" max="10"
+                  placeholder="1-10"
+                  disabled={!editing}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Occurrence (1-10)</label>
+                <input
+                  type="number"
+                  value={draft.occurrence ?? ''}
+                  onChange={(e) => updateField('occurrence', Math.min(10, Math.max(0, parseInt(e.target.value) || 0)))}
+                  className={inputCls}
+                  min="1" max="10"
+                  placeholder="1-10"
+                  disabled={!editing}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Detection (1-10)</label>
+                <input
+                  type="number"
+                  value={draft.detection ?? ''}
+                  onChange={(e) => updateField('detection', Math.min(10, Math.max(0, parseInt(e.target.value) || 0)))}
+                  className={inputCls}
+                  min="1" max="10"
+                  placeholder="1-10"
+                  disabled={!editing}
+                />
+              </div>
+            </div>
+            <div className={`flex items-center gap-3 px-4 py-3 rounded-lg ${rpnColor}`}>
+              <span className="text-sm font-semibold">Risk Priority Number (RPN):</span>
+              <span className="text-lg font-bold">{rpn || '---'}</span>
+              <span className="text-xs">= {severity || '?'} x {occurrence || '?'} x {detection || '?'}</span>
+              {rpn >= 200 && <span className="ml-auto text-xs font-bold uppercase">High Risk</span>}
+              {rpn >= 100 && rpn < 200 && <span className="ml-auto text-xs font-bold uppercase">Medium Risk</span>}
+              {rpn > 0 && rpn < 100 && <span className="ml-auto text-xs font-bold uppercase">Low Risk</span>}
+            </div>
+            <div>
+              <label className={labelCls}>Recommended Actions</label>
+              <textarea
+                value={draft.recommended_actions || ''}
+                onChange={(e) => updateField('recommended_actions', e.target.value)}
+                rows={3}
+                className={inputCls}
+                placeholder="What actions should be taken to reduce the RPN?"
+                disabled={!editing}
+              />
+            </div>
+          </div>
+        );
+      }
+
+      case 'timeline':
+        return (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls}>Timeline Events</label>
+              <div className="space-y-2">
+                {(draft.events || []).map((item, idx) => (
+                  <div key={idx} className="flex items-start gap-2">
+                    <input
+                      type="date"
+                      value={item.date || ''}
+                      onChange={(e) => updateListItem('events', idx, 'date', e.target.value)}
+                      className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white w-40"
+                      disabled={!editing}
+                    />
+                    <input
+                      type="text"
+                      value={item.description || ''}
+                      onChange={(e) => updateListItem('events', idx, 'description', e.target.value)}
+                      className={`flex-1 ${inputCls}`}
+                      placeholder={`What happened at this point?`}
+                      disabled={!editing}
+                    />
+                    {editing && (
+                      <button
+                        onClick={() => removeListItem('events', idx)}
+                        className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors mt-1"
+                        title="Remove"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {editing && (
+                  <button
+                    onClick={() => addListItem('events', { date: '', description: '' })}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors font-medium"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Event
+                  </button>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Root Cause Summary</label>
+              <textarea
+                value={draft.root_cause_summary || ''}
+                onChange={(e) => updateField('root_cause_summary', e.target.value)}
+                rows={3}
+                className={inputCls}
+                placeholder="Based on the timeline analysis, the root cause is..."
+                disabled={!editing}
+              />
+            </div>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  const form = renderForm();
+  if (!form) return null;
+
+  return (
+    <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+          <FlaskConical className="w-4 h-4 text-amber-500" />
+          {ROOT_CAUSE_LABELS[method]} - Structured Analysis
+        </h4>
+        {canEdit && !editing && (
+          <button
+            onClick={() => setEditing(true)}
+            className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+            title="Edit structured analysis"
+          >
+            <Pencil className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+      {form}
+      {editing && (
+        <div className="flex items-center gap-2 mt-4 justify-end border-t border-gray-200 pt-3">
+          <button
+            onClick={handleCancel}
+            className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {saving ? 'Saving...' : 'Save Analysis'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Read-only structured data display
+function StructuredReadOnly({ method, data }) {
+  if (!method || method === 'other' || !data || Object.keys(data).length === 0) return null;
+
+  const labelCls = "text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5";
+  const valueCls = "text-sm text-gray-700 bg-white rounded-lg p-3 border border-gray-100 min-h-[32px] whitespace-pre-wrap";
+  const emptyValue = <span className="text-gray-400 italic">Not filled in</span>;
+
+  const renderValue = (val) => val ? <div className={valueCls}>{val}</div> : <div className={valueCls}>{emptyValue}</div>;
+
+  switch (method) {
+    case '5_whys':
+      return (
+        <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
+          <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+            <FlaskConical className="w-4 h-4 text-amber-500" />
+            5 Whys - Structured Analysis
+          </h4>
+          {[1, 2, 3, 4, 5].map(n => (
+            <div key={n}>
+              <div className={labelCls}>Why #{n}</div>
+              {renderValue(data[`why_${n}`])}
+            </div>
+          ))}
+          <div>
+            <div className={labelCls}>Root Cause Summary</div>
+            {renderValue(data.root_cause_summary)}
+          </div>
+        </div>
+      );
+
+    case 'fishbone':
+      return (
+        <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
+          <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+            <FlaskConical className="w-4 h-4 text-amber-500" />
+            Fishbone / Ishikawa - Structured Analysis
+          </h4>
+          {['People', 'Process', 'Equipment', 'Materials', 'Environment', 'Measurement'].map(cat => (
+            <div key={cat}>
+              <div className={labelCls}>{cat}</div>
+              {renderValue(data[cat.toLowerCase()])}
+            </div>
+          ))}
+          <div>
+            <div className={labelCls}>Root Cause Summary</div>
+            {renderValue(data.root_cause_summary)}
+          </div>
+        </div>
+      );
+
+    case 'fault_tree':
+      return (
+        <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
+          <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+            <FlaskConical className="w-4 h-4 text-amber-500" />
+            Fault Tree Analysis - Structured Analysis
+          </h4>
+          <div>
+            <div className={labelCls}>Top Event</div>
+            {renderValue(data.top_event)}
+          </div>
+          <div>
+            <div className={labelCls}>Contributing Factors</div>
+            {(data.contributing_factors || []).length > 0 ? (
+              <ul className="list-disc list-inside text-sm text-gray-700 bg-white rounded-lg p-3 border border-gray-100 space-y-1">
+                {data.contributing_factors.map((f, i) => <li key={i}>{f.description || '(empty)'}</li>)}
+              </ul>
+            ) : renderValue(null)}
+          </div>
+          <div>
+            <div className={labelCls}>Root Cause Summary</div>
+            {renderValue(data.root_cause_summary)}
+          </div>
+        </div>
+      );
+
+    case 'pareto': {
+      const sorted = [...(data.issue_categories || [])].sort((a, b) => (b.count || 0) - (a.count || 0));
+      const total = sorted.reduce((s, c) => s + (c.count || 0), 0);
+      return (
+        <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
+          <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+            <FlaskConical className="w-4 h-4 text-amber-500" />
+            Pareto Analysis - Structured Analysis
+          </h4>
+          <div>
+            <div className={labelCls}>Data Collection Period</div>
+            {renderValue(data.data_collection_period)}
+          </div>
+          <div>
+            <div className={labelCls}>Issue Categories</div>
+            {sorted.length > 0 ? (
+              <div className="bg-white rounded-lg p-3 border border-gray-100 space-y-1.5">
+                {sorted.map((c, i) => {
+                  const pct = total > 0 ? ((c.count || 0) / total * 100).toFixed(1) : 0;
+                  return (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      <span className="font-medium text-gray-700 flex-1">{c.category || '(unnamed)'}</span>
+                      <span className="text-gray-500">{c.count || 0}</span>
+                      <div className="w-24 bg-gray-100 rounded-full h-2">
+                        <div className="bg-indigo-500 h-2 rounded-full" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="text-xs text-gray-400 w-12 text-right">{pct}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : renderValue(null)}
+          </div>
+          <div>
+            <div className={labelCls}>Vital Few (Top Causes)</div>
+            {renderValue(data.vital_few)}
+          </div>
+          <div>
+            <div className={labelCls}>Root Cause Summary</div>
+            {renderValue(data.root_cause_summary)}
+          </div>
+        </div>
+      );
+    }
+
+    case 'fmea': {
+      const sev = parseInt(data.severity) || 0;
+      const occ = parseInt(data.occurrence) || 0;
+      const det = parseInt(data.detection) || 0;
+      const rpn = sev * occ * det;
+      const rpnColor = rpn >= 200 ? 'text-red-700 bg-red-50' : rpn >= 100 ? 'text-amber-700 bg-amber-50' : rpn > 0 ? 'text-green-700 bg-green-50' : 'text-gray-500 bg-gray-50';
+      return (
+        <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
+          <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+            <FlaskConical className="w-4 h-4 text-amber-500" />
+            FMEA - Structured Analysis
+          </h4>
+          <div>
+            <div className={labelCls}>Failure Mode</div>
+            {renderValue(data.failure_mode)}
+          </div>
+          <div>
+            <div className={labelCls}>Potential Effects</div>
+            {renderValue(data.potential_effects)}
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <div className={labelCls}>Severity</div>
+              <div className="text-center text-lg font-bold text-gray-700 bg-white rounded-lg p-2 border border-gray-100">{sev || '---'}</div>
+            </div>
+            <div>
+              <div className={labelCls}>Occurrence</div>
+              <div className="text-center text-lg font-bold text-gray-700 bg-white rounded-lg p-2 border border-gray-100">{occ || '---'}</div>
+            </div>
+            <div>
+              <div className={labelCls}>Detection</div>
+              <div className="text-center text-lg font-bold text-gray-700 bg-white rounded-lg p-2 border border-gray-100">{det || '---'}</div>
+            </div>
+          </div>
+          <div className={`flex items-center gap-3 px-4 py-3 rounded-lg ${rpnColor}`}>
+            <span className="text-sm font-semibold">RPN:</span>
+            <span className="text-lg font-bold">{rpn || '---'}</span>
+            {rpn >= 200 && <span className="ml-auto text-xs font-bold uppercase">High Risk</span>}
+            {rpn >= 100 && rpn < 200 && <span className="ml-auto text-xs font-bold uppercase">Medium Risk</span>}
+            {rpn > 0 && rpn < 100 && <span className="ml-auto text-xs font-bold uppercase">Low Risk</span>}
+          </div>
+          <div>
+            <div className={labelCls}>Recommended Actions</div>
+            {renderValue(data.recommended_actions)}
+          </div>
+        </div>
+      );
+    }
+
+    case 'timeline':
+      return (
+        <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
+          <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+            <FlaskConical className="w-4 h-4 text-amber-500" />
+            Timeline Analysis - Structured Analysis
+          </h4>
+          <div>
+            <div className={labelCls}>Events</div>
+            {(data.events || []).length > 0 ? (
+              <div className="bg-white rounded-lg p-3 border border-gray-100 space-y-2">
+                {data.events.map((ev, i) => (
+                  <div key={i} className="flex items-start gap-3 text-sm">
+                    <span className="font-medium text-gray-500 whitespace-nowrap">{ev.date || '(no date)'}</span>
+                    <span className="text-gray-700">{ev.description || '(no description)'}</span>
+                  </div>
+                ))}
+              </div>
+            ) : renderValue(null)}
+          </div>
+          <div>
+            <div className={labelCls}>Root Cause Summary</div>
+            {renderValue(data.root_cause_summary)}
+          </div>
+        </div>
+      );
+
+    default:
+      return null;
+  }
+}
+
 export default function CAPADetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -807,7 +1484,7 @@ export default function CAPADetail() {
   };
 
   // Header field editing
-  const [editingField, setEditingField] = useState(null); // 'status' | 'responsible' | 'target_date' | 'completion_date' | 'effectiveness_date'
+  const [editingField, setEditingField] = useState(null); // 'status' | 'responsible' | 'target_date' | 'completion_date' | 'effectiveness_date' | 'classification' | 'priority' | 'risk_assessment' | 'category' | 'department' | 'initiated_by' | 'verification_method'
   const [fieldDraft, setFieldDraft] = useState('');
   const [savingField, setSavingField] = useState(false);
 
@@ -1371,14 +2048,35 @@ export default function CAPADetail() {
                   </h2>
                 )}
                 <div className="flex flex-wrap items-center gap-3 text-sm">
-                  {capa.classification && (
+                  {editingField === 'classification' ? (
+                    <div className="inline-flex items-center gap-1.5">
+                      <select
+                        value={fieldDraft}
+                        onChange={(e) => setFieldDraft(e.target.value)}
+                        className="border border-indigo-300 rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        autoFocus
+                      >
+                        <option value="critical">Critical</option>
+                        <option value="major">Major</option>
+                        <option value="minor">Minor</option>
+                      </select>
+                      <button onClick={() => saveField('classification', fieldDraft)} disabled={savingField} className="p-1 text-green-600 hover:bg-green-50 rounded"><Save className="w-3.5 h-3.5" /></button>
+                      <button onClick={cancelFieldEdit} className="p-1 text-gray-400 hover:bg-gray-50 rounded"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  ) : capa.classification && (
                     <span className="group relative inline-flex items-center cursor-help">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
-                        capa.classification === 'critical' ? 'bg-red-100 text-red-700 border-red-200' :
-                        capa.classification === 'major' ? 'bg-orange-100 text-orange-700 border-orange-200' :
-                        'bg-yellow-100 text-yellow-700 border-yellow-200'
-                      }`}>
-                        {capa.classification?.charAt(0).toUpperCase() + capa.classification?.slice(1)} ⓘ
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                          capa.classification === 'critical' ? 'bg-red-100 text-red-700 border-red-200' :
+                          capa.classification === 'major' ? 'bg-orange-100 text-orange-700 border-orange-200' :
+                          'bg-yellow-100 text-yellow-700 border-yellow-200'
+                        } ${isAdmin ? 'cursor-pointer hover:opacity-80' : ''}`}
+                        onClick={() => isAdmin && startFieldEdit('classification', capa.classification)}
+                        title={isAdmin ? 'Click to edit classification' : ''}
+                      >
+                        {capa.classification?.charAt(0).toUpperCase() + capa.classification?.slice(1)}
+                        {isAdmin && <Pencil className="w-3 h-3 ml-1 opacity-50" />}
+                        {!isAdmin && ' ⓘ'}
                       </span>
                       <div className="hidden group-hover:block absolute top-full left-0 mt-2 w-80 p-4 bg-white rounded-xl shadow-xl border border-gray-200 z-50 text-left">
                         <h4 className="text-sm font-bold text-gray-900 mb-3">Classification Guide</h4>
@@ -1418,38 +2116,127 @@ export default function CAPADetail() {
                       </div>
                     </span>
                   )}
-                  {capa.priority && (
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
-                      capa.priority === 'high' ? 'bg-red-50 text-red-600 border-red-200' :
-                      capa.priority === 'medium' ? 'bg-amber-50 text-amber-600 border-amber-200' :
-                      'bg-green-50 text-green-600 border-green-200'
-                    }`}>
+                  {editingField === 'priority' ? (
+                    <div className="inline-flex items-center gap-1.5">
+                      <select
+                        value={fieldDraft}
+                        onChange={(e) => setFieldDraft(e.target.value)}
+                        className="border border-indigo-300 rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        autoFocus
+                      >
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                      </select>
+                      <button onClick={() => saveField('priority', fieldDraft)} disabled={savingField} className="p-1 text-green-600 hover:bg-green-50 rounded"><Save className="w-3.5 h-3.5" /></button>
+                      <button onClick={cancelFieldEdit} className="p-1 text-gray-400 hover:bg-gray-50 rounded"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  ) : capa.priority && (
+                    <span
+                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                        capa.priority === 'high' ? 'bg-red-50 text-red-600 border-red-200' :
+                        capa.priority === 'medium' ? 'bg-amber-50 text-amber-600 border-amber-200' :
+                        'bg-green-50 text-green-600 border-green-200'
+                      } ${isAdmin ? 'cursor-pointer hover:opacity-80' : ''}`}
+                      onClick={() => isAdmin && startFieldEdit('priority', capa.priority)}
+                      title={isAdmin ? 'Click to edit priority' : ''}
+                    >
                       Priority: {capa.priority?.charAt(0).toUpperCase() + capa.priority?.slice(1)}
+                      {isAdmin && <Pencil className="w-3 h-3 ml-1 opacity-50" />}
                     </span>
                   )}
-                  {capa.risk_assessment && (
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
-                      capa.risk_assessment === 'high' || capa.risk_assessment === 'critical' ? 'bg-red-50 text-red-600 border-red-200' :
-                      capa.risk_assessment === 'medium' ? 'bg-amber-50 text-amber-600 border-amber-200' :
-                      'bg-green-50 text-green-600 border-green-200'
-                    }`}>
+                  {editingField === 'risk_assessment' ? (
+                    <div className="inline-flex items-center gap-1.5">
+                      <select
+                        value={fieldDraft}
+                        onChange={(e) => setFieldDraft(e.target.value)}
+                        className="border border-indigo-300 rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        autoFocus
+                      >
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                      </select>
+                      <button onClick={() => saveField('risk_assessment', fieldDraft)} disabled={savingField} className="p-1 text-green-600 hover:bg-green-50 rounded"><Save className="w-3.5 h-3.5" /></button>
+                      <button onClick={cancelFieldEdit} className="p-1 text-gray-400 hover:bg-gray-50 rounded"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  ) : capa.risk_assessment && (
+                    <span
+                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                        capa.risk_assessment === 'high' || capa.risk_assessment === 'critical' ? 'bg-red-50 text-red-600 border-red-200' :
+                        capa.risk_assessment === 'medium' ? 'bg-amber-50 text-amber-600 border-amber-200' :
+                        'bg-green-50 text-green-600 border-green-200'
+                      } ${isAdmin ? 'cursor-pointer hover:opacity-80' : ''}`}
+                      onClick={() => isAdmin && startFieldEdit('risk_assessment', capa.risk_assessment)}
+                      title={isAdmin ? 'Click to edit risk assessment' : ''}
+                    >
                       Risk: {capa.risk_assessment?.charAt(0).toUpperCase() + capa.risk_assessment?.slice(1)}
+                      {isAdmin && <Pencil className="w-3 h-3 ml-1 opacity-50" />}
                     </span>
                   )}
                 </div>
 
                 {/* Category / Department / Source info cards */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
-                  {capa.category && (
-                    <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                  {editingField === 'category' ? (
+                    <div className="bg-gray-50 rounded-lg p-3 border border-indigo-200">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Category</p>
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          value={fieldDraft}
+                          onChange={(e) => setFieldDraft(e.target.value)}
+                          className="border border-indigo-300 rounded-lg px-2 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full"
+                          autoFocus
+                        >
+                          {['process', 'equipment', 'personnel', 'materials', 'documentation', 'environmental', 'supplier', 'regulatory', 'other'].map(opt => (
+                            <option key={opt} value={opt}>{opt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                          ))}
+                        </select>
+                        <button onClick={() => saveField('category', fieldDraft)} disabled={savingField} className="p-1 text-green-600 hover:bg-green-50 rounded"><Save className="w-3.5 h-3.5" /></button>
+                        <button onClick={cancelFieldEdit} className="p-1 text-gray-400 hover:bg-gray-50 rounded"><X className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </div>
+                  ) : capa.category && (
+                    <div
+                      className={`bg-gray-50 rounded-lg p-3 border border-gray-100 ${isAdmin ? 'cursor-pointer hover:border-indigo-200 transition-colors' : ''}`}
+                      onClick={() => isAdmin && startFieldEdit('category', capa.category)}
+                      title={isAdmin ? 'Click to edit category' : ''}
+                    >
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Category</p>
-                      <p className="text-sm font-semibold text-gray-800">{capa.category?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</p>
+                      <p className="text-sm font-semibold text-gray-800 flex items-center gap-1">
+                        {capa.category?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                        {isAdmin && <Pencil className="w-3 h-3 opacity-40" />}
+                      </p>
                     </div>
                   )}
-                  {capa.department && (
-                    <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                  {editingField === 'department' ? (
+                    <div className="bg-gray-50 rounded-lg p-3 border border-indigo-200">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Department</p>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={fieldDraft}
+                          onChange={(e) => setFieldDraft(e.target.value)}
+                          className="border border-indigo-300 rounded-lg px-2 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full"
+                          autoFocus
+                          onKeyDown={(e) => e.key === 'Enter' && saveField('department', fieldDraft)}
+                        />
+                        <button onClick={() => saveField('department', fieldDraft)} disabled={savingField} className="p-1 text-green-600 hover:bg-green-50 rounded"><Save className="w-3.5 h-3.5" /></button>
+                        <button onClick={cancelFieldEdit} className="p-1 text-gray-400 hover:bg-gray-50 rounded"><X className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </div>
+                  ) : capa.department && (
+                    <div
+                      className={`bg-gray-50 rounded-lg p-3 border border-gray-100 ${isAdmin ? 'cursor-pointer hover:border-indigo-200 transition-colors' : ''}`}
+                      onClick={() => isAdmin && startFieldEdit('department', capa.department)}
+                      title={isAdmin ? 'Click to edit department' : ''}
+                    >
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Department</p>
-                      <p className="text-sm font-semibold text-gray-800">{capa.department}</p>
+                      <p className="text-sm font-semibold text-gray-800 flex items-center gap-1">
+                        {capa.department}
+                        {isAdmin && <Pencil className="w-3 h-3 opacity-40" />}
+                      </p>
                     </div>
                   )}
                   {capa.source_type && (
@@ -1458,10 +2245,33 @@ export default function CAPADetail() {
                       <p className="text-sm font-semibold text-gray-800">{capa.source_type?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}{capa.source_id ? ` #${capa.source_id}` : ''}</p>
                     </div>
                   )}
-                  {capa.initiated_by && (
-                    <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                  {editingField === 'initiated_by' ? (
+                    <div className="bg-gray-50 rounded-lg p-3 border border-indigo-200">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Initiated By</p>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={fieldDraft}
+                          onChange={(e) => setFieldDraft(e.target.value)}
+                          className="border border-indigo-300 rounded-lg px-2 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full"
+                          autoFocus
+                          onKeyDown={(e) => e.key === 'Enter' && saveField('initiated_by', fieldDraft)}
+                        />
+                        <button onClick={() => saveField('initiated_by', fieldDraft)} disabled={savingField} className="p-1 text-green-600 hover:bg-green-50 rounded"><Save className="w-3.5 h-3.5" /></button>
+                        <button onClick={cancelFieldEdit} className="p-1 text-gray-400 hover:bg-gray-50 rounded"><X className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </div>
+                  ) : capa.initiated_by && (
+                    <div
+                      className={`bg-gray-50 rounded-lg p-3 border border-gray-100 ${isAdmin ? 'cursor-pointer hover:border-indigo-200 transition-colors' : ''}`}
+                      onClick={() => isAdmin && startFieldEdit('initiated_by', capa.initiated_by)}
+                      title={isAdmin ? 'Click to edit initiated by' : ''}
+                    >
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Initiated By</p>
-                      <p className="text-sm font-semibold text-gray-800">{capa.initiated_by}</p>
+                      <p className="text-sm font-semibold text-gray-800 flex items-center gap-1">
+                        {capa.initiated_by}
+                        {isAdmin && <Pencil className="w-3 h-3 opacity-40" />}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -1519,10 +2329,33 @@ export default function CAPADetail() {
                     <p className="text-[10px] font-bold text-red-500 mt-0.5">⚠️ OVERDUE</p>
                   )}
                 </div>
-                <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-100 col-span-2">
-                  <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-0.5">Verification Method</p>
-                  <p className="text-sm font-semibold text-indigo-900">{capa.verification_method || '— Not yet defined'}</p>
-                </div>
+                {editingField === 'verification_method' ? (
+                  <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200 col-span-2">
+                    <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1">Verification Method</p>
+                    <textarea
+                      value={fieldDraft}
+                      onChange={(e) => setFieldDraft(e.target.value)}
+                      className="border border-indigo-300 rounded-lg px-2 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full min-h-[60px] resize-y"
+                      autoFocus
+                    />
+                    <div className="flex items-center gap-1.5 mt-1.5">
+                      <button onClick={() => saveField('verification_method', fieldDraft)} disabled={savingField} className="p-1 text-green-600 hover:bg-green-50 rounded"><Save className="w-3.5 h-3.5" /></button>
+                      <button onClick={cancelFieldEdit} className="p-1 text-gray-400 hover:bg-gray-50 rounded"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className={`bg-indigo-50 rounded-lg p-3 border border-indigo-100 col-span-2 ${isAdmin ? 'cursor-pointer hover:border-indigo-200 transition-colors' : ''}`}
+                    onClick={() => isAdmin && startFieldEdit('verification_method', capa.verification_method)}
+                    title={isAdmin ? 'Click to edit verification method' : ''}
+                  >
+                    <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-0.5">Verification Method</p>
+                    <p className="text-sm font-semibold text-indigo-900 flex items-center gap-1">
+                      {capa.verification_method || '— Not yet defined'}
+                      {isAdmin && <Pencil className="w-3 h-3 opacity-40" />}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </Card>
@@ -1632,14 +2465,30 @@ export default function CAPADetail() {
                 </div>
               )}
             </div>
+
+            {/* Structured RCA form based on selected method */}
+            {capa.root_cause_method && capa.root_cause_method !== 'other' && (
+              <RootCauseStructuredForm
+                method={capa.root_cause_method}
+                data={typeof capa.root_cause_structured === 'string'
+                  ? (() => { try { return JSON.parse(capa.root_cause_structured); } catch(e) { return {}; } })()
+                  : (capa.root_cause_structured || {})}
+                canEdit={canEditContent}
+                onSave={async (structuredData) => {
+                  await apiPut(`/api/capas/${capa.id}`, { root_cause_structured: structuredData });
+                  refetch();
+                }}
+              />
+            )}
+
             <FieldHelp text={GMP_HELP.capa.fields.root_cause_analysis} />
             <EditableCard
               icon={FlaskConical}
               iconColor="text-amber-500"
-              title="Root Cause Analysis"
+              title="Additional Notes"
               value={<FormattedText text={capa.root_cause_analysis} />}
               rawValue={capa.root_cause_analysis || ""}
-              placeholder={GMP_HELP.capa.placeholders.root_cause_analysis}
+              placeholder="Optional: Add any additional notes or context about the root cause investigation..."
               isAdmin={canEditContent}
               onSave={saveTextCard('root_cause_analysis')}
               aiSuggestProps={{ field: 'root_cause_analysis', recordType: 'capa', context: capa }}
