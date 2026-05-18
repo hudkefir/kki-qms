@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { MessageCircle, X, Send, Trash2, Bot, User } from 'lucide-react';
 import { useLocation, useParams } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { API_BASE_URL } from '../config';
 
 export default function ChatSidebar() {
@@ -154,6 +156,33 @@ export default function ChatSidebar() {
                 updated[updated.length - 1] = { role: 'assistant', content: fullText };
                 return updated;
               });
+            } else if (event.type === 'tool_start') {
+              // Show inline notification that Jarvis is editing
+              const fieldLabel = (event.field || '').replace(/_/g, ' ');
+              fullText += `\n\n> ✏️ *Updating ${fieldLabel}...*\n\n`;
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { role: 'assistant', content: fullText };
+                return updated;
+              });
+            } else if (event.type === 'tool_result') {
+              if (event.result?.success) {
+                const fieldLabel = (event.result.field || '').replace(/_/g, ' ');
+                fullText = fullText.replace(
+                  /> ✏️ \*Updating.*?\.\.\.\*\n\n$/,
+                  `> ✅ **Updated ${fieldLabel}** — refresh the page to see changes.\n\n`
+                );
+              } else {
+                fullText = fullText.replace(
+                  /> ✏️ \*Updating.*?\.\.\.\*\n\n$/,
+                  `> ❌ **Edit failed:** ${event.result?.error || 'Unknown error'}\n\n`
+                );
+              }
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { role: 'assistant', content: fullText };
+                return updated;
+              });
             } else if (event.type === 'done') {
               if (event.chatSessionId) {
                 setChatSessionId(event.chatSessionId);
@@ -286,15 +315,42 @@ export default function ChatSidebar() {
                 </div>
               )}
               <div
-                className={`max-w-[80%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
+                className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
                   msg.role === 'user'
-                    ? 'bg-navy-600 text-white'
+                    ? 'bg-navy-600 text-white whitespace-pre-wrap'
                     : msg.isError
-                    ? 'bg-red-50 text-red-700 border border-red-200'
-                    : 'bg-gray-100 text-gray-800'
+                    ? 'bg-red-50 text-red-700 border border-red-200 whitespace-pre-wrap'
+                    : 'bg-gray-100 text-gray-800 jarvis-markdown'
                 }`}
               >
-                {msg.content || (isLoading && i === messages.length - 1 ? (
+                {msg.content ? (
+                  msg.role === 'assistant' && !msg.isError ? (
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                        ul: ({ children }) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal pl-4 mb-2">{children}</ol>,
+                        li: ({ children }) => <li className="mb-0.5">{children}</li>,
+                        h1: ({ children }) => <h3 className="font-bold text-base mb-1">{children}</h3>,
+                        h2: ({ children }) => <h3 className="font-bold text-sm mb-1">{children}</h3>,
+                        h3: ({ children }) => <h3 className="font-semibold text-sm mb-1">{children}</h3>,
+                        strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                        code: ({ inline, children }) => inline
+                          ? <code className="bg-gray-200 px-1 py-0.5 rounded text-xs font-mono">{children}</code>
+                          : <pre className="bg-gray-200 p-2 rounded text-xs font-mono overflow-x-auto my-1"><code>{children}</code></pre>,
+                        hr: () => <hr className="my-2 border-gray-300" />,
+                        a: ({ href, children }) => <a href={href} className="text-navy-600 underline" target="_blank" rel="noopener noreferrer">{children}</a>,
+                        blockquote: ({ children }) => <blockquote className="border-l-2 border-gray-300 pl-2 my-1 text-gray-600">{children}</blockquote>,
+                        table: ({ children }) => <table className="text-xs border-collapse my-1 w-full">{children}</table>,
+                        th: ({ children }) => <th className="border border-gray-300 px-1.5 py-0.5 bg-gray-200 text-left font-semibold">{children}</th>,
+                        td: ({ children }) => <td className="border border-gray-300 px-1.5 py-0.5">{children}</td>,
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  ) : msg.content
+                ) : (isLoading && i === messages.length - 1 ? (
                   <span className="inline-flex items-center gap-1 text-gray-400">
                     <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                     <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />

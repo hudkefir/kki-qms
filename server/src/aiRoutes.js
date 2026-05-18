@@ -5,6 +5,132 @@ import db from './database-pg.js';
 
 const router = Router();
 
+// ── AI Tool Definitions ────────────────────────────────────────────────────
+// Table + field mappings for AI-driven record updates
+const RECORD_TABLE_MAP = {
+  capas: 'capas',
+  deviations: 'deviation_reports',
+  complaints: 'complaints',
+  ccrs: 'ccrs',
+  'change-control': 'change_requests',
+};
+
+const EDITABLE_FIELDS = {
+  capas: [
+    'description', 'root_cause_analysis', 'investigation_details', 'containment_action',
+    'corrective_action', 'preventive_action', 'verification_method', 'effectiveness_notes',
+    'risk_assessment', 'root_cause_method',
+  ],
+  deviations: [
+    'description', 'root_cause', 'immediate_action', 'scope_assessment',
+    'product_disposition', 'disposition_rationale', 'root_cause_method',
+  ],
+  complaints: [
+    'description', 'investigation_details', 'root_cause', 'corrective_action',
+    'immediate_action',
+  ],
+  ccrs: [
+    'description', 'investigation_details', 'root_cause', 'corrective_action',
+  ],
+  'change-control': [
+    'description', 'justification', 'risk_assessment', 'implementation_plan',
+  ],
+};
+
+const AI_TOOLS = [
+  {
+    name: 'update_record_field',
+    description: `Update a field on the QMS record the user is currently viewing. Use this when the user asks you to fill in, write, draft, or update a specific field. Only use for the record currently being viewed. Always confirm what you're writing before applying.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        record_type: {
+          type: 'string',
+          enum: ['capas', 'deviations', 'complaints', 'ccrs', 'change-control'],
+          description: 'The type of record to update',
+        },
+        record_id: {
+          type: 'string',
+          description: 'The ID of the record to update (from the current context)',
+        },
+        field: {
+          type: 'string',
+          description: 'The field name to update (e.g., description, root_cause_analysis, corrective_action)',
+        },
+        value: {
+          type: 'string',
+          description: 'The new value to set for the field. Write in professional GMP style.',
+        },
+      },
+      required: ['record_type', 'record_id', 'field', 'value'],
+    },
+  },
+];
+
+// Execute AI tool calls
+async function executeToolCall(toolName, toolInput, userId) {
+  if (toolName === 'update_record_field') {
+    const { record_type, record_id, field, value } = toolInput;
+
+    // Validate record type
+    const tableName = RECORD_TABLE_MAP[record_type];
+    if (!tableName) {
+      return { success: false, error: `Unknown record type: ${record_type}` };
+    }
+
+    // Validate field is editable
+    const allowedFields = EDITABLE_FIELDS[record_type] || [];
+    if (!allowedFields.includes(field)) {
+      return { success: false, error: `Field "${field}" is not editable via AI for ${record_type}. Editable fields: ${allowedFields.join(', ')}` };
+    }
+
+    // Fetch current record
+    const record = await db.get(`SELECT * FROM ${tableName} WHERE id = $1`, [record_id]);
+    if (!record) {
+      return { success: false, error: `Record not found: ${record_type} #${record_id}` };
+    }
+
+    const oldValue = record[field] || '';
+
+    // Apply update
+    await db.run(
+      `UPDATE ${tableName} SET ${field} = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [value, record_id]
+    );
+
+    // Log audit
+    try {
+      const idField = record_type === 'capas' ? 'capa_id'
+        : record_type === 'deviations' ? 'report_id'
+        : record_type === 'complaints' ? 'complaint_number'
+        : record_type === 'ccrs' ? 'ccr_number'
+        : 'id';
+      await db.run(
+        `INSERT INTO audit_log (action, table_name, record_id, record_identifier, user_id, details) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          `ai_update_${record_type}`,
+          tableName,
+          record_id,
+          record[idField] || record_id,
+          userId || 'jarvis-ai',
+          JSON.stringify({ field, old_value: oldValue, new_value: value, source: 'jarvis_ai' }),
+        ]
+      );
+    } catch (auditErr) {
+      console.error('AI audit log failed:', auditErr.message);
+    }
+
+    return {
+      success: true,
+      message: `Updated "${field}" on ${record_type} record.`,
+      field,
+      old_value: oldValue ? oldValue.substring(0, 100) + (oldValue.length > 100 ? '...' : '') : '(empty)',
+    };
+  }
+
+  return { success: false, error: `Unknown tool: ${toolName}` };
+}
+
 // ── Jarvis Chat ─────────────────────────────────────────────────────────────
 // In-memory conversation store keyed by session ID
 // Each entry: { messages: [{role, content}], lastAccess: timestamp }
@@ -53,10 +179,25 @@ The user can navigate to these sections: Dashboard, Complaints, CCRs (Customer C
 - Provide regulatory citations (e.g., "per 21 CFR 117.150") when relevant
 - If you don't know something specific to KKI's internal processes, say so and offer general GMP guidance instead
 
+## Editing Records
+When you are viewing a specific record (CAPA, deviation, complaint, CCR, or change control), you have the ability to **directly edit fields** using the update_record_field tool. Use this when:
+- The user asks you to fill in, write, draft, or update a field
+- The user says something like "fill in the root cause" or "write the corrective action"
+- The user asks you to help complete a record
+
+When editing, write in professional GMP documentation style:
+- Past tense for events that occurred
+- Present tense for procedures and controls
+- Specific and factual — cite lot numbers, dates, and locations from the record data
+- Do NOT fabricate data not present in the record
+
+After editing a field, tell the user what you wrote and that they should refresh the page to see the updated value.
+
 ## Important Rules
 - Never fabricate lot numbers, batch IDs, test results, or specific KKI data
 - Always recommend documenting actions in the QMS
 - For critical food safety issues, always recommend immediate containment and escalation to management
+- Use markdown formatting (headers, bold, lists) in your responses — the chat renders it properly
 - Keep responses focused — 2-5 sentences for simple questions, more for complex topics`;
 
 router.post('/ai/chat', async (req, res) => {
@@ -320,46 +461,103 @@ router.post('/ai/chat', async (req, res) => {
     res.flushHeaders();
 
     const client = new Anthropic({ apiKey });
-    const stream = client.messages.stream({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
-      system: systemPrompt,
-      messages: session.messages,
-    });
 
+    // Determine if we're on a record page where tools make sense
+    const hasRecordContext = context?.recordType && context?.recordId && RECORD_TABLE_MAP[context.recordType];
+    const toolsConfig = hasRecordContext ? { tools: AI_TOOLS } : {};
+
+    // Tool use loop: stream text, execute tools, continue until done
+    let conversationMessages = [...session.messages];
     let fullResponse = '';
+    let toolsUsed = [];
+    let maxToolRounds = 3; // prevent infinite loops
+    let aborted = false;
 
-    stream.on('text', (text) => {
-      fullResponse += text;
-      res.write(`data: ${JSON.stringify({ type: 'text', text })}\n\n`);
-    });
+    req.on('close', () => { aborted = true; });
 
-    stream.on('error', (err) => {
-      console.error('Jarvis chat stream error:', err.message);
-      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`);
-      res.end();
-    });
+    for (let round = 0; round < maxToolRounds; round++) {
+      if (aborted) break;
 
-    stream.on('end', () => {
-      // Save assistant response to in-memory history
-      if (fullResponse) {
-        session.messages.push({ role: 'assistant', content: fullResponse });
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages: conversationMessages,
+        ...toolsConfig,
+      });
+
+      // Process content blocks
+      let hasToolUse = false;
+      const assistantContent = [];
+
+      for (const block of response.content) {
+        if (block.type === 'text') {
+          fullResponse += block.text;
+          assistantContent.push(block);
+          res.write(`data: ${JSON.stringify({ type: 'text', text: block.text })}\n\n`);
+        } else if (block.type === 'tool_use') {
+          hasToolUse = true;
+          assistantContent.push(block);
+
+          // Notify frontend that a tool is being executed
+          res.write(`data: ${JSON.stringify({ type: 'tool_start', tool: block.name, field: block.input?.field })}\n\n`);
+
+          // Execute the tool
+          try {
+            const result = await executeToolCall(block.name, block.input, userId);
+            toolsUsed.push({ tool: block.name, input: block.input, result });
+
+            // Send tool result notification to frontend
+            res.write(`data: ${JSON.stringify({ type: 'tool_result', tool: block.name, result })}\n\n`);
+
+            // Add assistant message with tool use + tool result to conversation
+            conversationMessages.push({ role: 'assistant', content: assistantContent });
+            conversationMessages.push({
+              role: 'user',
+              content: [{
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: JSON.stringify(result),
+              }],
+            });
+          } catch (toolErr) {
+            console.error('Tool execution error:', toolErr.message);
+            const errorResult = { success: false, error: toolErr.message };
+            res.write(`data: ${JSON.stringify({ type: 'tool_result', tool: block.name, result: errorResult })}\n\n`);
+
+            conversationMessages.push({ role: 'assistant', content: assistantContent });
+            conversationMessages.push({
+              role: 'user',
+              content: [{
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: JSON.stringify(errorResult),
+                is_error: true,
+              }],
+            });
+          }
+        }
       }
-      // Persist assistant message to DB
-      if (userId && fullResponse) {
-        db.run(
-          'INSERT INTO chat_messages (user_id, session_id, role, content, context) VALUES (?, ?, ?, ?, ?)',
-          [userId, sessionKey, 'assistant', fullResponse, JSON.stringify(context || {})]
-        ).catch(dbErr => console.error('Failed to persist assistant chat message:', dbErr.message));
-      }
-      res.write(`data: ${JSON.stringify({ type: 'done', chatSessionId: sessionKey })}\n\n`);
-      res.end();
-    });
 
-    // Handle client disconnect
-    req.on('close', () => {
-      stream.abort();
-    });
+      // If no tool use, we're done
+      if (!hasToolUse) {
+        break;
+      }
+    }
+
+    // Save assistant response to in-memory history (text only)
+    if (fullResponse) {
+      session.messages.push({ role: 'assistant', content: fullResponse });
+    }
+    // Persist assistant message to DB
+    if (userId && fullResponse) {
+      db.run(
+        'INSERT INTO chat_messages (user_id, session_id, role, content, context) VALUES (?, ?, ?, ?, ?)',
+        [userId, sessionKey, 'assistant', fullResponse, JSON.stringify(context || {})]
+      ).catch(dbErr => console.error('Failed to persist assistant chat message:', dbErr.message));
+    }
+    res.write(`data: ${JSON.stringify({ type: 'done', chatSessionId: sessionKey, toolsUsed: toolsUsed.length > 0 ? toolsUsed : undefined })}\n\n`);
+    res.end();
   } catch (err) {
     console.error('Jarvis chat error:', err.message);
     if (!res.headersSent) {
