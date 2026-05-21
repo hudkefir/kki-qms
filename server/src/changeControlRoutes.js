@@ -665,6 +665,14 @@ router.post('/capas', requireWriteAccess, async (req, res) => {
       return res.status(400).json({ error: 'responsible_person and target_date are required' });
     }
 
+    // Coerce empty/invalid values to safe defaults (prevents PG CHECK violations)
+    const validClassifications = ['minor', 'major', 'critical'];
+    const safeClassification = validClassifications.includes(classification) ? classification : 'major';
+    const validPriorities = ['low', 'medium', 'high', 'critical'];
+    const safePriority = validPriorities.includes(priority) ? priority : 'medium';
+    const validRisks = ['low', 'medium', 'high', 'critical'];
+    const safeRisk = validRisks.includes(risk_assessment) ? risk_assessment : 'medium';
+
     const capa_id = await nextId('capa');
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
@@ -677,8 +685,8 @@ router.post('/capas', requireWriteAccess, async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [capa_id, source_type, source_id, corrective_action, preventive_action,
       responsible_person, target_date, linked_change_request_id,
-      title, description, classification, root_cause_analysis, risk_assessment,
-      investigation_details, verification_method, priority, initiated_by, department, category,
+      title, description, safeClassification, root_cause_analysis, safeRisk,
+      investigation_details, verification_method, safePriority, initiated_by, department, category,
       linked_complaints_json, now, now]);
 
     const created = await db.get('SELECT * FROM capas WHERE id = ?', [info.lastInsertRowid]);

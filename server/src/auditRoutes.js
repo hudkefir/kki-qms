@@ -128,7 +128,7 @@ router.get('/audit-logs/stats', requireAuth, async (req, res) => {
     const activeUsers = await db.all(`
       SELECT DISTINCT username, MAX(timestamp) as last_active
       FROM audit_logs
-      WHERE timestamp >= CURRENT_TIMESTAMP - INTERVAL '24 hours' AND username != 'anonymous'
+      WHERE timestamp::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '24 hours' AND username != 'anonymous'
       GROUP BY username
       ORDER BY last_active DESC
     `);
@@ -136,7 +136,7 @@ router.get('/audit-logs/stats', requireAuth, async (req, res) => {
     // Failed logins (last 24 hours)
     const failedLogins = (await db.all(`
       SELECT * FROM audit_logs
-      WHERE action = 'login_failed' AND timestamp >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+      WHERE action = 'login_failed' AND timestamp::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
       ORDER BY timestamp DESC
     `)).map(l => ({
       ...l,
