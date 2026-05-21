@@ -788,21 +788,24 @@ router.put('/v2/daily-message/:date', async (req, res) => {
 });
 
 // ── AUTO-BACKUP: snapshot before destructive ops ──
+// NOTE: Uses tb_operators/tb_sections (the live tables).
+// Old references to taskboard_operators/taskboard_sections were dead code
+// (those tables never existed in Supabase). Fixed 2026-05-21.
 async function autoBackupTasks(reason) {
   try {
     const tasks = await db.all('SELECT * FROM taskboard_tasks ORDER BY board_date, sort_order');
-    const operators = await db.all('SELECT * FROM taskboard_operators ORDER BY sort_order');
-    const sections = await db.all('SELECT * FROM taskboard_sections ORDER BY sort_order');
+    const operators = await db.all('SELECT * FROM tb_operators ORDER BY sort_order');
+    const sections = await db.all('SELECT * FROM tb_sections ORDER BY sort_order');
     if (tasks.length === 0 && operators.length === 0) return; // nothing to backup
     const snapshot = JSON.stringify({ tasks, operators, sections, reason, timestamp: new Date().toISOString() });
     await db.run(
-      'INSERT INTO taskboard_backups (data, reason, created_at) VALUES (?, ?, NOW())',
+      'INSERT INTO taskboard_state_backups (state, label, created_at) VALUES (?, ?, NOW())',
       [snapshot, reason]
     );
     // Keep only last 20 backups
-    const old = await db.all('SELECT id FROM taskboard_backups ORDER BY id DESC OFFSET 20');
+    const old = await db.all('SELECT id FROM taskboard_state_backups ORDER BY id DESC OFFSET 20');
     for (const row of old) {
-      await db.run('DELETE FROM taskboard_backups WHERE id = ?', [row.id]);
+      await db.run('DELETE FROM taskboard_state_backups WHERE id = ?', [row.id]);
     }
     console.log('[TASKBOARD BACKUP] Auto-backup saved: ' + reason + ' (' + tasks.length + ' tasks, ' + operators.length + ' operators)');
   } catch (err) {
@@ -813,7 +816,7 @@ async function autoBackupTasks(reason) {
 // GET /api/taskboard/auto-backups — list auto-backups
 router.get('/auto-backups', async (req, res) => {
   try {
-    const backups = await db.all('SELECT id, reason, created_at, length(data) as size FROM taskboard_backups ORDER BY id DESC LIMIT 20');
+    const backups = await db.all('SELECT id, label as reason, created_at, length(state) as size FROM taskboard_state_backups ORDER BY id DESC LIMIT 20');
     res.json(backups);
   } catch (err) {
     res.status(500).json({ error: 'Failed to list backups' });
@@ -823,10 +826,10 @@ router.get('/auto-backups', async (req, res) => {
 // POST /api/taskboard/auto-backups/:id/restore — restore from auto-backup
 router.post('/auto-backups/:id/restore', async (req, res) => {
   try {
-    const backup = await db.get('SELECT * FROM taskboard_backups WHERE id = ?', [req.params.id]);
+    const backup = await db.get('SELECT * FROM taskboard_state_backups WHERE id = ?', [req.params.id]);
     if (!backup) return res.status(404).json({ error: 'Backup not found' });
 
-    const snapshot = JSON.parse(backup.data);
+    const snapshot = JSON.parse(backup.state || backup.data);
     
     // Save current state as backup before restoring
     await autoBackupTasks('Pre-restore backup (restoring from backup ' + req.params.id + ')');
@@ -844,22 +847,22 @@ router.post('/auto-backups/:id/restore', async (req, res) => {
 
     // Restore operators
     if (snapshot.operators && snapshot.operators.length > 0) {
-      await db.run('DELETE FROM taskboard_operators');
+      await db.run('DELETE FROM tb_operators');
       for (const o of snapshot.operators) {
         await db.run(
-          'INSERT INTO taskboard_operators (name, role, color, sort_order) VALUES (?, ?, ?, ?)',
-          [o.name||'', o.role||'', o.color||'', o.sort_order||0]
+          'INSERT INTO tb_operators (id, name, role, zone, color, avatar, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [o.id||o.name, o.name||'', o.role||'', o.zone||'', o.color||'', o.avatar||'', o.sort_order||0]
         );
       }
     }
 
     // Restore sections
     if (snapshot.sections && snapshot.sections.length > 0) {
-      await db.run('DELETE FROM taskboard_sections');
+      await db.run('DELETE FROM tb_sections');
       for (const s of snapshot.sections) {
         await db.run(
-          'INSERT INTO taskboard_sections (name, color, sort_order) VALUES (?, ?, ?)',
-          [s.name||'', s.color||'', s.sort_order||0]
+          'INSERT INTO tb_sections (id, name, icon, color, bg, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+          [s.id||s.name, s.name||'', s.icon||'', s.color||'', s.bg||'', s.sort_order||0]
         );
       }
     }
