@@ -38,6 +38,7 @@ import pickListRoutes from './routes/inventory/picks.js';
 import documentRoutes from './routes/documents/documents.js';
 import operatorTaskRoutes from './routes/admin/operatorTasks.js';
 import operatorDashboardRoutes from './routes/admin/operators.js';
+import productionRoutes from './routes/production/index.js';
 import { setupWebSocket } from './websocket.js';
 import { requireAuth } from './authMiddleware.js';
 import { auditApiMiddleware } from './auditMiddleware.js';
@@ -214,6 +215,7 @@ app.use('/api', requireAuth, pickListRoutes);
 app.use('/api', requireAuth, documentRoutes);
 app.use('/api', requireAuth, operatorTaskRoutes);
 app.use('/api', requireAuth, operatorDashboardRoutes);
+app.use('/api/production', requireAuth, productionRoutes);
 
 
 // Global error handler — prevent stack trace leaks
