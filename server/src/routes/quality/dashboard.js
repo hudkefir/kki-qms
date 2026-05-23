@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { join } from 'path';
-import db from './database-pg.js';
-import { broadcast } from './websocket.js';
-import { requireWriteAccess, requireRole } from './authMiddleware.js';
-import { logAudit } from './auditMiddleware.js';
-import { readSOPContent, readSOPContentFromBuffer, previewSOPUpdates } from './sopContentReader.js';
-import { sanitizeBody } from './sanitize.js';
-import { downloadFile } from "./supabase.js";
+import db from '../../database-pg.js';
+import { broadcast } from '../../websocket.js';
+import { requireWriteAccess, requireRole } from '../../authMiddleware.js';
+import { logAudit } from '../../auditMiddleware.js';
+import { readSOPContent, readSOPContentFromBuffer, previewSOPUpdates } from '../../sopContentReader.js';
+import { sanitizeBody } from '../../sanitize.js';
+import { downloadFile } from "../../supabase.js";
 
 const router = Router();
 

@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import db from './database-pg.js';
-import { requireWriteAccess } from './authMiddleware.js';
-import { logAudit } from './auditMiddleware.js';
+import db from '../../database-pg.js';
+import { requireWriteAccess } from '../../authMiddleware.js';
+import { logAudit } from '../../auditMiddleware.js';
 
 const router = Router();
 

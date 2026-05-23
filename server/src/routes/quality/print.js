@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import db from './database-pg.js';
+import db from '../../database-pg.js';
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType, HeadingLevel } from 'docx';
-import { requireAuth } from './authMiddleware.js';
-import { uploadFile } from './supabase.js';
+import { requireAuth } from '../../authMiddleware.js';
+import { uploadFile } from '../../supabase.js';
 
 const router = Router();
 

@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import db from './database-pg.js';
-import { requireWriteAccess, requireRole } from './authMiddleware.js';
-import { logAudit } from './auditMiddleware.js';
-import { broadcast } from './websocket.js';
-import { sanitizeBody } from './sanitize.js';
+import db from '../../database-pg.js';
+import { requireWriteAccess, requireRole } from '../../authMiddleware.js';
+import { logAudit } from '../../auditMiddleware.js';
+import { broadcast } from '../../websocket.js';
+import { sanitizeBody } from '../../sanitize.js';
 
 const router = Router();
 
@@ -301,7 +301,7 @@ router.post('/suppliers/:id/reviews', requireWriteAccess, async (req, res) => {
 // ==================== DOCUMENT UPLOAD ====================
 import multer from "multer";
 import { extname } from "path";
-import { uploadFile, downloadFile, deleteFile } from './supabase.js';
+import { uploadFile, downloadFile, deleteFile } from '../../supabase.js';
 
 const supplierUpload = multer({
   storage: multer.memoryStorage(),

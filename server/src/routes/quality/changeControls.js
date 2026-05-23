@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import db from './database-pg.js';
-import { broadcast } from './websocket.js';
-import { requireWriteAccess, requireRole, requireContentAccess } from './authMiddleware.js';
-import { logAudit } from './auditMiddleware.js';
-import { sanitizeBody } from './sanitize.js';
+import db from '../../database-pg.js';
+import { broadcast } from '../../websocket.js';
+import { requireWriteAccess, requireRole, requireContentAccess } from '../../authMiddleware.js';
+import { logAudit } from '../../auditMiddleware.js';
+import { sanitizeBody } from '../../sanitize.js';
 import multer from 'multer';
-import { uploadFile, downloadFile, deleteFile } from './supabase.js';
+import { uploadFile, downloadFile, deleteFile } from '../../supabase.js';
 
 const capaUpload = multer({
   storage: multer.memoryStorage(),
@@ -665,13 +665,13 @@ router.post('/capas', requireWriteAccess, async (req, res) => {
       return res.status(400).json({ error: 'responsible_person and target_date are required' });
     }
 
-    // Coerce empty/invalid values to safe defaults (prevents PG CHECK violations)
+    // Coerce constrained fields to valid values or null
     const validClassifications = ['minor', 'major', 'critical'];
-    const safeClassification = validClassifications.includes(classification) ? classification : 'major';
     const validPriorities = ['low', 'medium', 'high', 'critical'];
+    const validRiskAssessments = ['low', 'medium', 'high', 'critical'];
+    const safeClassification = validClassifications.includes(classification) ? classification : null;
     const safePriority = validPriorities.includes(priority) ? priority : 'medium';
-    const validRisks = ['low', 'medium', 'high', 'critical'];
-    const safeRisk = validRisks.includes(risk_assessment) ? risk_assessment : 'medium';
+    const safeRiskAssessment = validRiskAssessments.includes(risk_assessment) ? risk_assessment : null;
 
     const capa_id = await nextId('capa');
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -685,7 +685,7 @@ router.post('/capas', requireWriteAccess, async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [capa_id, source_type, source_id, corrective_action, preventive_action,
       responsible_person, target_date, linked_change_request_id,
-      title, description, safeClassification, root_cause_analysis, safeRisk,
+      title, description, safeClassification, root_cause_analysis, safeRiskAssessment,
       investigation_details, verification_method, safePriority, initiated_by, department, category,
       linked_complaints_json, now, now]);
 
@@ -723,6 +723,18 @@ router.put('/capas/:id', requireContentAccess, async (req, res) => { console.log
       'department', 'category', 'linked_complaints_json'
     ];
     const fields = isAdmin ? [...contentFields, ...adminFields] : contentFields;
+
+    // Coerce constrained fields to valid values or null before update
+    const constrainedValues = {
+      classification: ['minor', 'major', 'critical'],
+      priority: ['low', 'medium', 'high', 'critical'],
+      risk_assessment: ['low', 'medium', 'high', 'critical'],
+    };
+    for (const [field, allowed] of Object.entries(constrainedValues)) {
+      if (sanitized[field] !== undefined && !allowed.includes(sanitized[field])) {
+        sanitized[field] = null;
+      }
+    }
 
     const updates = [];
     const params = [];

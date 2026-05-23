@@ -41,12 +41,6 @@ function convertSql(sql) {
   s = s.replace(/date\('now'\)/gi, 'CURRENT_DATE');
   // date('now', '+N days') → CURRENT_DATE + INTERVAL 'N days'
   s = s.replace(/date\('now',\s*'([^']+)'\)/gi, (_, interval) => `CURRENT_DATE + INTERVAL '${interval.replace(/^\+/, '')}'`);
-  // datetime('now', '-24 hours') → CURRENT_TIMESTAMP - INTERVAL '24 hours'  (safety net for SQLite remnants)
-  s = s.replace(/datetime\('now',\s*'([^']+)'\)/gi, (_, interval) => {
-    const sign = interval.startsWith('-') ? '-' : '+';
-    const clean = interval.replace(/^[+-]\s*/, '');
-    return `CURRENT_TIMESTAMP ${sign} INTERVAL '${clean}'`;
-  });
   // INTEGER PRIMARY KEY AUTOINCREMENT → SERIAL PRIMARY KEY
   s = s.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
   return s;
@@ -91,10 +85,10 @@ const db = {
   async run(sql, params = []) {
     let s = convertSql(sql);
     const isInsert = /^\s*INSERT\s/i.test(s);
-    // Auto-add RETURNING id for INSERT — but skip tables that have no `id` column
-    const noIdTables = /INTO\s+(ccr_complaints|qms_sequence|_health_check|wo_sequence|recall_sequence|crisis_sequence|exercise_sequence)\b/i;
-    if (isInsert && !/RETURNING\s/i.test(s) && !noIdTables.test(s)) {
-      s = s.replace(/;?\s*$/, ' RETURNING id');
+    // Auto-add RETURNING id for INSERT if not already present
+    // Use RETURNING * so tables without an 'id' column don't break
+    if (isInsert && !/RETURNING\s/i.test(s)) {
+      s = s.replace(/;?\s*$/, ' RETURNING *');
     }
     const result = await pool.query(s, params);
     return {

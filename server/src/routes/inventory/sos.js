@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from './authMiddleware.js';
+import { requireAuth } from '../../authMiddleware.js';
 const router = Router();
 
 // Simple in-memory cache (5 min TTL)

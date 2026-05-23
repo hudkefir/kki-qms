@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import db from './database-pg.js';
-import { broadcast } from './websocket.js';
-import { logAudit } from './auditMiddleware.js';
-import { requireAuth, requireRole, requireContentAccess } from './authMiddleware.js';
+import db from '../../database-pg.js';
+import { broadcast } from '../../websocket.js';
+import { logAudit } from '../../auditMiddleware.js';
+import { requireAuth, requireRole, requireContentAccess } from '../../authMiddleware.js';
 
 const router = Router();
 

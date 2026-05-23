@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import db from './database-pg.js';
-import { broadcast } from './websocket.js';
-import { requireWriteAccess } from './authMiddleware.js';
-import { logAudit } from './auditMiddleware.js';
-import { sanitizeBody } from './sanitize.js';
+import db from '../../database-pg.js';
+import { broadcast } from '../../websocket.js';
+import { requireWriteAccess } from '../../authMiddleware.js';
+import { logAudit } from '../../auditMiddleware.js';
+import { sanitizeBody } from '../../sanitize.js';
 
 const router = Router();
 

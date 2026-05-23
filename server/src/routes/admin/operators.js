@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import db from './database-pg.js';
-import { requireAuth } from './authMiddleware.js';
+import db from '../../database-pg.js';
+import { requireAuth } from '../../authMiddleware.js';
 
 const router = Router();
 

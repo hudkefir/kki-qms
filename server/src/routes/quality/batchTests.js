@@ -4,10 +4,10 @@ import { writeFileSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'fs'
 import { join, extname } from 'path';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
-import db from './database-pg.js';
-import { requireAuth, requireWriteAccess, requireRole } from './authMiddleware.js';
-import { logAudit } from './auditMiddleware.js';
-import { uploadFile, downloadFile, deleteFile } from './supabase.js';
+import db from '../../database-pg.js';
+import { requireAuth, requireWriteAccess, requireRole } from '../../authMiddleware.js';
+import { logAudit } from '../../auditMiddleware.js';
+import { uploadFile, downloadFile, deleteFile } from '../../supabase.js';
 
 // ── Multer setup for COA PDF uploads ────────────────────────────────────────
 const coaUpload = multer({

@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import db, { checkDbHealth } from './database-pg.js';
-import { requireRole } from './authMiddleware.js';
-import { runSmokeTests } from './smokeTest.js';
+import db, { checkDbHealth } from '../../database-pg.js';
+import { requireRole } from '../../authMiddleware.js';
+import { runSmokeTests } from '../../smokeTest.js';
 
 const router = Router();
 const SERVER_START_TIME = Date.now();
