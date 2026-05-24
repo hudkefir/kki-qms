@@ -20,7 +20,7 @@ uploads/
 *.pre-*
 client/client/
 server/documents/
-documents/
+/documents/
 *.bak
 *.archive-bak
 *.mjs
