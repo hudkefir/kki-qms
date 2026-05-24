@@ -1,0 +1,25 @@
+-- ============================================================================
+-- EXAMPLE: Incremental migration template
+-- ============================================================================
+-- This file runs EXACTLY ONCE. After it's applied, it's recorded in
+-- schema_migrations and won't run again.
+--
+-- Pattern for adding columns:
+--   ALTER TABLE sops ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+--
+-- Pattern for adding indexes:
+--   CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
+--
+-- Pattern for data migrations:
+--   UPDATE users SET role = 'operator' WHERE role = 'viewer' AND display_name LIKE '%operator%';
+--
+-- Rules:
+--   1. Number files sequentially (32-xxx.sql, 33-xxx.sql, etc.)
+--   2. Use IF NOT EXISTS / IF EXISTS where possible for safety
+--   3. Each file should be self-contained
+--   4. Never modify an already-applied migration — create a new one instead
+--   5. Delete THIS example file once you've read it
+-- ============================================================================
+
+-- No-op: this is just a template
+SELECT 1;

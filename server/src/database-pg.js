@@ -2,6 +2,7 @@ import pg from 'pg';
 import { readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { runMigrations } from './migrate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -132,38 +133,9 @@ const db = {
   pool,
 };
 
-// ─── Table creation (from modular migration files) ───────────────────────────
-// Each migration file (01-core.sql … 12-chat.sql) is independent.
-// A bad edit to one file cannot silently break unrelated tables.
-async function initTables() {
-  const migrationsDir = join(__dirname, 'migrations');
-  const files = readdirSync(migrationsDir)
-    .filter(f => f.endsWith('.sql'))
-    .sort();
-
-  for (const file of files) {
-    const sql = readFileSync(join(migrationsDir, file), 'utf-8');
-    // Split into individual statements so one failure (e.g. index on missing column)
-    // doesn't prevent subsequent CREATE TABLEs from running
-    const statements = sql
-      .split(';')
-      .map(s => s.trim())
-      .filter(s => s.length > 0);
-
-    for (const stmt of statements) {
-      try {
-        await pool.query(stmt);
-      } catch (err) {
-        // Log but continue — legacy tables may have different columns
-        console.warn(`[${file}] statement skipped: ${err.message.split('\n')[0]}`);
-      }
-    }
-  }
-}
-
 // ─── Initialize on import ────────────────────────────────────────────────────
 try {
-  await initTables();
+  await runMigrations(pool);
   console.log('PostgreSQL connected and tables verified');
 } catch (err) {
   console.error('PostgreSQL init error:', err.message);
