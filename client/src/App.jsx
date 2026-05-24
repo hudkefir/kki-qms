@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
-import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail, ListTodo, LayoutDashboard, HelpCircle } from 'lucide-react';
+import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail, ListTodo, LayoutDashboard, HelpCircle, Factory, Droplets, FileSpreadsheet } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -46,6 +46,12 @@ import EmailScan from './pages/EmailScan';
 import OperatorDashboard from './pages/OperatorDashboard';
 import OperatorTasksAdmin from './pages/OperatorTasksAdmin';
 import DocumentGuide from './pages/DocumentGuide';
+import ProductionDashboard from './pages/production/ProductionDashboard';
+import FermentationSchedule from './pages/production/FermentationSchedule';
+import ProductionOrders from './pages/production/ProductionOrders';
+import PouringSchedule from './pages/production/PouringSchedule';
+import ProductionTaskboard from './pages/production/ProductionTaskboard';
+import BOMs from './pages/production/BOMs';
 import useWebSocket from './hooks/useWebSocket';
 import AccessDenied from "./components/AccessDenied";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -106,9 +112,19 @@ export default function App() {
   const navGroups = [
     { items: [
       { to: '/my-tasks', icon: LayoutDashboard, label: 'My Dashboard', end: true },
-      { to: isOperator ? '/overview' : '/', icon: Home, label: 'QMS Overview', end: !isOperator },
+      { to: isOperator ? '/overview' : '/', icon: Home, label: 'Overview', end: !isOperator },
     ] },
-    { label: 'Quality & Compliance',
+    { label: '🏭 Production',
+      items: [
+        { to: '/production', icon: Factory, label: 'Production Dashboard' },
+        { to: '/production/fermentation', icon: Beaker, label: 'Fermentation' },
+        { to: '/production/orders', icon: ClipboardList, label: 'Production Orders' },
+        { to: '/production/pouring', icon: Droplets, label: 'Pouring' },
+        { to: '/production/taskboard', icon: ListTodo, label: 'Production Tasks' },
+        { to: '/production/boms', icon: FileSpreadsheet, label: 'BOMs / Recipes' },
+      ]
+    },
+    { label: '📋 Quality',
       items: [
         { to: '/document-guide', icon: HelpCircle, label: 'Document Guide' },
         { to: '/complaints', icon: AlertCircle, label: 'Complaints' },
@@ -116,10 +132,6 @@ export default function App() {
         { to: '/deviations', icon: AlertOctagon, label: 'Deviations' },
         { to: '/capas', icon: ShieldCheck, label: 'CAPAs' },
         { to: '/change-requests', icon: GitPullRequest, label: 'Change Control' },
-      ]
-    },
-    { label: 'Production',
-      items: [
         { to: '/batch-testing', icon: FlaskConical, label: 'Batch Testing' },
         { to: '/equipment', icon: Cog, label: 'Equipment' },
         { to: '/maintenance', icon: Wrench, label: 'Maintenance' },
@@ -245,6 +257,12 @@ export default function App() {
           <Routes>
             <Route path="/" element={user.role === 'operator' ? <OperatorDashboard /> : <Dashboard />} />
             <Route path="/overview" element={<Dashboard />} />
+            <Route path="/production" element={<ProductionDashboard />} />
+            <Route path="/production/fermentation" element={<FermentationSchedule />} />
+            <Route path="/production/orders" element={<ProductionOrders />} />
+            <Route path="/production/pouring" element={<PouringSchedule />} />
+            <Route path="/production/taskboard" element={<ProductionTaskboard />} />
+            <Route path="/production/boms" element={<BOMs />} />
             <Route path="/sops" element={<SOPLibrary />} />
             <Route path="/sops/:id" element={<SOPDetail />} />
             <Route path="/document-guide" element={<DocumentGuide />} />
