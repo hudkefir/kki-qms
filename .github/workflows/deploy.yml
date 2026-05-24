@@ -34,6 +34,7 @@ jobs:
             --source . \
             --region ${{ env.REGION }} \
             --project ${{ env.PROJECT_ID }} \
+            --port 8080 \
             --allow-unauthenticated \
             --quiet
 
