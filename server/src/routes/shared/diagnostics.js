@@ -136,4 +136,44 @@ router.post('/admin/smoke-test', async (req, res) => {
   }
 });
 
+// ─── GET /api/admin/backup-status ───────────────────────────────────────────
+// Returns the latest backup status from the local status file written by backup.py.
+// The backup script runs hourly on the Mac mini and writes /tmp/kki-backup-status.json.
+// In Cloud Run, this endpoint returns the last known status from GCS metadata instead.
+router.get('/admin/backup-status', async (req, res) => {
+  try {
+    // Try local status file first (works on Mac mini / local dev)
+    const fs = await import('fs');
+    const statusPath = '/tmp/kki-backup-status.json';
+
+    if (fs.existsSync(statusPath)) {
+      const raw = fs.readFileSync(statusPath, 'utf-8');
+      const status = JSON.parse(raw);
+
+      // Calculate age
+      const backupTime = new Date(status.timestamp);
+      const ageMs = Date.now() - backupTime.getTime();
+      const ageHours = Math.round(ageMs / (1000 * 60 * 60) * 10) / 10;
+
+      return res.json({
+        ...status,
+        age_hours: ageHours,
+        stale: ageHours > 2, // Flag if backup is older than 2 hours
+        source: 'local_status_file',
+      });
+    }
+
+    // Fallback: check GCS for latest backup (Cloud Run environment)
+    // This would require gcloud or Supabase storage — for now return unknown
+    res.json({
+      success: null,
+      message: 'No local backup status file found. Backup runs on the Mac mini.',
+      source: 'none',
+    });
+  } catch (err) {
+    console.error('Backup status error:', err);
+    res.status(500).json({ error: 'Failed to read backup status', message: err.message });
+  }
+});
+
 export default router;
