@@ -62,12 +62,13 @@ jobs:
           echo "✅ Health check passed (HTTP 200)"
 
       - name: Post-deploy write verification
-        if: ${{ secrets.QMS_DEPLOY_KEY != '' }}
+        env:
+          QMS_DEPLOY_KEY: ${{ secrets.QMS_DEPLOY_KEY }}
         run: |
           echo "Running deploy verification (DB write test)..."
           RESPONSE=$(curl -s -w '\n%{http_code}' \
             -X POST \
-            -H "x-deploy-key: ${{ secrets.QMS_DEPLOY_KEY }}" \
+            -H "x-deploy-key: $QMS_DEPLOY_KEY" \
             "${{ steps.url.outputs.url }}/api/deploy-verify")
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
