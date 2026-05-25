@@ -80,14 +80,29 @@ export async function runSmokeTests(baseUrl, sessionCookie = null) {
       const authDenied = requiresAuth && response.status === 401;
 
       if (statusOk) {
+        // Response body validation — check it's valid JSON with data
+        let bodyWarning = null;
+        try {
+          const body = await response.clone().json();
+          if (Array.isArray(body) && body.length === 0 && !path.includes('health')) {
+            bodyWarning = 'Empty array response — table may have no data';
+          } else if (body.error) {
+            bodyWarning = `Response contains error: ${body.error}`;
+          }
+        } catch {
+          // Not JSON or parse error — might be OK for some endpoints
+        }
+
         passed++;
-        results.push({
+        const result = {
           endpoint: `${method} ${path}`,
           description,
-          status: 'pass',
+          status: bodyWarning ? 'warn' : 'pass',
           http_status: response.status,
           response_time_ms: Date.now() - startTime,
-        });
+        };
+        if (bodyWarning) result.warning = bodyWarning;
+        results.push(result);
       } else if (authDenied && sessionCookie) {
         // We had a cookie but got 401 — session may be invalid
         failed++;

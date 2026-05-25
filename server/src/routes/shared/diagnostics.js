@@ -176,4 +176,96 @@ router.get('/admin/backup-status', async (req, res) => {
   }
 });
 
+// ─── POST /api/deploy-verify ────────────────────────────────────────────────
+// Post-deploy write test. Inserts a row, reads it back, deletes it.
+// Protected by API key (QMS_DEPLOY_KEY), not session auth, so CI can call it.
+// Returns { status: 'pass'|'fail', checks: [...] }
+router.post('/deploy-verify', async (req, res) => {
+  // Auth via API key (skip normal session auth)
+  const apiKey = req.headers['x-deploy-key'] || req.query.key;
+  const expectedKey = process.env.QMS_DEPLOY_KEY;
+
+  if (!expectedKey || apiKey !== expectedKey) {
+    return res.status(401).json({ error: 'Invalid or missing deploy key' });
+  }
+
+  const checks = [];
+  let allPassed = true;
+
+  // Check 1: Health endpoint
+  try {
+    await checkDbHealth();
+    checks.push({ name: 'db_health', status: 'pass' });
+  } catch (err) {
+    checks.push({ name: 'db_health', status: 'fail', error: err.message });
+    allPassed = false;
+  }
+
+  // Check 2: Write test — insert, read, delete
+  try {
+    const testId = `deploy-verify-${Date.now()}`;
+    
+    // Create _deploy_checks table if needed
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS _deploy_checks (
+        id TEXT PRIMARY KEY,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Insert
+    await db.run('INSERT INTO _deploy_checks (id) VALUES (?)', [testId]);
+
+    // Read back
+    const row = await db.get('SELECT id FROM _deploy_checks WHERE id = ?', [testId]);
+    if (!row || row.id !== testId) {
+      throw new Error('Write verification failed: inserted row not found on read-back');
+    }
+
+    // Delete
+    await db.run('DELETE FROM _deploy_checks WHERE id = ?', [testId]);
+
+    checks.push({ name: 'write_test', status: 'pass' });
+  } catch (err) {
+    checks.push({ name: 'write_test', status: 'fail', error: err.message });
+    allPassed = false;
+  }
+
+  // Check 3: Core tables have data
+  try {
+    const coreTables = ['sops', 'users', 'audit_logs'];
+    const counts = {};
+    for (const table of coreTables) {
+      const row = await db.get(`SELECT COUNT(*) AS c FROM ${table}`);
+      counts[table] = row?.c ?? 0;
+    }
+    const empty = Object.entries(counts).filter(([, c]) => c === 0).map(([t]) => t);
+    if (empty.length > 0) {
+      checks.push({ name: 'core_data', status: 'warn', message: `Empty tables: ${empty.join(', ')}`, counts });
+    } else {
+      checks.push({ name: 'core_data', status: 'pass', counts });
+    }
+  } catch (err) {
+    checks.push({ name: 'core_data', status: 'fail', error: err.message });
+    allPassed = false;
+  }
+
+  // Check 4: Migration tracking
+  try {
+    const row = await db.get('SELECT COUNT(*) AS c FROM schema_migrations WHERE success = true');
+    checks.push({ name: 'migrations', status: 'pass', applied: row?.c ?? 0 });
+  } catch (err) {
+    checks.push({ name: 'migrations', status: 'fail', error: err.message });
+    allPassed = false;
+  }
+
+  const status = allPassed ? 'pass' : 'fail';
+  res.status(allPassed ? 200 : 503).json({
+    status,
+    timestamp: new Date().toISOString(),
+    revision: process.env.K_REVISION || 'unknown',
+    checks,
+  });
+});
+
 export default router;

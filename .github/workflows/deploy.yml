@@ -38,10 +38,46 @@ jobs:
             --allow-unauthenticated \
             --quiet
 
-      - name: Show deployment URL
+      - name: Get deployment URL
+        id: url
         run: |
           URL=$(gcloud run services describe ${{ env.SERVICE }} \
             --region ${{ env.REGION }} \
             --project ${{ env.PROJECT_ID }} \
             --format 'value(status.url)')
+          echo "url=$URL" >> $GITHUB_OUTPUT
           echo "Deployed to: $URL"
+
+      - name: Post-deploy health check
+        run: |
+          echo "Waiting 10s for new revision to stabilize..."
+          sleep 10
+          echo "Checking health endpoint..."
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.url.outputs.url }}/api/health")
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ Health check failed (HTTP $STATUS)"
+            curl -s "${{ steps.url.outputs.url }}/api/health" || true
+            exit 1
+          fi
+          echo "✅ Health check passed (HTTP 200)"
+
+      - name: Post-deploy write verification
+        if: ${{ secrets.QMS_DEPLOY_KEY != '' }}
+        run: |
+          echo "Running deploy verification (DB write test)..."
+          RESPONSE=$(curl -s -w '\n%{http_code}' \
+            -X POST \
+            -H "x-deploy-key: ${{ secrets.QMS_DEPLOY_KEY }}" \
+            "${{ steps.url.outputs.url }}/api/deploy-verify")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          
+          echo "Response (HTTP $HTTP_CODE):"
+          echo "$BODY" | python3 -m json.tool 2>/dev/null || echo "$BODY"
+          
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Deploy verification FAILED"
+            exit 1
+          fi
+          echo "✅ Deploy verification passed — write test OK"

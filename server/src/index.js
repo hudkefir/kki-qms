@@ -142,6 +142,9 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// Deploy verification (API key auth — called by CI/CD after deploy)
+app.post('/api/deploy-verify', diagnosticsRoutes);
+
 // Version endpoint (public — for frontend footer)
 app.get('/api/version', (req, res) => {
   res.json(versionInfo);
