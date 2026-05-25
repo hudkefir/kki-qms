@@ -180,7 +180,12 @@ router.get('/admin/backup-status', async (req, res) => {
 // Post-deploy write test. Inserts a row, reads it back, deletes it.
 // Protected by API key (QMS_DEPLOY_KEY), not session auth, so CI can call it.
 // Returns { status: 'pass'|'fail', checks: [...] }
-router.post('/deploy-verify', async (req, res) => {
+// Export as standalone handler for direct mounting (bypasses requireAuth)
+export async function deployVerifyHandler(req, res) {
+  return _deployVerify(req, res);
+}
+
+async function _deployVerify(req, res) {
   // Auth via API key (skip normal session auth)
   const apiKey = req.headers['x-deploy-key'] || req.query.key;
   const expectedKey = process.env.QMS_DEPLOY_KEY;
@@ -266,6 +271,8 @@ router.post('/deploy-verify', async (req, res) => {
     revision: process.env.K_REVISION || 'unknown',
     checks,
   });
-});
+}
+
+router.post('/deploy-verify', _deployVerify);
 
 export default router;
