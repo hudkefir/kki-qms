@@ -21,6 +21,8 @@ export { default as printRoutes } from './quality/print.js';
 export { default as inventoryRoutes } from './inventory/stock.js';
 export { default as pickListRoutes } from './inventory/picks.js';
 export { default as sosRoutes } from './inventory/sos.js';
+export { default as itemRoutes } from './inventory/items.js';
+export { default as lotRoutes } from './inventory/lots.js';
 
 // documents
 export { default as documentRoutes } from './documents/documents.js';
