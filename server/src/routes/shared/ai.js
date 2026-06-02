@@ -636,7 +636,7 @@ router.post('/ai/chat', async (req, res) => {
     systemPrompt += `\n\nThe current user is: ${userName} (role: ${req.session?.user?.role || 'unknown'})`;
 
     // Stream response via SSE
-    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Chat-Session-Id', sessionKey);
@@ -676,13 +676,13 @@ router.post('/ai/chat', async (req, res) => {
         if (block.type === 'text') {
           fullResponse += block.text;
           assistantContent.push(block);
-          res.write(`data: ${JSON.stringify({ type: 'text', text: block.text })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'text', text: block.text })}\n\n`, 'utf-8');
         } else if (block.type === 'tool_use') {
           hasToolUse = true;
           assistantContent.push(block);
 
           // Notify frontend that a tool is being executed
-          res.write(`data: ${JSON.stringify({ type: 'tool_start', tool: block.name, field: block.input?.field })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'tool_start', tool: block.name, field: block.input?.field })}\n\n`, 'utf-8');
 
           // Execute the tool
           try {
@@ -690,7 +690,7 @@ router.post('/ai/chat', async (req, res) => {
             toolsUsed.push({ tool: block.name, input: block.input, result });
 
             // Send tool result notification to frontend
-            res.write(`data: ${JSON.stringify({ type: 'tool_result', tool: block.name, result })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'tool_result', tool: block.name, result })}\n\n`, 'utf-8');
 
             // Add assistant message with tool use + tool result to conversation
             conversationMessages.push({ role: 'assistant', content: assistantContent });
@@ -705,7 +705,7 @@ router.post('/ai/chat', async (req, res) => {
           } catch (toolErr) {
             console.error('Tool execution error:', toolErr.message);
             const errorResult = { success: false, error: toolErr.message };
-            res.write(`data: ${JSON.stringify({ type: 'tool_result', tool: block.name, result: errorResult })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'tool_result', tool: block.name, result: errorResult })}\n\n`, 'utf-8');
 
             conversationMessages.push({ role: 'assistant', content: assistantContent });
             conversationMessages.push({
@@ -738,14 +738,14 @@ router.post('/ai/chat', async (req, res) => {
         [userId, sessionKey, 'assistant', fullResponse, JSON.stringify(context || {})]
       ).catch(dbErr => console.error('Failed to persist assistant chat message:', dbErr.message));
     }
-    res.write(`data: ${JSON.stringify({ type: 'done', chatSessionId: sessionKey, toolsUsed: toolsUsed.length > 0 ? toolsUsed : undefined })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'done', chatSessionId: sessionKey, toolsUsed: toolsUsed.length > 0 ? toolsUsed : undefined })}\n\n`, 'utf-8');
     res.end();
   } catch (err) {
     console.error('Jarvis chat error:', err.message);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Chat failed: ' + err.message });
     } else {
-      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`, 'utf-8');
       res.end();
     }
   }
