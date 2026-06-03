@@ -20,7 +20,7 @@ function setCache(key, data) {
 // Load SOS credentials from env vars (required on Cloud Run)
 function getSOSConfig() {
   if (process.env.SOS_API_KEY) {
-    return { apiKey: process.env.SOS_API_KEY };
+    return { access_token: process.env.SOS_API_KEY };
   }
   console.error('SOS_API_KEY environment variable not set');
   return null;
