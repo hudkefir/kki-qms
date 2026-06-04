@@ -2242,7 +2242,13 @@ export default function CAPADetail() {
                   {capa.source_type && (
                     <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Source</p>
-                      <p className="text-sm font-semibold text-gray-800">{capa.source_type?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}{capa.source_id ? ` #${capa.source_id}` : ''}</p>
+                      {capa.source_type === 'deviation' && capa.source_id ? (
+                        <p className="text-sm font-semibold text-navy-700 cursor-pointer hover:underline" onClick={() => navigate(`/deviations/${capa.source_id}`)}>
+                          Deviation #{capa.source_id} {capa.source_deviation_report_id ? `(${capa.source_deviation_report_id})` : ''}
+                        </p>
+                      ) : (
+                        <p className="text-sm font-semibold text-gray-800">{capa.source_type?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}{capa.source_id ? ` #${capa.source_id}` : ''}</p>
+                      )}
                     </div>
                   )}
                   {editingField === 'initiated_by' ? (

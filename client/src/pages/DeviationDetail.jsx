@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Edit2, Save, X, Plus, Clock, CheckCircle, AlertTriangle,
-  Shield, FileText, Users, AlertOctagon
+  Shield, FileText, Users, AlertOctagon, History, MessageSquare, Paperclip,
+  Upload, Download, Trash2, Lock, Unlock, Eye, AlertCircle, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { useFetch, apiPut, apiPost } from '../hooks/useApi';
+import { useFetch, apiPut, apiPost, apiDelete } from '../hooks/useApi';
 import RecordLinker from '../components/RecordLinker';
 import { FieldHelp, RecordInfoTooltip, GMP_HELP } from '../components/GmpFieldHelp';
 import AiSuggestButton from '../components/AiSuggestButton';
@@ -58,6 +59,30 @@ export default function DeviationDetail() {
   const [dispositionForm, setDispositionForm] = useState({});
   const [showCapaModal, setShowCapaModal] = useState(false);
   const [capaForm, setCapaForm] = useState({});
+
+  // Feature 1: Audit Trail
+  const { data: auditTrail, refetch: refetchAudit } = useFetch(`/api/deviations/${id}/audit-trail`);
+
+  // Feature 2: Attachments
+  const { data: attachments, refetch: refetchAttachments } = useFetch(`/api/deviations/${id}/attachments`);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [fileDescription, setFileDescription] = useState('');
+
+  // Feature 3: Comments
+  const { data: comments, refetch: refetchComments } = useFetch(`/api/deviations/${id}/comments`);
+  const [newComment, setNewComment] = useState('');
+  const [postingComment, setPostingComment] = useState(false);
+
+  // Feature 4: Approvals
+  const { data: approvals, refetch: refetchApprovals } = useFetch(`/api/deviations/${id}/approvals`);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [approvalAction, setApprovalAction] = useState(null); // { type: 'request' | 'approve' | 'reject', approvalType?, approvalId? }
+  const [approvalForm, setApprovalForm] = useState({ signature_meaning: '', password: '', rejection_reason: '' });
+
+  // Feature 5: Similar Deviations
+  const { data: similarDeviations } = useFetch(`/api/deviations/${id}/similar`);
+  const [showSimilar, setShowSimilar] = useState(false);
 
   const openCapaModal = () => {
     const affBatches = Array.isArray(dev.affected_batches) ? dev.affected_batches : JSON.parse(dev.affected_batches || '[]');
@@ -197,12 +222,18 @@ export default function DeviationDetail() {
   const linkedBatchTests = dev.linked_batch_tests || [];
   const linkedCount = linkedComplaints.length + linkedSops.length + linkedBatchTests.length;
 
+  const attachmentCount = (attachments || []).length;
+  const commentCount = (comments || []).length;
+
   const tabs = [
     { id: 'overview', label: 'What Happened' },
     { id: 'linked', label: `Linked Records (${linkedCount})` },
     { id: 'investigation', label: 'Investigation' },
     { id: 'disposition', label: 'Disposition' },
     { id: 'capas', label: `CAPAs (${capas.length})` },
+    { id: 'attachments', label: `Attachments (${attachmentCount})` },
+    { id: 'comments', label: `Comments (${commentCount})` },
+    { id: 'audit', label: 'Audit Trail' },
   ];
 
   return (
@@ -289,8 +320,110 @@ export default function DeviationDetail() {
         )}
       </div>
 
+      {/* ── Feature 5: Similar Deviations Alert ── */}
+      {similarDeviations && similarDeviations.length > 0 && (
+        <div className={`rounded-xl shadow-sm border p-4 mb-6 ${
+          similarDeviations.length >= 3 ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'
+        }`}>
+          <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowSimilar(!showSimilar)}>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className={`w-5 h-5 ${similarDeviations.length >= 3 ? 'text-red-600' : 'text-amber-600'}`} />
+              <span className={`font-medium text-sm ${similarDeviations.length >= 3 ? 'text-red-800' : 'text-amber-800'}`}>
+                {similarDeviations.length >= 3
+                  ? `Recurring pattern detected -- ${similarDeviations.length} similar deviations in 90 days. Consider CAPA.`
+                  : `${similarDeviations.length} similar deviation${similarDeviations.length > 1 ? 's' : ''} found in the last 90 days`
+                }
+              </span>
+            </div>
+            {showSimilar ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+          </div>
+          {showSimilar && (
+            <div className="mt-3 space-y-2">
+              {similarDeviations.map(sd => (
+                <Link key={sd.id} to={`/deviations/${sd.id}`} className="block p-3 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-sm font-medium text-navy-700">{sd.report_id}</span>
+                      <span className="text-sm text-gray-700 ml-2">{sd.title}</span>
+                    </div>
+                    <DevStatusBadge status={sd.status} />
+                  </div>
+                  <div className="flex items-center gap-3 mt-1">
+                    <span className="text-xs text-gray-500">{sd.discovered_at || sd.created_at}</span>
+                    {sd.similarity_reasons && sd.similarity_reasons.map((reason, i) => (
+                      <span key={i} className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">{reason}</span>
+                    ))}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Feature 4: Approval Status ── */}
+      {approvals && approvals.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <Lock className="w-4 h-4" /> Approval Status
+          </h3>
+          <div className="flex gap-4">
+            {['investigation', 'disposition', 'closure'].map(aType => {
+              const approval = (approvals || []).find(a => a.approval_type === aType);
+              const statusStyles = {
+                pending: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+                approved: 'bg-green-100 text-green-700 border-green-200',
+                rejected: 'bg-red-100 text-red-700 border-red-200',
+              };
+              return (
+                <div key={aType} className="flex-1 text-center">
+                  <p className="text-xs font-medium text-gray-500 uppercase mb-1">{aType}</p>
+                  {approval ? (
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${statusStyles[approval.status]}`}>
+                      {approval.status === 'approved' && <CheckCircle className="w-3 h-3 mr-1" />}
+                      {approval.status === 'rejected' && <X className="w-3 h-3 mr-1" />}
+                      {approval.status === 'pending' && <Clock className="w-3 h-3 mr-1" />}
+                      {approval.status.charAt(0).toUpperCase() + approval.status.slice(1)}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-gray-400">Not requested</span>
+                  )}
+                  {approval && approval.approved_by && (
+                    <p className="text-xs text-gray-400 mt-1">by {approval.approved_by}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Request / Approve / Reject buttons */}
+          <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
+            {!approvals?.find(a => a.approval_type === 'investigation') && dev.root_cause && (
+              <button onClick={() => { setApprovalAction({ type: 'request', approvalType: 'investigation' }); setShowApprovalModal(true); }}
+                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs hover:bg-blue-700">Request Investigation Approval</button>
+            )}
+            {!approvals?.find(a => a.approval_type === 'disposition') && dev.product_disposition && (
+              <button onClick={() => { setApprovalAction({ type: 'request', approvalType: 'disposition' }); setShowApprovalModal(true); }}
+                className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs hover:bg-purple-700">Request Disposition Approval</button>
+            )}
+            {!approvals?.find(a => a.approval_type === 'closure') && dev.status !== 'closed' && approvals?.find(a => a.approval_type === 'disposition' && a.status === 'approved') && (
+              <button onClick={() => { setApprovalAction({ type: 'request', approvalType: 'closure' }); setShowApprovalModal(true); }}
+                className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs hover:bg-green-700">Request Closure Approval</button>
+            )}
+            {approvals?.filter(a => a.status === 'pending').map(a => (
+              <div key={a.id} className="flex gap-1">
+                <button onClick={() => { setApprovalAction({ type: 'approve', approvalId: a.id, approvalType: a.approval_type }); setApprovalForm({ signature_meaning: '', password: '' }); setShowApprovalModal(true); }}
+                  className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs hover:bg-green-700 flex items-center gap-1"><Unlock className="w-3 h-3" /> Approve {a.approval_type}</button>
+                <button onClick={() => { setApprovalAction({ type: 'reject', approvalId: a.id, approvalType: a.approval_type }); setApprovalForm({ rejection_reason: '', password: '' }); setShowApprovalModal(true); }}
+                  className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs hover:bg-red-700 flex items-center gap-1"><X className="w-3 h-3" /> Reject</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1">
+      <div className="flex flex-wrap gap-1 mb-6 bg-gray-100 rounded-lg p-1">
         {tabs.map(tab => (
           <button
             key={tab.id}
@@ -736,6 +869,241 @@ export default function DeviationDetail() {
         </div>
       )}
 
+      {/* ── Feature 1: Audit Trail Tab ── */}
+      {activeTab === 'audit' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <History className="w-5 h-5 text-gray-500" /> Change History
+          </h2>
+          {(!auditTrail || auditTrail.length === 0) ? (
+            <p className="text-sm text-gray-400">No audit entries recorded yet</p>
+          ) : (
+            <div className="relative">
+              <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
+              <div className="space-y-6">
+                {auditTrail.map((entry) => {
+                  const initials = (entry.username || '??').slice(0, 2).toUpperCase();
+                  let oldVals = {};
+                  let newVals = {};
+                  try { oldVals = typeof entry.old_values === 'string' ? JSON.parse(entry.old_values) : (entry.old_values || {}); } catch(e) {}
+                  try { newVals = typeof entry.new_values === 'string' ? JSON.parse(entry.new_values) : (entry.new_values || {}); } catch(e) {}
+                  const changedFields = Object.keys(newVals).filter(k => k !== 'undefined');
+
+                  return (
+                    <div key={entry.id} className="relative pl-10">
+                      <div className="absolute left-2 w-5 h-5 rounded-full bg-navy-800 text-white text-[9px] font-bold flex items-center justify-center z-10">
+                        {initials}
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium text-gray-900">
+                            {entry.action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                          </span>
+                          <span className="text-xs text-gray-400">
+                            {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ''}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mb-1">by {entry.username}</p>
+                        {changedFields.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {changedFields.map(field => (
+                              <div key={field} className="text-xs">
+                                <span className="font-medium text-gray-600">{field}:</span>
+                                {oldVals[field] !== undefined && (
+                                  <span className="text-red-500 line-through ml-1">{String(oldVals[field]).substring(0, 80)}</span>
+                                )}
+                                <span className="text-green-600 ml-1">{String(newVals[field]).substring(0, 80)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Feature 2: Attachments Tab ── */}
+      {activeTab === 'attachments' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <Paperclip className="w-5 h-5 text-gray-500" /> Attachments & Evidence
+            </h2>
+
+            {/* Upload dropzone */}
+            <div
+              className={`border-2 border-dashed rounded-lg p-6 text-center mb-4 transition-colors ${
+                dragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+              }`}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={async (e) => {
+                e.preventDefault();
+                setDragOver(false);
+                const file = e.dataTransfer.files[0];
+                if (!file) return;
+                setUploadingFile(true);
+                try {
+                  const fd = new FormData();
+                  fd.append('file', file);
+                  fd.append('description', fileDescription);
+                  await apiPost(`/api/deviations/${id}/attachments`, fd);
+                  setFileDescription('');
+                  refetchAttachments();
+                } catch (err) { alert('Upload error: ' + err.message); }
+                finally { setUploadingFile(false); }
+              }}
+            >
+              <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+              <p className="text-sm text-gray-500 mb-2">Drag & drop a file here, or click to browse</p>
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+                className="hidden"
+                id="dev-file-input"
+                onChange={async (e) => {
+                  const file = e.target.files[0];
+                  if (!file) return;
+                  setUploadingFile(true);
+                  try {
+                    const fd = new FormData();
+                    fd.append('file', file);
+                    fd.append('description', fileDescription);
+                    await apiPost(`/api/deviations/${id}/attachments`, fd);
+                    setFileDescription('');
+                    refetchAttachments();
+                    e.target.value = '';
+                  } catch (err) { alert('Upload error: ' + err.message); }
+                  finally { setUploadingFile(false); }
+                }}
+              />
+              <label htmlFor="dev-file-input" className="px-4 py-2 bg-navy-800 text-white rounded-lg text-sm cursor-pointer hover:bg-navy-700">
+                {uploadingFile ? 'Uploading...' : 'Choose File'}
+              </label>
+              <p className="text-xs text-gray-400 mt-2">PDF, DOC, DOCX, XLS, XLSX, JPG, PNG (max 10MB)</p>
+            </div>
+
+            {/* File list */}
+            {(!attachments || attachments.length === 0) ? (
+              <p className="text-sm text-gray-400">No files attached yet</p>
+            ) : (
+              <div className="space-y-2">
+                {attachments.map(att => {
+                  const isImage = /\.(jpg|jpeg|png|gif)$/i.test(att.original_name);
+                  const sizeKB = att.file_size ? (att.file_size / 1024).toFixed(1) + ' KB' : '';
+                  return (
+                    <div key={att.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                      {isImage ? (
+                        <img src={`/api/deviations/${id}/attachments/${att.id}/download`} alt={att.original_name} className="w-12 h-12 object-cover rounded border border-gray-200" />
+                      ) : (
+                        <div className="w-12 h-12 bg-gray-200 rounded flex items-center justify-center">
+                          <FileText className="w-6 h-6 text-gray-500" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{att.original_name}</p>
+                        <p className="text-xs text-gray-500">{sizeKB} &middot; {att.uploaded_by} &middot; {att.created_at ? new Date(att.created_at).toLocaleDateString() : ''}</p>
+                        {att.description && <p className="text-xs text-gray-400 mt-0.5">{att.description}</p>}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <a href={`/api/deviations/${id}/attachments/${att.id}/download`} download className="p-1.5 text-gray-500 hover:text-blue-600 rounded hover:bg-blue-50">
+                          <Download className="w-4 h-4" />
+                        </a>
+                        <button onClick={async () => {
+                          if (!confirm('Delete this attachment?')) return;
+                          try { await apiDelete(`/api/deviations/${id}/attachments/${att.id}`); refetchAttachments(); }
+                          catch (err) { alert('Error: ' + err.message); }
+                        }} className="p-1.5 text-gray-500 hover:text-red-600 rounded hover:bg-red-50">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Feature 3: Comments Tab ── */}
+      {activeTab === 'comments' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <MessageSquare className="w-5 h-5 text-gray-500" /> Comments & Activity
+          </h2>
+
+          {/* Comment list (oldest first, chat-style) */}
+          <div className="space-y-3 mb-4 max-h-96 overflow-y-auto">
+            {(!comments || comments.length === 0) ? (
+              <p className="text-sm text-gray-400 text-center py-4">No comments yet. Start the conversation.</p>
+            ) : (
+              comments.map(c => {
+                const isSystem = c.comment_type === 'system' || c.comment_type === 'status_change';
+                const initials = (c.author || '??').slice(0, 2).toUpperCase();
+                return (
+                  <div key={c.id} className={`flex gap-3 ${isSystem ? 'justify-center' : ''}`}>
+                    {isSystem ? (
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-full">
+                        <AlertCircle className="w-3 h-3 text-gray-400" />
+                        <span className="text-xs text-gray-500 italic">{c.content}</span>
+                        <span className="text-xs text-gray-400">{c.created_at ? new Date(c.created_at).toLocaleString() : ''}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="w-8 h-8 rounded-full bg-navy-800 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
+                          {initials}
+                        </div>
+                        <div className="flex-1 bg-gray-50 rounded-lg p-3 border border-gray-100">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-sm font-medium text-gray-900">{c.author}</span>
+                            <span className="text-xs text-gray-400">{c.created_at ? new Date(c.created_at).toLocaleString() : ''}</span>
+                          </div>
+                          <p className="text-sm text-gray-700 whitespace-pre-wrap">{c.content}</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* New comment input */}
+          <div className="border-t border-gray-200 pt-4">
+            <textarea
+              rows={3}
+              value={newComment}
+              onChange={e => setNewComment(e.target.value)}
+              placeholder="Add a comment..."
+              className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2 mb-2"
+            />
+            <div className="flex justify-end">
+              <button
+                disabled={!newComment.trim() || postingComment}
+                onClick={async () => {
+                  setPostingComment(true);
+                  try {
+                    await apiPost(`/api/deviations/${id}/comments`, { content: newComment.trim() });
+                    setNewComment('');
+                    refetchComments();
+                  } catch (err) { alert('Error: ' + err.message); }
+                  finally { setPostingComment(false); }
+                }}
+                className="px-4 py-2 bg-navy-800 text-white rounded-lg text-sm hover:bg-navy-700 disabled:opacity-50"
+              >
+                {postingComment ? 'Posting...' : 'Post Comment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Classify Modal */}
       <Modal isOpen={showClassifyModal} onClose={() => setShowClassifyModal(false)} title="Classify Deviation">
         <form onSubmit={handleClassify} className="space-y-4">
@@ -838,6 +1206,75 @@ export default function DeviationDetail() {
           <div className="flex justify-end gap-3">
             <button type="button" onClick={() => setShowCapaModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">Cancel</button>
             <button type="submit" className="px-4 py-2 bg-navy-800 text-white rounded-lg text-sm">Create CAPA</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── Feature 4: Approval Modal ── */}
+      <Modal isOpen={showApprovalModal} onClose={() => { setShowApprovalModal(false); setApprovalAction(null); }} title={
+        approvalAction?.type === 'request' ? `Request ${approvalAction.approvalType} Approval`
+        : approvalAction?.type === 'approve' ? `Approve ${approvalAction?.approvalType}`
+        : `Reject ${approvalAction?.approvalType}`
+      }>
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            if (approvalAction.type === 'request') {
+              await apiPost(`/api/deviations/${id}/approvals`, { approval_type: approvalAction.approvalType });
+            } else {
+              const body = {
+                status: approvalAction.type === 'approve' ? 'approved' : 'rejected',
+                password: approvalForm.password,
+                signature_meaning: approvalForm.signature_meaning,
+              };
+              if (approvalAction.type === 'reject') body.rejection_reason = approvalForm.rejection_reason;
+              await apiPut(`/api/deviations/${id}/approvals/${approvalAction.approvalId}`, body);
+            }
+            setShowApprovalModal(false);
+            setApprovalAction(null);
+            setApprovalForm({});
+            refetchApprovals();
+            refetch();
+          } catch (err) { alert('Error: ' + err.message); }
+        }} className="space-y-4">
+          {approvalAction?.type === 'request' && (
+            <p className="text-sm text-gray-600">
+              This will request approval for the <strong>{approvalAction.approvalType}</strong> stage of this deviation.
+            </p>
+          )}
+          {(approvalAction?.type === 'approve' || approvalAction?.type === 'reject') && (
+            <>
+              {approvalAction?.type === 'approve' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Signature Meaning *</label>
+                  <input type="text" required value={approvalForm.signature_meaning || ''} onChange={e => setApprovalForm({ ...approvalForm, signature_meaning: e.target.value })}
+                    placeholder="e.g., I approve this investigation is complete and accurate"
+                    className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                </div>
+              )}
+              {approvalAction?.type === 'reject' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Rejection Reason *</label>
+                  <textarea rows={3} required value={approvalForm.rejection_reason || ''} onChange={e => setApprovalForm({ ...approvalForm, rejection_reason: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Password (e-signature) *</label>
+                <input type="password" required value={approvalForm.password || ''} onChange={e => setApprovalForm({ ...approvalForm, password: e.target.value })}
+                  placeholder="Re-enter your password to sign"
+                  className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+                <p className="text-xs text-gray-400 mt-1">Your password serves as your electronic signature per 21 CFR Part 11</p>
+              </div>
+            </>
+          )}
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={() => { setShowApprovalModal(false); setApprovalAction(null); }} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">Cancel</button>
+            <button type="submit" className={`px-4 py-2 text-white rounded-lg text-sm ${
+              approvalAction?.type === 'reject' ? 'bg-red-600 hover:bg-red-700' : 'bg-navy-800 hover:bg-navy-700'
+            }`}>
+              {approvalAction?.type === 'request' ? 'Submit Request' : approvalAction?.type === 'approve' ? 'Sign & Approve' : 'Reject'}
+            </button>
           </div>
         </form>
       </Modal>

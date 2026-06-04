@@ -5,11 +5,23 @@ import { requireWriteAccess, requireRole, requireContentAccess } from '../../aut
 import { logAudit } from '../../auditMiddleware.js';
 import { sanitizeBody } from '../../sanitize.js';
 import multer from 'multer';
+import bcrypt from 'bcryptjs';
 import { uploadFile, downloadFile, deleteFile } from '../../supabase.js';
 
 const capaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const allowed = /pdf|doc|docx|xls|xlsx|jpg|jpeg|png|gif/;
+    const ext = file.originalname.split('.').pop().toLowerCase();
+    if (allowed.test(ext)) { cb(null, true); }
+    else { cb(new Error('File type not allowed. Accepted: PDF, DOC, DOCX, XLS, XLSX, JPG, PNG')); }
+  }
+});
+
+const deviationUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = /pdf|doc|docx|xls|xlsx|jpg|jpeg|png|gif/;
     const ext = file.originalname.split('.').pop().toLowerCase();
@@ -299,6 +311,22 @@ router.delete('/change-requests/:id', requireRole('admin'), async (req, res) => 
 
 // ==================== DEVIATION REPORTS ====================
 
+// GET /api/deviations/:id/audit-trail
+router.get('/deviations/:id/audit-trail', async (req, res) => {
+  try {
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+    if (!dev) return res.status(404).json({ error: 'Deviation not found' });
+
+    const logs = await db.all(
+      "SELECT * FROM audit_logs WHERE resource_type = 'deviation_reports' AND resource_id = ? ORDER BY timestamp DESC",
+      [String(req.params.id)]
+    );
+    res.json(logs);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/deviations
 router.get('/deviations', async (req, res) => {
   try {
@@ -459,6 +487,10 @@ router.put('/deviations/:id', requireWriteAccess, async (req, res) => {
       }
     }
     logAudit(req, 'update_deviation', 'deviation_reports', req.params.id, dev.report_id, { old_values, new_values: sanitized });
+    // System comment for status changes
+    if (sanitized.status && sanitized.status !== dev.status) {
+      addDeviationSystemComment(req.params.id, `Status changed from ${dev.status} to ${sanitized.status} by ${req.session?.user?.display_name || req.session?.user?.username || 'Unknown'}`);
+    }
     broadcast('deviation_updated', updated);
     res.json(updated);
   } catch (err) {
@@ -494,6 +526,7 @@ router.post('/deviations/:id/classify', requireWriteAccess, async (req, res) => 
 
     const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     logAudit(req, 'classify_deviation', 'deviation_reports', req.params.id, dev.report_id, { new_values: { classification } });
+    addDeviationSystemComment(req.params.id, `Classification set to ${classification} by ${req.session?.user?.display_name || req.session?.user?.username || 'Unknown'}`);
     broadcast('deviation_updated', updated);
     res.json(updated);
   } catch (err) {
@@ -514,6 +547,7 @@ router.post('/deviations/:id/investigate', requireWriteAccess, async (req, res) 
 
     const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     logAudit(req, 'investigate_deviation', 'deviation_reports', req.params.id, dev.report_id, { new_values: { root_cause_method, root_cause } });
+    addDeviationSystemComment(req.params.id, `Investigation recorded by ${req.session?.user?.display_name || req.session?.user?.username || 'Unknown'}. Method: ${root_cause_method || 'N/A'}`);
     broadcast('deviation_updated', updated);
     res.json(updated);
   } catch (err) {
@@ -535,11 +569,287 @@ router.post('/deviations/:id/disposition', requireWriteAccess, async (req, res) 
 
     const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     logAudit(req, 'disposition_deviation', 'deviation_reports', req.params.id, dev.report_id, { new_values: { product_disposition } });
+    addDeviationSystemComment(req.params.id, `Product disposition set to ${product_disposition} by ${req.session?.user?.display_name || req.session?.user?.username || 'Unknown'}`);
     broadcast('deviation_updated', updated);
     res.json(updated);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// ── Helper: add a system comment to a deviation ──
+async function addDeviationSystemComment(deviationId, content) {
+  try {
+    await db.run('INSERT INTO deviation_comments (deviation_id, author, content, comment_type) VALUES (?, ?, ?, ?)',
+      [deviationId, 'System', content, 'system']);
+  } catch(e) { console.error('System comment error:', e.message); }
+}
+
+// ==================== DEVIATION ATTACHMENTS ====================
+
+// GET /api/deviations/:id/attachments
+router.get('/deviations/:id/attachments', async (req, res) => {
+  try {
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+    if (!dev) return res.status(404).json({ error: 'Deviation not found' });
+    const rows = await db.all('SELECT * FROM deviation_attachments WHERE deviation_id = ? ORDER BY created_at DESC', [req.params.id]);
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// POST /api/deviations/:id/attachments
+router.post('/deviations/:id/attachments', requireWriteAccess, deviationUpload.single('file'), async (req, res) => {
+  try {
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+    if (!dev) return res.status(404).json({ error: 'Deviation not found' });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = req.file.originalname.split('.').pop();
+    const storageFilename = 'dev-' + req.params.id + '-' + uniqueSuffix + '.' + ext;
+    const storagePath = `deviation-attachments/${req.params.id}/${storageFilename}`;
+    await uploadFile(storagePath, req.file.buffer, req.file.mimetype);
+
+    const uploader = req.session?.user?.display_name || req.session?.user?.username || 'Unknown';
+    const description = req.body.description || '';
+    const result = await db.run(
+      'INSERT INTO deviation_attachments (deviation_id, filename, original_name, file_size, mime_type, uploaded_by, description) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [req.params.id, storagePath, req.file.originalname, req.file.size, req.file.mimetype, uploader, description]
+    );
+
+    const attachment = await db.get('SELECT * FROM deviation_attachments WHERE id = ?', [result.lastInsertRowid]);
+    logAudit(req, 'upload_deviation_attachment', 'deviation_reports', req.params.id, dev.report_id, { filename: req.file.originalname });
+    addDeviationSystemComment(req.params.id, `${uploader} uploaded file: ${req.file.originalname}`);
+    res.status(201).json(attachment);
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/deviations/:id/attachments/:attachmentId/download
+router.get('/deviations/:id/attachments/:attachmentId/download', async (req, res) => {
+  try {
+    const attachment = await db.get('SELECT * FROM deviation_attachments WHERE id = ? AND deviation_id = ?', [req.params.attachmentId, req.params.id]);
+    if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
+
+    const buffer = await downloadFile(attachment.filename);
+    res.setHeader('Content-Type', attachment.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${attachment.original_name}"`);
+    res.send(buffer);
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/deviations/:id/attachments/:attachmentId
+router.delete('/deviations/:id/attachments/:attachmentId', requireWriteAccess, async (req, res) => {
+  try {
+    const attachment = await db.get('SELECT * FROM deviation_attachments WHERE id = ? AND deviation_id = ?', [req.params.attachmentId, req.params.id]);
+    if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
+
+    await db.run('DELETE FROM deviation_attachments WHERE id = ?', [req.params.attachmentId]);
+    try { await deleteFile(attachment.filename); } catch(e) { console.warn('Storage delete error:', e.message); }
+
+    logAudit(req, 'delete_deviation_attachment', 'deviation_reports', req.params.id, null, { filename: attachment.original_name });
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
+});
+
+// ==================== DEVIATION COMMENTS ====================
+
+// GET /api/deviations/:id/comments
+router.get('/deviations/:id/comments', async (req, res) => {
+  try {
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+    if (!dev) return res.status(404).json({ error: 'Deviation not found' });
+    const rows = await db.all('SELECT * FROM deviation_comments WHERE deviation_id = ? ORDER BY created_at ASC', [req.params.id]);
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// POST /api/deviations/:id/comments
+router.post('/deviations/:id/comments', requireWriteAccess, async (req, res) => {
+  try {
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+    if (!dev) return res.status(404).json({ error: 'Deviation not found' });
+
+    const { content } = req.body;
+    if (!content || !content.trim()) return res.status(400).json({ error: 'content is required' });
+
+    const author = req.session?.user?.display_name || req.session?.user?.username || 'Unknown';
+    const result = await db.run(
+      'INSERT INTO deviation_comments (deviation_id, author, content, comment_type) VALUES (?, ?, ?, ?)',
+      [req.params.id, author, content.trim(), 'comment']
+    );
+    const comment = await db.get('SELECT * FROM deviation_comments WHERE id = ?', [result.lastInsertRowid]);
+    res.status(201).json(comment);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// ==================== DEVIATION APPROVALS ====================
+
+// GET /api/deviations/:id/approvals
+router.get('/deviations/:id/approvals', async (req, res) => {
+  try {
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+    if (!dev) return res.status(404).json({ error: 'Deviation not found' });
+    const rows = await db.all('SELECT * FROM deviation_approvals WHERE deviation_id = ? ORDER BY created_at ASC', [req.params.id]);
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// POST /api/deviations/:id/approvals — request approval
+router.post('/deviations/:id/approvals', requireWriteAccess, async (req, res) => {
+  try {
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+    if (!dev) return res.status(404).json({ error: 'Deviation not found' });
+
+    const { approval_type } = req.body;
+    if (!['investigation', 'disposition', 'closure'].includes(approval_type)) {
+      return res.status(400).json({ error: 'approval_type must be investigation, disposition, or closure' });
+    }
+
+    const requestedBy = req.session?.user?.display_name || req.session?.user?.username || 'Unknown';
+    const result = await db.run(
+      'INSERT INTO deviation_approvals (deviation_id, approval_type, requested_by) VALUES (?, ?, ?)',
+      [req.params.id, approval_type, requestedBy]
+    );
+    const approval = await db.get('SELECT * FROM deviation_approvals WHERE id = ?', [result.lastInsertRowid]);
+
+    addDeviationSystemComment(req.params.id, `${requestedBy} requested ${approval_type} approval`);
+    logAudit(req, 'request_deviation_approval', 'deviation_reports', req.params.id, dev.report_id, { new_values: { approval_type } });
+    res.status(201).json(approval);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// PUT /api/deviations/:id/approvals/:approvalId — approve/reject with e-signature
+router.put('/deviations/:id/approvals/:approvalId', requireWriteAccess, async (req, res) => {
+  try {
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+    if (!dev) return res.status(404).json({ error: 'Deviation not found' });
+
+    const approval = await db.get('SELECT * FROM deviation_approvals WHERE id = ? AND deviation_id = ?', [req.params.approvalId, req.params.id]);
+    if (!approval) return res.status(404).json({ error: 'Approval not found' });
+    if (approval.status !== 'pending') return res.status(400).json({ error: 'Approval already processed' });
+
+    const { status, rejection_reason, password, signature_meaning } = req.body;
+    if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'status must be approved or rejected' });
+    if (!password) return res.status(400).json({ error: 'Password required for e-signature' });
+
+    // Verify password (e-signature)
+    const user = await db.get('SELECT * FROM users WHERE id = ?', [req.session.user.id]);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    const valid = bcrypt.compareSync(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Invalid password — e-signature verification failed' });
+
+    const approvedBy = req.session?.user?.display_name || req.session?.user?.username || '';
+
+    await db.run(
+      'UPDATE deviation_approvals SET status = ?, approved_by = ?, approved_at = CURRENT_TIMESTAMP, rejection_reason = ?, signature_meaning = ? WHERE id = ?',
+      [status, approvedBy, rejection_reason || null, signature_meaning || '', req.params.approvalId]
+    );
+
+    // Auto-advance deviation status on approval
+    if (status === 'approved') {
+      if (approval.approval_type === 'investigation') {
+        await db.run("UPDATE deviation_reports SET status = 'pending_disposition', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
+        addDeviationSystemComment(req.params.id, `Investigation approved by ${approvedBy}. Status advanced to Pending Disposition.`);
+      } else if (approval.approval_type === 'disposition') {
+        await db.run("UPDATE deviation_reports SET status = 'pending_closure', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
+        addDeviationSystemComment(req.params.id, `Disposition approved by ${approvedBy}. Status advanced to Pending Closure.`);
+      } else if (approval.approval_type === 'closure') {
+        await db.run("UPDATE deviation_reports SET status = 'closed', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
+        addDeviationSystemComment(req.params.id, `Closure approved by ${approvedBy}. Deviation closed.`);
+      }
+    } else {
+      addDeviationSystemComment(req.params.id, `${approval.approval_type} rejected by ${approvedBy}: ${rejection_reason || ''}`);
+    }
+
+    logAudit(req, status === 'approved' ? 'approve_deviation' : 'reject_deviation', 'deviation_reports', req.params.id, dev.report_id, { new_values: { approval_type: approval.approval_type, status } });
+    const updated = await db.get('SELECT * FROM deviation_approvals WHERE id = ?', [req.params.approvalId]);
+    broadcast('deviation_updated', await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]));
+    res.json(updated);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// ==================== SIMILAR DEVIATIONS (Feature 5) ====================
+
+// GET /api/deviations/:id/similar
+router.get('/deviations/:id/similar', async (req, res) => {
+  try {
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+    if (!dev) return res.status(404).json({ error: 'Deviation not found' });
+
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const cutoff = ninetyDaysAgo.toISOString();
+
+    // Get all recent deviations except the current one
+    const candidates = await db.all(
+      'SELECT * FROM deviation_reports WHERE id != ? AND created_at >= ? ORDER BY created_at DESC',
+      [req.params.id, cutoff]
+    );
+
+    // Parse current deviation's data
+    const devProducts = (() => { try { return JSON.parse(dev.affected_products || '[]'); } catch(e) { return []; } })();
+    const devBatches = (() => { try { return JSON.parse(dev.affected_batches || '[]'); } catch(e) { return []; } })();
+
+    // Extract keywords from title and description
+    const extractKeywords = (text) => {
+      if (!text) return [];
+      return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 3);
+    };
+    const devKeywords = [...new Set([...extractKeywords(dev.title), ...extractKeywords(dev.description)])];
+
+    const results = [];
+    for (const c of candidates) {
+      const reasons = [];
+      let score = 0;
+
+      // Category match
+      if (dev.category && c.category === dev.category) {
+        reasons.push(`Same category: ${c.category}`);
+        score += 5;
+      }
+
+      // Product overlap
+      const cProducts = (() => { try { return JSON.parse(c.affected_products || '[]'); } catch(e) { return []; } })();
+      const productOverlap = devProducts.filter(p => cProducts.includes(p));
+      if (productOverlap.length > 0) {
+        reasons.push(`Same product: ${productOverlap.join(', ')}`);
+        score += 4;
+      }
+
+      // Location match
+      if (dev.location && c.location && dev.location.toLowerCase() === c.location.toLowerCase()) {
+        reasons.push(`Same location: ${c.location}`);
+        score += 2;
+      }
+
+      // Keyword overlap in title/description
+      const cKeywords = [...new Set([...extractKeywords(c.title), ...extractKeywords(c.description)])];
+      const kwOverlap = devKeywords.filter(kw => cKeywords.includes(kw));
+      if (kwOverlap.length >= 2) {
+        reasons.push(`Keyword match: ${kwOverlap.slice(0, 3).join(', ')}`);
+        score += Math.min(kwOverlap.length, 5);
+      }
+
+      if (score >= 3 && reasons.length > 0) {
+        results.push({
+          id: c.id,
+          report_id: c.report_id,
+          title: c.title,
+          status: c.status,
+          category: c.category,
+          classification: c.classification,
+          discovered_at: c.discovered_at,
+          created_at: c.created_at,
+          similarity_reasons: reasons,
+          score
+        });
+      }
+    }
+
+    // Sort by score descending, limit to 10
+    results.sort((a, b) => b.score - a.score);
+    res.json(results.slice(0, 10));
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ==================== CAPAs ====================
@@ -642,6 +952,17 @@ router.get('/capas/:id', async (req, res) => {
     // Get action items
     capa.action_items = await db.all('SELECT * FROM capa_action_items WHERE capa_id = ? ORDER BY created_at ASC', [capa.id]);
 
+    // Enrich source deviation info for bidirectional link
+    if (capa.source_type === 'deviation' && capa.source_id) {
+      try {
+        const srcDev = await db.get('SELECT report_id, title FROM deviation_reports WHERE id = ?', [capa.source_id]);
+        if (srcDev) {
+          capa.source_deviation_report_id = srcDev.report_id;
+          capa.source_deviation_title = srcDev.title;
+        }
+      } catch(e) {}
+    }
+
     res.json(capa);
   } catch (err) {
     console.error('Get CAPA error:', err);
@@ -691,6 +1012,10 @@ router.post('/capas', requireWriteAccess, async (req, res) => {
 
     const created = await db.get('SELECT * FROM capas WHERE id = ?', [info.lastInsertRowid]);
     logAudit(req, 'create_capa', 'capas', created.id, capa_id, { new_values: { capa_id, title, source_type, source_id, responsible_person } });
+    // Add system comment to the source deviation if applicable
+    if (source_type === 'deviation' && source_id) {
+      addDeviationSystemComment(source_id, `CAPA ${capa_id} created from this deviation by ${req.session?.user?.display_name || req.session?.user?.username || 'Unknown'}`);
+    }
     broadcast('capa_created', created);
     res.status(201).json(created);
   } catch (err) {
