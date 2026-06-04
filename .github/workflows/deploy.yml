@@ -14,12 +14,30 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Generate version.json
+        run: |
+          BUILD_NUM=$(cat .build-number 2>/dev/null || echo "0")
+          BUILD_NUM=$((BUILD_NUM + 1))
+          echo "$BUILD_NUM" > .build-number
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "{\"build\":$BUILD_NUM,\"commit\":\"$COMMIT_HASH\",\"buildTime\":\"$BUILD_TIME\"}" > version.json
+          echo "Build #$BUILD_NUM ($COMMIT_HASH) at $BUILD_TIME"
+
+      - name: Update build number in repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .build-number
+          git commit -m "ci: bump build number to $(cat .build-number)" || true
+          git push || true
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2

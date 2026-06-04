@@ -708,7 +708,7 @@ export default function DeviationDetail() {
       </Modal>
 
       {/* Investigate Modal */}
-      <Modal isOpen={showInvestigateModal} onClose={() => setShowInvestigateModal(false)} title="Record Investigation">
+      <Modal isOpen={showInvestigateModal} onClose={() => setShowInvestigateModal(false)} title="Record Investigation" size="lg">
         <form onSubmit={handleInvestigate} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Root Cause Method</label>
@@ -724,11 +724,11 @@ export default function DeviationDetail() {
               <label className="block text-sm font-medium text-gray-700">Root Cause</label>
               <AiSuggestButton field="root_cause" recordType="deviation" context={{ ...dev, ...investigateForm }} onSuggestion={(text) => setInvestigateForm({ ...investigateForm, root_cause: text })} />
             </div>
-            <textarea rows={3} value={investigateForm.root_cause || ''} onChange={e => setInvestigateForm({ ...investigateForm, root_cause: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+            <textarea rows={8} value={investigateForm.root_cause || ''} onChange={e => setInvestigateForm({ ...investigateForm, root_cause: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Scope Assessment</label>
-            <textarea rows={2} value={investigateForm.scope_assessment || ''} onChange={e => setInvestigateForm({ ...investigateForm, scope_assessment: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+            <textarea rows={5} value={investigateForm.scope_assessment || ''} onChange={e => setInvestigateForm({ ...investigateForm, scope_assessment: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
           </div>
           <div className="flex justify-end gap-3">
             <button type="button" onClick={() => setShowInvestigateModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">Cancel</button>
@@ -738,7 +738,7 @@ export default function DeviationDetail() {
       </Modal>
 
       {/* Disposition Modal */}
-      <Modal isOpen={showDispositionModal} onClose={() => setShowDispositionModal(false)} title="Set Product Disposition">
+      <Modal isOpen={showDispositionModal} onClose={() => setShowDispositionModal(false)} title="Set Product Disposition" size="lg">
         <form onSubmit={handleDisposition} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Disposition *</label>
@@ -749,7 +749,7 @@ export default function DeviationDetail() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Rationale</label>
-            <textarea rows={3} value={dispositionForm.disposition_rationale || ''} onChange={e => setDispositionForm({ ...dispositionForm, disposition_rationale: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+            <textarea rows={6} value={dispositionForm.disposition_rationale || ''} onChange={e => setDispositionForm({ ...dispositionForm, disposition_rationale: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
           </div>
           <div className="flex justify-end gap-3">
             <button type="button" onClick={() => setShowDispositionModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">Cancel</button>
@@ -759,15 +759,15 @@ export default function DeviationDetail() {
       </Modal>
 
       {/* CAPA Modal */}
-      <Modal isOpen={showCapaModal} onClose={() => setShowCapaModal(false)} title="Create CAPA">
+      <Modal isOpen={showCapaModal} onClose={() => setShowCapaModal(false)} title="Create CAPA" size="lg">
         <form onSubmit={handleCreateCapa} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Corrective Action *</label>
-            <textarea rows={2} required value={capaForm.corrective_action || ''} onChange={e => setCapaForm({ ...capaForm, corrective_action: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+            <textarea rows={5} required value={capaForm.corrective_action || ''} onChange={e => setCapaForm({ ...capaForm, corrective_action: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Preventive Action *</label>
-            <textarea rows={2} required value={capaForm.preventive_action || ''} onChange={e => setCapaForm({ ...capaForm, preventive_action: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+            <textarea rows={5} required value={capaForm.preventive_action || ''} onChange={e => setCapaForm({ ...capaForm, preventive_action: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
