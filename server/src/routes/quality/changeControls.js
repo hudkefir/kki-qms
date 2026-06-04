@@ -45,6 +45,47 @@ await db.exec(`CREATE TABLE IF NOT EXISTS capa_attachments (
   FOREIGN KEY (capa_id) REFERENCES capas(id) ON DELETE CASCADE
 )`);
 
+// ── Ensure deviation_attachments table exists ──
+await db.exec(`CREATE TABLE IF NOT EXISTS deviation_attachments (
+  id SERIAL PRIMARY KEY,
+  deviation_id INTEGER NOT NULL REFERENCES deviation_reports(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  original_name TEXT NOT NULL,
+  file_size INTEGER DEFAULT 0,
+  mime_type TEXT DEFAULT '',
+  uploaded_by TEXT DEFAULT '',
+  description TEXT DEFAULT '',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+)`);
+await db.exec(`CREATE INDEX IF NOT EXISTS idx_deviation_attachments_dev ON deviation_attachments(deviation_id)`);
+
+// ── Ensure deviation_comments table exists ──
+await db.exec(`CREATE TABLE IF NOT EXISTS deviation_comments (
+  id SERIAL PRIMARY KEY,
+  deviation_id INTEGER NOT NULL REFERENCES deviation_reports(id) ON DELETE CASCADE,
+  author TEXT NOT NULL,
+  content TEXT NOT NULL,
+  comment_type TEXT DEFAULT 'comment' CHECK (comment_type IN ('comment', 'status_change', 'system')),
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+)`);
+await db.exec(`CREATE INDEX IF NOT EXISTS idx_deviation_comments_dev ON deviation_comments(deviation_id)`);
+
+// ── Ensure deviation_approvals table exists ──
+await db.exec(`CREATE TABLE IF NOT EXISTS deviation_approvals (
+  id SERIAL PRIMARY KEY,
+  deviation_id INTEGER NOT NULL REFERENCES deviation_reports(id) ON DELETE CASCADE,
+  approval_type TEXT NOT NULL CHECK (approval_type IN ('investigation', 'disposition', 'closure')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  requested_by TEXT NOT NULL,
+  approved_by TEXT,
+  approved_at TEXT,
+  rejection_reason TEXT,
+  signature_meaning TEXT DEFAULT '',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+)`);
+await db.exec(`CREATE INDEX IF NOT EXISTS idx_deviation_approvals_dev ON deviation_approvals(deviation_id)`);
+
 // ──── Sequence helper ────
 async function nextId(type) {
   const year = new Date().getFullYear();
