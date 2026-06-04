@@ -58,6 +58,50 @@ export default function DeviationDetail() {
   const [dispositionForm, setDispositionForm] = useState({});
   const [showCapaModal, setShowCapaModal] = useState(false);
   const [capaForm, setCapaForm] = useState({});
+
+  const openCapaModal = () => {
+    const affBatches = Array.isArray(dev.affected_batches) ? dev.affected_batches : JSON.parse(dev.affected_batches || '[]');
+    const affProducts = Array.isArray(dev.affected_products) ? dev.affected_products : JSON.parse(dev.affected_products || '[]');
+    const batchInfo = affBatches.length > 0 ? `\nBatch(es): ${affBatches.join(', ')}` : '';
+    const productInfo = affProducts.length > 0 ? `\nProduct(s): ${affProducts.join(', ')}` : '';
+    const classInfo = dev.classification ? `\nClassification: ${dev.classification}` : '';
+    const descContext = `Deviation ${dev.report_id}: ${dev.description || ''}${batchInfo}${productInfo}${classInfo}`;
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + 30);
+    const targetStr = targetDate.toISOString().slice(0, 10);
+
+    // Auto-generate corrective action from root cause and description
+    let correctiveAction = '';
+    if (dev.root_cause) {
+      correctiveAction = `Root cause identified: ${dev.root_cause}\n\nCorrective action: Address the root cause by implementing immediate corrections to the process/procedure that led to this deviation.`;
+      if (dev.immediate_action) {
+        correctiveAction += `\n\nImmediate containment already taken: ${dev.immediate_action}`;
+      }
+    } else if (dev.description) {
+      correctiveAction = `Investigate and correct the issue described in ${dev.report_id}: ${dev.description.substring(0, 200)}${dev.description.length > 200 ? '...' : ''}`;
+    }
+
+    // Auto-generate preventive action from root cause and category
+    let preventiveAction = '';
+    if (dev.root_cause) {
+      const categoryLabel = DEV_CATEGORY_LABELS[dev.category] || dev.category || 'process';
+      preventiveAction = `To prevent recurrence of the root cause (${dev.root_cause.substring(0, 150)}${dev.root_cause.length > 150 ? '...' : ''}):\n\n`;
+      preventiveAction += '1. Review and update applicable SOPs to address the identified gap\n';
+      preventiveAction += '2. Conduct targeted training for relevant personnel\n';
+      preventiveAction += `3. Implement additional monitoring/verification for ${categoryLabel} controls\n`;
+      preventiveAction += '4. Verify effectiveness of corrective actions within 30 days';
+    }
+
+    setCapaForm({
+      title: `CAPA for ${dev.report_id}${affBatches.length > 0 ? ` (${affBatches[0]})` : ''} - ${dev.title || ''}`,
+      corrective_action: correctiveAction,
+      preventive_action: preventiveAction,
+      description: descContext.trim(),
+      responsible_person: dev.investigated_by || dev.discovered_by || '',
+      target_date: targetStr,
+    });
+    setShowCapaModal(true);
+  };
   const [linkType, setLinkType] = useState('');
   const [linkSearch, setLinkSearch] = useState('');
 
@@ -110,7 +154,11 @@ export default function DeviationDetail() {
   const handleCreateCapa = async (e) => {
     e.preventDefault();
     try {
-      await apiPost('/api/capas', { ...capaForm, source_type: 'deviation', source_id: dev.id });
+      await apiPost('/api/capas', {
+        ...capaForm,
+        source_type: 'deviation',
+        source_id: dev.id,
+      });
       setShowCapaModal(false);
       setCapaForm({});
       refetch();
@@ -643,7 +691,7 @@ export default function DeviationDetail() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Linked CAPAs</h2>
-            <button onClick={() => setShowCapaModal(true)} className="flex items-center gap-2 px-3 py-2 bg-navy-800 text-white rounded-lg text-sm hover:bg-navy-700">
+            <button onClick={openCapaModal} className="flex items-center gap-2 px-3 py-2 bg-navy-800 text-white rounded-lg text-sm hover:bg-navy-700">
               <Plus className="w-4 h-4" /> Create CAPA
             </button>
           </div>
@@ -665,7 +713,7 @@ export default function DeviationDetail() {
                           {isOverdue ? 'Overdue' : capa.status.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
                         </span>
                       </div>
-                      <Link to="/capas" className="text-xs text-navy-600 hover:underline">View All CAPAs</Link>
+                      <Link to={`/capas/${capa.id}`} className="text-xs text-navy-600 hover:underline">View CAPA</Link>
                     </div>
                     <p className="text-sm text-gray-900 mb-1"><strong>Corrective:</strong> {capa.corrective_action}</p>
                     <p className="text-sm text-gray-900 mb-2"><strong>Preventive:</strong> {capa.preventive_action}</p>
@@ -759,8 +807,16 @@ export default function DeviationDetail() {
       </Modal>
 
       {/* CAPA Modal */}
-      <Modal isOpen={showCapaModal} onClose={() => setShowCapaModal(false)} title="Create CAPA" size="lg">
+      <Modal isOpen={showCapaModal} onClose={() => setShowCapaModal(false)} title="Create CAPA from Deviation" size="lg">
         <form onSubmit={handleCreateCapa} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+            <input type="text" value={capaForm.title || ''} onChange={e => setCapaForm({ ...capaForm, title: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Context / Description</label>
+            <textarea rows={3} value={capaForm.description || ''} onChange={e => setCapaForm({ ...capaForm, description: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2 bg-gray-50" />
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Corrective Action *</label>
             <textarea rows={5} required value={capaForm.corrective_action || ''} onChange={e => setCapaForm({ ...capaForm, corrective_action: e.target.value })} className="w-full border border-gray-300 rounded-lg text-sm px-3 py-2" />

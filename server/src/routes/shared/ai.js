@@ -118,6 +118,36 @@ const AI_TOOLS = [
       required: ['capa_id', 'title', 'assigned_to'],
     },
   },
+  {
+    name: 'create_capa_from_deviation',
+    description: `Create a CAPA (Corrective and Preventive Action) from a deviation report. Use this when the user asks to create a CAPA from a deviation, or wants to initiate corrective actions for a deviation. The tool auto-generates corrective and preventive actions from the deviation's root cause, description, and category. The user can optionally provide overrides for corrective_action, preventive_action, responsible_person, and target_date.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        deviation_id: {
+          type: 'string',
+          description: 'The ID of the deviation to create the CAPA from (numeric database ID)',
+        },
+        corrective_action: {
+          type: 'string',
+          description: 'Override corrective action text (optional — defaults to deviation root cause if available)',
+        },
+        preventive_action: {
+          type: 'string',
+          description: 'Override preventive action text (optional)',
+        },
+        responsible_person: {
+          type: 'string',
+          description: 'Override responsible person (optional — defaults to deviation investigator or discoverer)',
+        },
+        target_date: {
+          type: 'string',
+          description: 'Override target date in YYYY-MM-DD format (optional — defaults to 30 days from today)',
+        },
+      },
+      required: ['deviation_id'],
+    },
+  },
 ];
 
 // Execute AI tool calls
@@ -283,6 +313,110 @@ async function executeToolCall(toolName, toolInput, userId) {
     };
   }
 
+  if (toolName === 'create_capa_from_deviation') {
+    const { deviation_id, corrective_action, preventive_action, responsible_person, target_date } = toolInput;
+
+    // Fetch the deviation
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = $1', [deviation_id]);
+    if (!dev) {
+      return { success: false, error: `Deviation #${deviation_id} not found` };
+    }
+
+    // Parse affected items for description context
+    let affBatches = [];
+    let affProducts = [];
+    try { affBatches = JSON.parse(dev.affected_batches || '[]'); } catch(e) {}
+    try { affProducts = JSON.parse(dev.affected_products || '[]'); } catch(e) {}
+
+    const batchInfo = affBatches.length > 0 ? `\nBatch(es): ${affBatches.join(', ')}` : '';
+    const productInfo = affProducts.length > 0 ? `\nProduct(s): ${affProducts.join(', ')}` : '';
+    const classInfo = dev.classification ? `\nClassification: ${dev.classification}` : '';
+
+    // Auto-fill fields
+    const capaTitle = `CAPA for ${dev.report_id}${affBatches.length > 0 ? ` (${affBatches[0]})` : ''} - ${dev.title || ''}`;
+    const capaDescription = `Deviation ${dev.report_id}: ${dev.description || ''}${batchInfo}${productInfo}${classInfo}`.trim();
+
+    // Auto-generate corrective action from deviation data
+    let capaCorrectiveAction = corrective_action || '';
+    if (!capaCorrectiveAction && dev.root_cause) {
+      capaCorrectiveAction = `Root cause identified: ${dev.root_cause}\n\nCorrective action: Address the root cause by implementing immediate corrections to the process/procedure that led to this deviation.`;
+      if (dev.immediate_action) {
+        capaCorrectiveAction += `\n\nImmediate containment already taken: ${dev.immediate_action}`;
+      }
+    } else if (!capaCorrectiveAction && dev.description) {
+      capaCorrectiveAction = `Investigate and correct the issue described in ${dev.report_id}: ${dev.description.substring(0, 200)}`;
+    }
+
+    // Auto-generate preventive action from root cause
+    let capaPreventiveAction = preventive_action || '';
+    if (!capaPreventiveAction && dev.root_cause) {
+      const rootCauseSnippet = dev.root_cause.substring(0, 150) + (dev.root_cause.length > 150 ? '...' : '');
+      capaPreventiveAction = `To prevent recurrence of the root cause (${rootCauseSnippet}):\n\n`;
+      capaPreventiveAction += '1. Review and update applicable SOPs to address the identified gap\n';
+      capaPreventiveAction += '2. Conduct targeted training for relevant personnel\n';
+      capaPreventiveAction += '3. Implement additional monitoring/verification controls\n';
+      capaPreventiveAction += '4. Verify effectiveness of corrective actions within 30 days';
+    }
+    const capaResponsible = responsible_person || dev.investigated_by || dev.discovered_by || '';
+    const defaultTarget = new Date();
+    defaultTarget.setDate(defaultTarget.getDate() + 30);
+    const capaTargetDate = target_date || defaultTarget.toISOString().slice(0, 10);
+
+    if (!capaResponsible) {
+      return { success: false, error: 'Could not determine responsible person. Please provide a responsible_person.' };
+    }
+
+    // Generate CAPA ID using qms_sequence
+    const year = new Date().getFullYear();
+    const seqRow = await db.get('SELECT next_number FROM qms_sequence WHERE type = $1 AND year = $2', ['capa', year]);
+    let num;
+    if (seqRow) {
+      num = seqRow.next_number;
+      await db.run('UPDATE qms_sequence SET next_number = $1 WHERE type = $2 AND year = $3', [num + 1, 'capa', year]);
+    } else {
+      num = 1;
+      await db.run('INSERT INTO qms_sequence (type, year, next_number) VALUES ($1, $2, $3)', ['capa', year, 2]);
+    }
+    const capa_id = `CAPA-${year}-${String(num).padStart(3, '0')}`;
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+    const info = await db.run(`
+      INSERT INTO capas (capa_id, source_type, source_id, corrective_action, preventive_action,
+        responsible_person, target_date, title, description, created_at, updated_at)
+      VALUES ($1, 'deviation', $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `, [capa_id, dev.id, capaCorrectiveAction, capaPreventiveAction,
+      capaResponsible, capaTargetDate, capaTitle, capaDescription, now, now]);
+
+    const created = await db.get('SELECT * FROM capas WHERE id = $1', [info.lastInsertRowid]);
+
+    // Audit log
+    try {
+      await db.run(
+        `INSERT INTO audit_log (action, table_name, record_id, record_identifier, user_id, details) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          'ai_create_capa_from_deviation',
+          'capas',
+          created.id,
+          capa_id,
+          userId || 'jarvis-ai',
+          JSON.stringify({ capa_id, deviation_id, deviation_report_id: dev.report_id, source: 'jarvis_ai' }),
+        ]
+      );
+    } catch (auditErr) {
+      console.error('AI audit log failed:', auditErr.message);
+    }
+
+    return {
+      success: true,
+      message: `Created ${capa_id} from deviation ${dev.report_id}. Title: "${capaTitle}". Responsible: ${capaResponsible}. Target date: ${capaTargetDate}.`,
+      capa_id,
+      capa_db_id: created.id,
+      deviation_report_id: dev.report_id,
+      responsible_person: capaResponsible,
+      target_date: capaTargetDate,
+    };
+  }
+
   return { success: false, error: `Unknown tool: ${toolName}` };
 }
 
@@ -369,6 +503,14 @@ When viewing a CAPA, you can also **update action item status** using the update
 - The user references a task by its title or number and asks to change its status
 
 The action items for the current CAPA are shown in your context under Related Records → actionItems. Match the user's request to the correct action_item_id from that list.
+
+## Creating CAPAs from Deviations
+When viewing a deviation, you can **create a CAPA directly** using the create_capa_from_deviation tool. Use this when:
+- The user asks to create a CAPA from the current deviation
+- The user says "initiate corrective actions" or "we need a CAPA for this"
+- The user asks you to escalate a deviation to CAPA
+
+The tool auto-generates corrective and preventive actions from the deviation's root cause, description, and category. You can also provide custom corrective_action and preventive_action text if the user specifies what they want.
 
 ## Important Rules
 - Never fabricate lot numbers, batch IDs, test results, or specific KKI data
