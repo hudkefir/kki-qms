@@ -413,7 +413,19 @@ router.get('/deviations/:id', async (req, res) => {
     const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
     if (!dev) return res.status(404).json({ error: 'Deviation not found' });
 
-    const capas = await db.all("SELECT * FROM capas WHERE source_type = 'deviation' AND source_id = ? ORDER BY id", [dev.id]);
+    // CAPAs created FROM this deviation (children via source_type/source_id)
+    const childCapas = await db.all("SELECT * FROM capas WHERE source_type = 'deviation' AND source_id = ? ORDER BY id", [dev.id]);
+    // CAPAs cross-linked via the generic record-link table ("Link Record" button); a CAPA can address more than one deviation
+    const linkedCapas = await db.all(`
+      SELECT DISTINCT c.* FROM capas c
+      JOIN qms_record_links l
+        ON (l.source_type = 'capa' AND l.source_id = c.id AND l.target_type = 'deviation' AND l.target_id = ?)
+        OR (l.target_type = 'capa' AND l.target_id = c.id AND l.source_type = 'deviation' AND l.source_id = ?)
+    `, [dev.id, dev.id]);
+    const capaMap = new Map();
+    for (const c of childCapas) capaMap.set(c.id, { ...c, relation: 'created_from' });
+    for (const c of linkedCapas) if (!capaMap.has(c.id)) capaMap.set(c.id, { ...c, relation: 'linked' });
+    const capas = Array.from(capaMap.values());
 
     // Parse linked IDs and fetch full records
     const linkedComplaintIds = JSON.parse(dev.linked_complaints_json || '[]');
