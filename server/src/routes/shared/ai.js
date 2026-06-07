@@ -2,6 +2,8 @@ import { Router } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import crypto from 'crypto';
 import db from '../../database-pg.js';
+import { logAudit } from '../../auditMiddleware.js';
+import { broadcast } from '../../websocket.js';
 
 const router = Router();
 
@@ -14,6 +16,34 @@ const RECORD_TABLE_MAP = {
   ccrs: 'ccrs',
   'change-control': 'change_requests',
 };
+
+// Singular link-type names used by qms_record_links (matches the operator /api/links UI).
+// Accepts both the plural QMS recordType keys and the singular link-type names.
+const LINK_TYPE_TABLE_MAP = {
+  capa: 'capas',
+  deviation: 'deviation_reports',
+  complaint: 'complaints',
+  ccr: 'ccrs',
+  change_request: 'change_requests',
+  batch_test: 'batch_tests',
+  sop: 'sops',
+};
+const RECORD_TYPE_TO_LINK_TYPE = {
+  capas: 'capa',
+  deviations: 'deviation',
+  complaints: 'complaint',
+  ccrs: 'ccr',
+  'change-control': 'change_request',
+  'batch-tests': 'batch_test',
+  sops: 'sop',
+};
+// Normalize any inbound type string to the singular link-type the links table uses.
+function toLinkType(t) {
+  if (!t) return null;
+  if (LINK_TYPE_TABLE_MAP[t]) return t;
+  if (RECORD_TYPE_TO_LINK_TYPE[t]) return RECORD_TYPE_TO_LINK_TYPE[t];
+  return null;
+}
 
 const EDITABLE_FIELDS = {
   capas: [
@@ -148,10 +178,72 @@ const AI_TOOLS = [
       required: ['deviation_id'],
     },
   },
+  {
+    name: 'create_capa',
+    description: `Create a new blank/standalone CAPA (Corrective and Preventive Action) from scratch — NOT tied to a deviation. Use this when the user asks to "create a CAPA", "open a new CAPA", "start a standalone CAPA", or initiate corrective/preventive action that is not linked to an existing deviation. If the user wants a CAPA FROM a deviation they are viewing, use create_capa_from_deviation instead. Always confirm the key fields (responsible person and target date) with the user before creating if they are not provided.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short title for the CAPA (e.g., "Recurring lid seal failures on SCM line")' },
+        description: { type: 'string', description: 'Description of the issue/problem statement this CAPA addresses. Write in professional GMP style.' },
+        corrective_action: { type: 'string', description: 'The corrective action to address the immediate problem/root cause.' },
+        preventive_action: { type: 'string', description: 'The preventive action to stop recurrence.' },
+        responsible_person: { type: 'string', description: 'Name or role of the person responsible (REQUIRED).' },
+        target_date: { type: 'string', description: 'Target completion date in YYYY-MM-DD format (REQUIRED). If not specified, default to 30 days out.' },
+        root_cause_analysis: { type: 'string', description: 'Optional root cause analysis text.' },
+        classification: { type: 'string', enum: ['minor', 'major', 'critical'], description: 'Optional severity classification.' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Optional priority (defaults to medium).' },
+        risk_assessment: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Optional risk level.' },
+      },
+      required: ['title', 'responsible_person', 'target_date'],
+    },
+  },
+  {
+    name: 'delete_capa',
+    description: `Delete a CAPA. ADMIN ONLY — this tool is restricted to admin users (Hudson). It permanently removes the CAPA and its updates/action items. Use ONLY when an admin explicitly asks to delete a specific CAPA. Always confirm the exact CAPA (by CAPA-ID and title) with the user before deleting. If the requester is not an admin, the tool will refuse.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        capa_id: { type: 'string', description: 'The CAPA to delete — either the numeric database id or the human CAPA-YYYY-NNN identifier.' },
+        confirm: { type: 'boolean', description: 'Must be true to proceed. Set this only after the user has explicitly confirmed deletion of this specific CAPA.' },
+      },
+      required: ['capa_id', 'confirm'],
+    },
+  },
+  {
+    name: 'link_records',
+    description: `Cross-link two QMS records together (e.g., link a CAPA to a complaint, CCR, change-control, deviation, batch test, or SOP). Use this when the user asks to "link", "associate", "connect", or "relate" records, or when you have identified a relevant related record that should be connected for traceability. The link is bidirectional and appears in both records' Links panel. Before linking, make sure both records actually exist (they appear in your context or you have their IDs).`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        source_type: { type: 'string', enum: ['capa', 'deviation', 'complaint', 'ccr', 'change_request', 'batch_test', 'sop'], description: 'Type of the first record.' },
+        source_id: { type: 'integer', description: 'Numeric database id of the first record.' },
+        target_type: { type: 'string', enum: ['capa', 'deviation', 'complaint', 'ccr', 'change_request', 'batch_test', 'sop'], description: 'Type of the second record.' },
+        target_id: { type: 'integer', description: 'Numeric database id of the second record.' },
+        link_reason: { type: 'string', description: 'Brief reason for the link (e.g., "Same affected lot SCM-2026-014", "Corrective action requires this process change"). Helps GMP traceability.' },
+      },
+      required: ['source_type', 'source_id', 'target_type', 'target_id'],
+    },
+  },
+  {
+    name: 'consult_specialist',
+    description: `Consult a specialist Jarvis agent for advice on a complex or out-of-domain request before acting. Use this when the operator asks for something that goes beyond routine QMS documentation and benefits from deeper expertise: complex root-cause/risk strategy, regulatory judgement calls, business/financial impact, or technical/engineering questions. Choose 'hermes' for business, financial, supplier, and strategic-quality decisions; choose 'claw' for technical, data, engineering, and systems questions. Pass a focused question and a short summary of the relevant context. Return the specialist's recommendation to the operator (attributed), then proceed.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        specialist: { type: 'string', enum: ['hermes', 'claw'], description: "'hermes' = business/financial/strategic-quality advisor; 'claw' = technical/engineering/data advisor." },
+        question: { type: 'string', description: 'The specific question you want the specialist to weigh in on.' },
+        context_summary: { type: 'string', description: 'A concise summary of the relevant record/situation so the specialist can give grounded advice.' },
+      },
+      required: ['specialist', 'question'],
+    },
+  },
 ];
 
 // Execute AI tool calls
-async function executeToolCall(toolName, toolInput, userId) {
+// ctx: { userId, role, req } — req is used for proper GMP audit logging via logAudit().
+async function executeToolCall(toolName, toolInput, ctx = {}) {
+  const { userId, role, req } = ctx;
   if (toolName === 'update_record_field') {
     const { record_type, record_id, field, value } = toolInput;
 
@@ -182,26 +274,16 @@ async function executeToolCall(toolName, toolInput, userId) {
     );
 
     // Log audit
-    try {
-      const idField = record_type === 'capas' ? 'capa_id'
-        : record_type === 'deviations' ? 'report_id'
-        : record_type === 'complaints' ? 'complaint_number'
-        : record_type === 'ccrs' ? 'ccr_number'
-        : 'id';
-      await db.run(
-        `INSERT INTO audit_log (action, table_name, record_id, record_identifier, user_id, details) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          `ai_update_${record_type}`,
-          tableName,
-          record_id,
-          record[idField] || record_id,
-          userId || 'jarvis-ai',
-          JSON.stringify({ field, old_value: oldValue, new_value: value, source: 'jarvis_ai' }),
-        ]
-      );
-    } catch (auditErr) {
-      console.error('AI audit log failed:', auditErr.message);
-    }
+    const idField = record_type === 'capas' ? 'capa_id'
+      : record_type === 'deviations' ? 'report_id'
+      : record_type === 'complaints' ? 'complaint_number'
+      : record_type === 'ccrs' ? 'ccr_number'
+      : 'id';
+    await logAudit(req, `ai_update_${record_type}`, tableName, record_id, record[idField] || record_id, {
+      old_values: { [field]: oldValue },
+      new_values: { [field]: value },
+      source: 'jarvis_ai',
+    });
 
     return {
       success: true,
@@ -228,21 +310,10 @@ async function executeToolCall(toolName, toolInput, userId) {
     );
 
     // Log audit
-    try {
-      await db.run(
-        `INSERT INTO audit_log (action, table_name, record_id, record_identifier, user_id, details) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          'ai_create_action_item',
-          'capa_action_items',
-          capa_id,
-          capa.capa_id || capa_id,
-          userId || 'jarvis-ai',
-          JSON.stringify({ title, description, assigned_to, due_date, source: 'jarvis_ai' }),
-        ]
-      );
-    } catch (auditErr) {
-      console.error('AI audit log failed:', auditErr.message);
-    }
+    await logAudit(req, 'ai_create_action_item', 'capa_action_items', capa_id, capa.capa_id || capa_id, {
+      new_values: { title, description, assigned_to, due_date },
+      source: 'jarvis_ai',
+    });
 
     return {
       success: true,
@@ -288,21 +359,11 @@ async function executeToolCall(toolName, toolInput, userId) {
     );
 
     // Audit log
-    try {
-      await db.run(
-        `INSERT INTO audit_log (action, table_name, record_id, record_identifier, user_id, details) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          'ai_update_action_item',
-          'capa_action_items',
-          item.capa_id,
-          item.capa_identifier || item.capa_id,
-          userId || 'jarvis-ai',
-          JSON.stringify({ action_item_id, title: item.title, old_status: oldStatus, new_status: status, notes, source: 'jarvis_ai' }),
-        ]
-      );
-    } catch (auditErr) {
-      console.error('AI audit log failed:', auditErr.message);
-    }
+    await logAudit(req, 'ai_update_action_item', 'capa_action_items', item.capa_id, item.capa_identifier || item.capa_id, {
+      old_values: { status: oldStatus },
+      new_values: { action_item_id, title: item.title, status, notes },
+      source: 'jarvis_ai',
+    });
 
     return {
       success: true,
@@ -390,21 +451,11 @@ async function executeToolCall(toolName, toolInput, userId) {
     const created = await db.get('SELECT * FROM capas WHERE id = $1', [info.lastInsertRowid]);
 
     // Audit log
-    try {
-      await db.run(
-        `INSERT INTO audit_log (action, table_name, record_id, record_identifier, user_id, details) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          'ai_create_capa_from_deviation',
-          'capas',
-          created.id,
-          capa_id,
-          userId || 'jarvis-ai',
-          JSON.stringify({ capa_id, deviation_id, deviation_report_id: dev.report_id, source: 'jarvis_ai' }),
-        ]
-      );
-    } catch (auditErr) {
-      console.error('AI audit log failed:', auditErr.message);
-    }
+    await logAudit(req, 'ai_create_capa_from_deviation', 'capas', created.id, capa_id, {
+      new_values: { capa_id, deviation_id, deviation_report_id: dev.report_id },
+      source: 'jarvis_ai',
+    });
+    broadcast('capa_created', created);
 
     return {
       success: true,
@@ -415,6 +466,208 @@ async function executeToolCall(toolName, toolInput, userId) {
       responsible_person: capaResponsible,
       target_date: capaTargetDate,
     };
+  }
+
+  if (toolName === 'create_capa') {
+    const {
+      title, description = '', corrective_action = '', preventive_action = '',
+      responsible_person, target_date, root_cause_analysis = '',
+      classification, priority, risk_assessment,
+    } = toolInput;
+
+    if (!responsible_person || !target_date) {
+      return { success: false, error: 'responsible_person and target_date are required to create a CAPA.' };
+    }
+
+    const validClassifications = ['minor', 'major', 'critical'];
+    const validPriorities = ['low', 'medium', 'high', 'critical'];
+    const validRisk = ['low', 'medium', 'high', 'critical'];
+    const safeClassification = validClassifications.includes(classification) ? classification : null;
+    const safePriority = validPriorities.includes(priority) ? priority : 'medium';
+    const safeRisk = validRisk.includes(risk_assessment) ? risk_assessment : null;
+
+    // Generate CAPA ID using qms_sequence
+    const year = new Date().getFullYear();
+    const seqRow = await db.get('SELECT next_number FROM qms_sequence WHERE type = $1 AND year = $2', ['capa', year]);
+    let num;
+    if (seqRow) {
+      num = seqRow.next_number;
+      await db.run('UPDATE qms_sequence SET next_number = $1 WHERE type = $2 AND year = $3', [num + 1, 'capa', year]);
+    } else {
+      num = 1;
+      await db.run('INSERT INTO qms_sequence (type, year, next_number) VALUES ($1, $2, $3)', ['capa', year, 2]);
+    }
+    const capa_id = `CAPA-${year}-${String(num).padStart(3, '0')}`;
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+    // Standalone CAPA: source_type='other', source_id=0 (no originating record).
+    // 'other' is the constraint-allowed value for a manually-created CAPA with no
+    // parent record — capas_source_type_check rejects 'manual'.
+    const info = await db.run(`
+      INSERT INTO capas (capa_id, source_type, source_id, corrective_action, preventive_action,
+        responsible_person, target_date, title, description, root_cause_analysis,
+        classification, risk_assessment, priority, status, created_at, updated_at)
+      VALUES ($1, 'other', 0, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', $12, $13)
+    `, [capa_id, corrective_action, preventive_action, responsible_person, target_date,
+      title, description, root_cause_analysis, safeClassification, safeRisk, safePriority, now, now]);
+
+    const created = await db.get('SELECT * FROM capas WHERE id = $1', [info.lastInsertRowid]);
+
+    await logAudit(req, 'ai_create_capa', 'capas', created.id, capa_id, {
+      new_values: { capa_id, title, responsible_person, target_date, classification: safeClassification, priority: safePriority },
+      source: 'jarvis_ai',
+    });
+    broadcast('capa_created', created);
+
+    return {
+      success: true,
+      message: `Created standalone ${capa_id}. Title: "${title}". Responsible: ${responsible_person}. Target date: ${target_date}.`,
+      capa_id,
+      capa_db_id: created.id,
+      responsible_person,
+      target_date,
+    };
+  }
+
+  if (toolName === 'delete_capa') {
+    const { capa_id, confirm } = toolInput;
+
+    // Admin-only gate (Hudson)
+    if (role !== 'admin') {
+      return { success: false, error: 'Deleting CAPAs is restricted to admin users. You do not have permission to delete this CAPA.' };
+    }
+    if (!confirm) {
+      return { success: false, error: 'Deletion not confirmed. Set confirm=true only after the user has explicitly confirmed deleting this specific CAPA.' };
+    }
+
+    // Resolve by numeric id or CAPA-YYYY-NNN identifier
+    let capa;
+    if (/^\d+$/.test(String(capa_id))) {
+      capa = await db.get('SELECT * FROM capas WHERE id = $1', [parseInt(capa_id, 10)]);
+    }
+    if (!capa) {
+      capa = await db.get('SELECT * FROM capas WHERE capa_id = $1', [String(capa_id)]);
+    }
+    if (!capa) {
+      return { success: false, error: `CAPA not found: ${capa_id}` };
+    }
+
+    // Hard delete (mirrors operator DELETE /api/capas/:id). capa_action_items cascade via FK;
+    // capa_updates and qms_record_links are cleaned up explicitly.
+    try { await db.run('DELETE FROM capa_updates WHERE capa_id = $1', [capa.id]); } catch (e) { /* table may not exist */ }
+    try {
+      await db.run(
+        `DELETE FROM qms_record_links WHERE (source_type = 'capa' AND source_id = $1) OR (target_type = 'capa' AND target_id = $1)`,
+        [capa.id]
+      );
+    } catch (e) { /* non-fatal */ }
+    await db.run('DELETE FROM capas WHERE id = $1', [capa.id]);
+
+    await logAudit(req, 'ai_delete_capa', 'capas', capa.id, capa.capa_id, {
+      old_values: capa,
+      source: 'jarvis_ai',
+    });
+    broadcast('capa_deleted', { id: capa.id });
+
+    return {
+      success: true,
+      message: `Deleted ${capa.capa_id} ("${capa.title || 'untitled'}"). This action was logged to the audit trail.`,
+      capa_id: capa.capa_id,
+    };
+  }
+
+  if (toolName === 'link_records') {
+    const { source_type, source_id, target_type, target_id, link_reason } = toolInput;
+
+    const st = toLinkType(source_type);
+    const tt = toLinkType(target_type);
+    if (!st || !tt) {
+      return { success: false, error: `Unknown record type for linking. Valid types: ${Object.keys(LINK_TYPE_TABLE_MAP).join(', ')}` };
+    }
+    if (st === tt && Number(source_id) === Number(target_id)) {
+      return { success: false, error: 'Cannot link a record to itself.' };
+    }
+
+    // Verify both records exist
+    const srcTable = LINK_TYPE_TABLE_MAP[st];
+    const tgtTable = LINK_TYPE_TABLE_MAP[tt];
+    const srcRec = await db.get(`SELECT id FROM ${srcTable} WHERE id = $1`, [source_id]);
+    if (!srcRec) return { success: false, error: `${st} #${source_id} not found.` };
+    const tgtRec = await db.get(`SELECT id FROM ${tgtTable} WHERE id = $1`, [target_id]);
+    if (!tgtRec) return { success: false, error: `${tt} #${target_id} not found.` };
+
+    // Avoid duplicate links (table has UNIQUE constraint, but check both directions)
+    const existing = await db.get(
+      `SELECT id FROM qms_record_links
+       WHERE (source_type = $1 AND source_id = $2 AND target_type = $3 AND target_id = $4)
+          OR (source_type = $3 AND source_id = $4 AND target_type = $1 AND target_id = $2)`,
+      [st, source_id, tt, target_id]
+    );
+    if (existing) {
+      return { success: true, message: `These records are already linked.`, link_id: existing.id, already_linked: true };
+    }
+
+    const createdBy = req?.session?.user?.display_name || req?.session?.user?.username || 'jarvis-ai';
+    const result = await db.get(
+      `INSERT INTO qms_record_links (source_type, source_id, target_type, target_id, link_reason, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [st, source_id, tt, target_id, link_reason || null, createdBy]
+    );
+
+    await logAudit(req, 'ai_create_link', 'qms_record_links', result.id, `${st}:${source_id} -> ${tt}:${target_id}`, {
+      new_values: { source_type: st, source_id, target_type: tt, target_id, link_reason },
+      source: 'jarvis_ai',
+    });
+
+    return {
+      success: true,
+      message: `Linked ${st} #${source_id} to ${tt} #${target_id}${link_reason ? ` (${link_reason})` : ''}.`,
+      link_id: result.id,
+    };
+  }
+
+  if (toolName === 'consult_specialist') {
+    const { specialist, question, context_summary } = toolInput;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return { success: false, error: 'Specialist consultation unavailable (AI not configured).' };
+    }
+
+    const personas = {
+      hermes: `You are Jarvis Hermes, a senior business, financial, and strategic-quality advisor for KEFIR Kultures Inc. (a small-batch kefir manufacturer, FDA 21 CFR Part 117). You think about business impact, cost, supplier relationships, regulatory risk exposure, recall/liability implications, and prioritization. Give pragmatic, decisive recommendations.`,
+      claw: `You are Jarvis Claw, a senior technical, data, and engineering advisor for KEFIR Kultures Inc. You think about systems, data integrity, process/automation, root-cause rigor, measurement, and verification. Give precise, technically grounded recommendations.`,
+    };
+    const persona = personas[specialist];
+    if (!persona) {
+      return { success: false, error: `Unknown specialist: ${specialist}. Use 'hermes' or 'claw'.` };
+    }
+
+    try {
+      const client = new Anthropic({ apiKey });
+      const consultPrompt = `${persona}\n\nA QMS operator's assistant (Jarvis QMS) is asking you for advice. Answer concisely (3-6 sentences), with a clear recommendation. This is advisory only — the QMS assistant will relay your input to the operator.`;
+      const userMsg = `Question: ${question}${context_summary ? `\n\nContext:\n${context_summary}` : ''}`;
+      const resp = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system: consultPrompt,
+        messages: [{ role: 'user', content: userMsg }],
+      });
+      const advice = resp.content?.[0]?.text || '';
+
+      await logAudit(req, 'ai_consult_specialist', 'ai_consult', specialist, specialist, {
+        new_values: { specialist, question },
+        source: 'jarvis_ai',
+      });
+
+      return {
+        success: true,
+        specialist,
+        advice,
+        message: `Consulted Jarvis ${specialist === 'hermes' ? 'Hermes' : 'Claw'}.`,
+      };
+    } catch (consultErr) {
+      return { success: false, error: `Specialist consultation failed: ${consultErr.message}` };
+    }
   }
 
   return { success: false, error: `Unknown tool: ${toolName}` };
@@ -511,6 +764,43 @@ When viewing a deviation, you can **create a CAPA directly** using the create_ca
 - The user asks you to escalate a deviation to CAPA
 
 The tool auto-generates corrective and preventive actions from the deviation's root cause, description, and category. You can also provide custom corrective_action and preventive_action text if the user specifies what they want.
+
+## Creating Standalone CAPAs
+You can create a **blank/standalone CAPA from scratch** (not tied to a deviation) using the create_capa tool. Use this when:
+- The user asks to "create a CAPA", "open a new CAPA", or "start a standalone CAPA"
+- The issue is not linked to an existing deviation report
+- The user describes a recurring problem, audit finding, or improvement that needs corrective/preventive action
+
+Before creating, make sure you have a title, a responsible person, and a target date. If the user doesn't give a target date, propose one (default 30 days) and confirm. Draft professional corrective_action and preventive_action text from what the user describes. If the CAPA actually stems from a deviation the user is viewing, prefer create_capa_from_deviation instead.
+
+## Deleting CAPAs (ADMIN ONLY)
+The delete_capa tool **permanently deletes a CAPA** and is **restricted to admin users only** (Hudson). Rules:
+- Only attempt this when an admin explicitly asks to delete a specific CAPA
+- ALWAYS confirm the exact CAPA (CAPA-ID and title) with the user, then call the tool with confirm=true
+- This is a hard delete and is logged to the audit trail for GMP traceability
+- If a non-admin asks to delete a CAPA, politely explain that deletion is admin-restricted and suggest closing the CAPA (status change) instead
+- Note for GMP: deletion removes the record entirely. For most situations, closing/voiding a CAPA preserves better traceability than deleting it — mention this if it seems like the user wants a record kept but inactive.
+
+## Linking Records (Cross-Linking)
+You can **link records together** using the link_records tool for traceability across CAPAs, deviations, complaints, CCRs, change-controls, batch tests, and SOPs. Links are bidirectional and show in both records' Links panel. Use the singular type names: capa, deviation, complaint, ccr, change_request, batch_test, sop. You need the numeric database id of each record (visible in your context under the record data and Related Records).
+
+### Link Intelligence — what to recommend linking
+Be proactive and intelligent about suggesting links. Apply this GMP reasoning:
+- **Complaint ↔ Batch Test / Deviation**: if a complaint references a lot/batch, link the matching batch test and any deviation for that lot.
+- **Deviation ↔ CAPA**: major/critical deviations should have a CAPA — link or create one.
+- **Recurring complaints (same product/SKU) → CAPA**: if multiple complaints share a product, recommend a CAPA and link them.
+- **CAPA ↔ Change Control**: if a corrective/preventive action requires a process, equipment, formula, or SOP change, link (or recommend creating) a Change Request.
+- **CAPA / Change Control ↔ SOP**: link SOPs that need updating as part of the action.
+- **CCR ↔ Complaints / Change Control**: link the customer complaints and any change requests a CCR drove.
+
+When you spot a likely link from the record data in your context, say so and offer to create it. Only create links between records that genuinely exist (verify the IDs from context). Always confirm before linking unless the user already asked you to.
+
+## Consulting Specialist Jarvis Agents (Escalation)
+For complex or out-of-domain requests, you can consult a specialist using consult_specialist BEFORE acting:
+- **hermes** — business, financial, supplier, regulatory-risk, and strategic-quality judgement (e.g., "is this a recall situation?", "what's the cost/liability tradeoff?", "how should we prioritize this?")
+- **claw** — technical, data, engineering, systems, and root-cause-rigor questions (e.g., "how do we design the verification?", "what data should we trend?")
+
+Use it when the operator asks for something that benefits from deeper expertise than routine QMS documentation. Pass a focused question and a short context summary. Relay the specialist's recommendation to the operator, attributed (e.g., "Jarvis Hermes suggests…"), then proceed. Don't consult for simple/routine tasks — answer those directly.
 
 ## Important Rules
 - Never fabricate lot numbers, batch IDs, test results, or specific KKI data
@@ -786,9 +1076,10 @@ router.post('/ai/chat', async (req, res) => {
 
     const client = new Anthropic({ apiKey });
 
-    // Determine if we're on a record page where tools make sense
-    const hasRecordContext = context?.recordType && context?.recordId && RECORD_TABLE_MAP[context.recordType];
-    const toolsConfig = hasRecordContext ? { tools: AI_TOOLS } : {};
+    // Tools are always available — create_capa, link_records, delete_capa, and
+    // consult_specialist work without a specific record in view (e.g. from list pages).
+    // Each tool validates its own inputs server-side.
+    const toolsConfig = { tools: AI_TOOLS };
 
     // Tool use loop: stream text, execute tools, continue until done
     let conversationMessages = [...session.messages];
@@ -828,7 +1119,11 @@ router.post('/ai/chat', async (req, res) => {
 
           // Execute the tool
           try {
-            const result = await executeToolCall(block.name, block.input, userId);
+            const result = await executeToolCall(block.name, block.input, {
+              userId,
+              role: req.session?.user?.role,
+              req,
+            });
             toolsUsed.push({ tool: block.name, input: block.input, result });
 
             // Send tool result notification to frontend
@@ -1005,4 +1300,5 @@ Task: ${fieldPrompt}`;
   }
 });
 
+export { executeToolCall, AI_TOOLS };
 export default router;
