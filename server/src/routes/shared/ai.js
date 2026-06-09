@@ -238,6 +238,85 @@ const AI_TOOLS = [
       required: ['specialist', 'question'],
     },
   },
+  {
+    name: 'create_deviation',
+    description: `Create a new deviation report. Use when operator reports a production issue, contamination event, process failure, or non-conformance that needs formal documentation.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short descriptive title of the deviation' },
+        description: { type: 'string', description: 'Detailed description of what happened' },
+        category: { type: 'string', enum: ['process', 'equipment', 'sanitation', 'documentation', 'personnel', 'supplier', 'environmental', 'other'], description: 'Category of deviation' },
+        discovered_by: { type: 'string', description: 'Name of person who discovered the deviation' },
+        location: { type: 'string', description: 'Where the deviation occurred' },
+        immediate_action: { type: 'string', description: 'Immediate action taken' },
+        affected_batches: { type: 'string', description: 'Comma-separated batch numbers affected' },
+        product_on_hold: { type: 'boolean', description: 'Whether product is on hold' },
+        classification: { type: 'string', enum: ['minor', 'major', 'critical'], description: 'Severity classification' },
+      },
+      required: ['title', 'description', 'category'],
+    },
+  },
+  {
+    name: 'update_deviation',
+    description: `Update a deviation report's status or classification. Use when operator wants to change deviation status (e.g., from reported to under_investigation) or update classification.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        deviation_id: { type: 'integer', description: 'Numeric ID of the deviation' },
+        deviation_identifier: { type: 'string', description: 'The DEV-YYYY-NNN identifier (alternative to deviation_id)' },
+        status: { type: 'string', enum: ['reported', 'under_investigation', 'root_cause_identified', 'corrective_action_planned', 'corrective_action_implemented', 'closed', 'rejected'] },
+        classification: { type: 'string', enum: ['minor', 'major', 'critical'] },
+        root_cause: { type: 'string' },
+        root_cause_method: { type: 'string', enum: ['5_why', 'fishbone', 'fmea', 'fault_tree', 'other'] },
+        product_disposition: { type: 'string', enum: ['release', 'hold', 'reject', 'rework', 'pending'] },
+        scope_assessment: { type: 'string' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'query_trends',
+    description: `Query QMS records to find trends, patterns, and related records. Use when operator asks questions like 'show me all Rhodotorula deviations', 'how many open CAPAs do we have', 'what deviations happened last month', etc.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        record_type: { type: 'string', enum: ['deviation', 'capa', 'complaint', 'batch_test', 'all'], description: 'Type of records to query' },
+        search_text: { type: 'string', description: 'Text to search in titles and descriptions' },
+        status: { type: 'string', description: 'Filter by status' },
+        category: { type: 'string', description: 'Filter by category' },
+        date_from: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
+        date_to: { type: 'string', description: 'End date (YYYY-MM-DD)' },
+        limit: { type: 'integer', description: 'Max records to return (default 20, max 50)' },
+      },
+      required: ['record_type'],
+    },
+  },
+  {
+    name: 'draft_root_cause',
+    description: `Draft a root cause analysis for a deviation based on historical patterns and the deviation's details. Returns a suggested root cause that the operator can review and edit.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        deviation_id: { type: 'integer', description: 'Numeric ID of the deviation to analyze' },
+        deviation_identifier: { type: 'string', description: 'The DEV-YYYY-NNN identifier (alternative to deviation_id)' },
+        method: { type: 'string', enum: ['5_why', 'fishbone', 'narrative'], description: 'Root cause analysis method to use (default: narrative)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'auto_fill_capa',
+    description: `Draft a complete CAPA (corrective action, preventive action, containment, root cause) based on a deviation and historical patterns. Returns a draft for operator review — does NOT create the CAPA automatically.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        deviation_id: { type: 'integer', description: 'Numeric ID of the source deviation' },
+        deviation_identifier: { type: 'string', description: 'The DEV-YYYY-NNN identifier (alternative to deviation_id)' },
+      },
+      required: [],
+    },
+  },
 ];
 
 // Execute AI tool calls
@@ -670,6 +749,430 @@ async function executeToolCall(toolName, toolInput, ctx = {}) {
     }
   }
 
+  // ── create_deviation ─────────────────────────────────────────────────────
+  if (toolName === 'create_deviation') {
+    const { title, description, category, discovered_by, location, immediate_action, affected_batches, product_on_hold, classification } = toolInput;
+
+    if (!title || !description || !category) {
+      return { success: false, error: 'title, description, and category are required to create a deviation.' };
+    }
+
+    const validCategories = ['process', 'equipment', 'sanitation', 'documentation', 'personnel', 'supplier', 'environmental', 'other'];
+    if (!validCategories.includes(category)) {
+      return { success: false, error: `Invalid category: ${category}. Valid: ${validCategories.join(', ')}` };
+    }
+
+    const validClassifications = ['minor', 'major', 'critical'];
+    const safeClassification = validClassifications.includes(classification) ? classification : null;
+
+    // Parse affected_batches string into JSON array
+    let batchesJson = '[]';
+    if (affected_batches) {
+      const batchArr = affected_batches.split(',').map(b => b.trim()).filter(Boolean);
+      batchesJson = JSON.stringify(batchArr);
+    }
+
+    // Generate report_id using qms_sequence
+    const year = new Date().getFullYear();
+    const seqRow = await db.get('SELECT next_number FROM qms_sequence WHERE type = $1 AND year = $2', ['deviation', year]);
+    let num;
+    if (seqRow) {
+      num = seqRow.next_number;
+      await db.run('UPDATE qms_sequence SET next_number = $1 WHERE type = $2 AND year = $3', [num + 1, 'deviation', year]);
+    } else {
+      num = 1;
+      await db.run('INSERT INTO qms_sequence (type, year, next_number) VALUES ($1, $2, $3)', ['deviation', year, 2]);
+    }
+    const report_id = `DEV-${year}-${String(num).padStart(3, '0')}`;
+
+    const info = await db.run(`
+      INSERT INTO deviation_reports (report_id, title, description, category, discovered_by, location,
+        immediate_action, affected_batches, product_on_hold, classification, status, discovered_at, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, [report_id, title, description, category, discovered_by || null, location || null,
+      immediate_action || null, batchesJson, product_on_hold ? true : false, safeClassification]);
+
+    const created = await db.get('SELECT * FROM deviation_reports WHERE id = $1', [info.lastInsertRowid]);
+
+    await logAudit(req, 'ai_create_deviation', 'deviation_reports', created.id, report_id, {
+      new_values: { report_id, title, category, classification: safeClassification },
+      source: 'jarvis_ai',
+    });
+    broadcast('deviation_created', created);
+
+    return {
+      success: true,
+      message: `Created deviation ${report_id}: "${title}" (${category}, ${safeClassification || 'unclassified'}).`,
+      report_id,
+      deviation_db_id: created.id,
+      category,
+      classification: safeClassification,
+    };
+  }
+
+  // ── update_deviation ─────────────────────────────────────────────────────
+  if (toolName === 'update_deviation') {
+    const { deviation_id, deviation_identifier, status, classification, root_cause, root_cause_method, product_disposition, scope_assessment } = toolInput;
+
+    if (!deviation_id && !deviation_identifier) {
+      return { success: false, error: 'Provide either deviation_id (numeric) or deviation_identifier (DEV-YYYY-NNN).' };
+    }
+
+    // Resolve the deviation
+    let dev;
+    if (deviation_id) {
+      dev = await db.get('SELECT * FROM deviation_reports WHERE id = $1', [deviation_id]);
+    }
+    if (!dev && deviation_identifier) {
+      dev = await db.get('SELECT * FROM deviation_reports WHERE report_id = $1', [String(deviation_identifier)]);
+    }
+    if (!dev) {
+      return { success: false, error: `Deviation not found: ${deviation_id || deviation_identifier}` };
+    }
+
+    // Build dynamic UPDATE — only update provided fields
+    const updates = [];
+    const params = [];
+    const oldValues = {};
+    const newValues = {};
+    let paramIdx = 1;
+
+    const validStatuses = ['reported', 'under_investigation', 'root_cause_identified', 'corrective_action_planned', 'corrective_action_implemented', 'closed', 'rejected'];
+    const validClassifications = ['minor', 'major', 'critical'];
+    const validDispositions = ['release', 'hold', 'reject', 'rework', 'pending'];
+    const validMethods = ['5_why', 'fishbone', 'fmea', 'fault_tree', 'other'];
+
+    if (status !== undefined && status !== null) {
+      if (!validStatuses.includes(status)) {
+        return { success: false, error: `Invalid status: ${status}. Valid: ${validStatuses.join(', ')}` };
+      }
+      oldValues.status = dev.status;
+      newValues.status = status;
+      updates.push(`status = $${paramIdx}`);
+      params.push(status);
+      paramIdx++;
+    }
+    if (classification !== undefined && classification !== null) {
+      if (!validClassifications.includes(classification)) {
+        return { success: false, error: `Invalid classification: ${classification}. Valid: ${validClassifications.join(', ')}` };
+      }
+      oldValues.classification = dev.classification;
+      newValues.classification = classification;
+      updates.push(`classification = $${paramIdx}`);
+      params.push(classification);
+      paramIdx++;
+    }
+    if (root_cause !== undefined && root_cause !== null) {
+      oldValues.root_cause = dev.root_cause;
+      newValues.root_cause = root_cause;
+      updates.push(`root_cause = $${paramIdx}`);
+      params.push(root_cause);
+      paramIdx++;
+    }
+    if (root_cause_method !== undefined && root_cause_method !== null) {
+      if (!validMethods.includes(root_cause_method)) {
+        return { success: false, error: `Invalid root_cause_method: ${root_cause_method}. Valid: ${validMethods.join(', ')}` };
+      }
+      oldValues.root_cause_method = dev.root_cause_method;
+      newValues.root_cause_method = root_cause_method;
+      updates.push(`root_cause_method = $${paramIdx}`);
+      params.push(root_cause_method);
+      paramIdx++;
+    }
+    if (product_disposition !== undefined && product_disposition !== null) {
+      if (!validDispositions.includes(product_disposition)) {
+        return { success: false, error: `Invalid product_disposition: ${product_disposition}. Valid: ${validDispositions.join(', ')}` };
+      }
+      oldValues.product_disposition = dev.product_disposition;
+      newValues.product_disposition = product_disposition;
+      updates.push(`product_disposition = $${paramIdx}`);
+      params.push(product_disposition);
+      paramIdx++;
+    }
+    if (scope_assessment !== undefined && scope_assessment !== null) {
+      oldValues.scope_assessment = dev.scope_assessment;
+      newValues.scope_assessment = scope_assessment;
+      updates.push(`scope_assessment = $${paramIdx}`);
+      params.push(scope_assessment);
+      paramIdx++;
+    }
+
+    if (updates.length === 0) {
+      return { success: false, error: 'No fields provided to update.' };
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(dev.id);
+    await db.run(
+      `UPDATE deviation_reports SET ${updates.join(', ')} WHERE id = $${paramIdx}`,
+      params
+    );
+
+    await logAudit(req, 'ai_update_deviation', 'deviation_reports', dev.id, dev.report_id, {
+      old_values: oldValues,
+      new_values: newValues,
+      source: 'jarvis_ai',
+    });
+    broadcast('deviation_updated', { id: dev.id, report_id: dev.report_id, ...newValues });
+
+    const changedFields = Object.keys(newValues).join(', ');
+    return {
+      success: true,
+      message: `Updated ${dev.report_id}: changed ${changedFields}.`,
+      report_id: dev.report_id,
+      updated_fields: newValues,
+    };
+  }
+
+  // ── query_trends ─────────────────────────────────────────────────────────
+  if (toolName === 'query_trends') {
+    const { record_type, search_text, status, category, date_from, date_to } = toolInput;
+    let limit = toolInput.limit || 20;
+    if (limit > 50) limit = 50;
+    if (limit < 1) limit = 20;
+
+    const results = {};
+
+    const queryTable = async (table, idCol, titleCol, extraFilters = []) => {
+      const conditions = ['1=1'];
+      const params = [];
+      let paramIdx = 1;
+
+      if (search_text) {
+        conditions.push(`(${titleCol} ILIKE $${paramIdx} OR description ILIKE $${paramIdx + 1})`);
+        params.push(`%${search_text}%`, `%${search_text}%`);
+        paramIdx += 2;
+      }
+      if (status) {
+        conditions.push(`status = $${paramIdx}`);
+        params.push(status);
+        paramIdx++;
+      }
+      if (category && table === 'deviation_reports') {
+        conditions.push(`category = $${paramIdx}`);
+        params.push(category);
+        paramIdx++;
+      }
+      if (date_from) {
+        conditions.push(`created_at >= $${paramIdx}`);
+        params.push(date_from);
+        paramIdx++;
+      }
+      if (date_to) {
+        conditions.push(`created_at <= $${paramIdx}::date + INTERVAL '1 day'`);
+        params.push(date_to);
+        paramIdx++;
+      }
+      for (const ef of extraFilters) {
+        conditions.push(ef.condition.replace('?', `$${paramIdx}`));
+        if (ef.param !== undefined) {
+          params.push(ef.param);
+          paramIdx++;
+        }
+      }
+
+      params.push(limit);
+      const rows = await db.all(
+        `SELECT id, ${idCol} as identifier, ${titleCol} as title, status, ${table === 'deviation_reports' ? 'category,' : ''} created_at
+         FROM ${table}
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY created_at DESC
+         LIMIT $${paramIdx}`,
+        params
+      );
+
+      // Summary stats (unfiltered by limit)
+      const countParams = params.slice(0, -1); // remove limit param
+      const total = await db.get(
+        `SELECT COUNT(*) as count FROM ${table} WHERE ${conditions.join(' AND ')}`,
+        countParams
+      );
+
+      return { records: rows || [], total_count: total?.count || 0 };
+    };
+
+    try {
+      if (record_type === 'deviation' || record_type === 'all') {
+        results.deviations = await queryTable('deviation_reports', 'report_id', 'title');
+      }
+      if (record_type === 'capa' || record_type === 'all') {
+        results.capas = await queryTable('capas', 'capa_id', 'title');
+      }
+      if (record_type === 'complaint' || record_type === 'all') {
+        results.complaints = await queryTable('complaints', 'complaint_number', 'complaint_number');
+      }
+      if (record_type === 'batch_test' || record_type === 'all') {
+        results.batch_tests = await queryTable('batch_tests', 'batch_id', 'batch_id');
+      }
+    } catch (queryErr) {
+      return { success: false, error: `Query failed: ${queryErr.message}` };
+    }
+
+    // Build summary
+    let totalRecords = 0;
+    const summaryParts = [];
+    for (const [key, val] of Object.entries(results)) {
+      totalRecords += val.total_count;
+      summaryParts.push(`${key}: ${val.total_count}`);
+    }
+
+    return {
+      success: true,
+      message: `Found ${totalRecords} matching records (${summaryParts.join(', ')}).`,
+      ...results,
+    };
+  }
+
+  // ── draft_root_cause ─────────────────────────────────────────────────────
+  if (toolName === 'draft_root_cause') {
+    const { deviation_id, deviation_identifier, method } = toolInput;
+
+    if (!deviation_id && !deviation_identifier) {
+      return { success: false, error: 'Provide either deviation_id (numeric) or deviation_identifier (DEV-YYYY-NNN).' };
+    }
+
+    // Resolve the deviation
+    let dev;
+    if (deviation_id) {
+      dev = await db.get('SELECT * FROM deviation_reports WHERE id = $1', [deviation_id]);
+    }
+    if (!dev && deviation_identifier) {
+      dev = await db.get('SELECT * FROM deviation_reports WHERE report_id = $1', [String(deviation_identifier)]);
+    }
+    if (!dev) {
+      return { success: false, error: `Deviation not found: ${deviation_id || deviation_identifier}` };
+    }
+
+    // Fetch similar deviations (same category, or keyword match on title)
+    const titleWords = (dev.title || '').split(/\s+/).filter(w => w.length > 3).slice(0, 3);
+    let similar_deviations = [];
+    try {
+      if (titleWords.length > 0) {
+        const catParamIdx = titleWords.length + 2;
+        const likeConditions = titleWords.map((_, i) => `title ILIKE $${i + 2}`).join(' OR ');
+        const likeParams = [dev.id, ...titleWords.map(w => `%${w}%`), dev.category];
+        similar_deviations = await db.all(
+          `SELECT id, report_id, title, category, classification, status, root_cause, root_cause_method, created_at
+           FROM deviation_reports
+           WHERE id != $1 AND (category = $${catParamIdx} OR ${likeConditions})
+           ORDER BY created_at DESC LIMIT 10`,
+          likeParams
+        );
+      } else {
+        similar_deviations = await db.all(
+          `SELECT id, report_id, title, category, classification, status, root_cause, root_cause_method, created_at
+           FROM deviation_reports
+           WHERE id != $1 AND category = $2
+           ORDER BY created_at DESC LIMIT 10`,
+          [dev.id, dev.category]
+        );
+      }
+    } catch (e) { /* non-fatal */ }
+
+    // Fetch linked CAPAs
+    let related_capas = [];
+    try {
+      related_capas = await db.all(
+        `SELECT id, capa_id, title, root_cause_analysis, corrective_action, preventive_action, status
+         FROM capas
+         WHERE (source_type = 'deviation' AND source_id = $1)
+            OR id IN (SELECT source_id FROM qms_record_links WHERE target_type = 'deviation' AND target_id = $1 AND source_type = 'capa'
+              UNION SELECT target_id FROM qms_record_links WHERE source_type = 'deviation' AND source_id = $1 AND target_type = 'capa')
+         LIMIT 10`,
+        [dev.id]
+      );
+    } catch (e) { /* non-fatal */ }
+
+    const suggested_method = method || 'narrative';
+
+    return {
+      success: true,
+      message: `Gathered context for root cause analysis of ${dev.report_id}. Found ${similar_deviations.length} similar deviations and ${related_capas.length} related CAPAs. Use this data to draft a ${suggested_method} root cause analysis.`,
+      deviation: {
+        id: dev.id,
+        report_id: dev.report_id,
+        title: dev.title,
+        description: dev.description,
+        category: dev.category,
+        classification: dev.classification,
+        discovered_by: dev.discovered_by,
+        location: dev.location,
+        immediate_action: dev.immediate_action,
+        affected_batches: dev.affected_batches,
+        existing_root_cause: dev.root_cause,
+      },
+      similar_deviations,
+      related_capas,
+      suggested_method,
+    };
+  }
+
+  // ── auto_fill_capa ───────────────────────────────────────────────────────
+  if (toolName === 'auto_fill_capa') {
+    const { deviation_id, deviation_identifier } = toolInput;
+
+    if (!deviation_id && !deviation_identifier) {
+      return { success: false, error: 'Provide either deviation_id (numeric) or deviation_identifier (DEV-YYYY-NNN).' };
+    }
+
+    // Resolve the deviation
+    let dev;
+    if (deviation_id) {
+      dev = await db.get('SELECT * FROM deviation_reports WHERE id = $1', [deviation_id]);
+    }
+    if (!dev && deviation_identifier) {
+      dev = await db.get('SELECT * FROM deviation_reports WHERE report_id = $1', [String(deviation_identifier)]);
+    }
+    if (!dev) {
+      return { success: false, error: `Deviation not found: ${deviation_id || deviation_identifier}` };
+    }
+
+    // Fetch historical CAPAs from same category deviations
+    let historical_capas = [];
+    try {
+      historical_capas = await db.all(
+        `SELECT c.id, c.capa_id, c.title, c.description, c.corrective_action, c.preventive_action,
+                c.containment_action, c.root_cause_analysis, c.classification, c.priority, c.status,
+                d.category as deviation_category, d.title as deviation_title
+         FROM capas c
+         JOIN deviation_reports d ON c.source_type = 'deviation' AND c.source_id = d.id
+         WHERE d.category = $1 AND c.id != COALESCE((SELECT id FROM capas WHERE source_type = 'deviation' AND source_id = $2 LIMIT 1), 0)
+         ORDER BY c.created_at DESC
+         LIMIT 10`,
+        [dev.category, dev.id]
+      );
+    } catch (e) { /* non-fatal */ }
+
+    return {
+      success: true,
+      message: `DRAFT — operator must review before creating. Gathered context from ${dev.report_id} and ${historical_capas.length} historical CAPAs in the "${dev.category}" category. Use this data to draft the CAPA fields below.`,
+      deviation: {
+        id: dev.id,
+        report_id: dev.report_id,
+        title: dev.title,
+        description: dev.description,
+        category: dev.category,
+        classification: dev.classification,
+        root_cause: dev.root_cause,
+        immediate_action: dev.immediate_action,
+        affected_batches: dev.affected_batches,
+        discovered_by: dev.discovered_by,
+        location: dev.location,
+      },
+      historical_capas,
+      draft: {
+        title: '',
+        description: '',
+        corrective_action: '',
+        preventive_action: '',
+        containment_action: '',
+        root_cause_analysis: '',
+        classification: '',
+        priority: '',
+      },
+    };
+  }
+
   return { success: false, error: `Unknown tool: ${toolName}` };
 }
 
@@ -801,6 +1304,46 @@ For complex or out-of-domain requests, you can consult a specialist using consul
 - **claw** — technical, data, engineering, systems, and root-cause-rigor questions (e.g., "how do we design the verification?", "what data should we trend?")
 
 Use it when the operator asks for something that benefits from deeper expertise than routine QMS documentation. Pass a focused question and a short context summary. Relay the specialist's recommendation to the operator, attributed (e.g., "Jarvis Hermes suggests…"), then proceed. Don't consult for simple/routine tasks — answer those directly.
+
+## Creating Deviations from Chat
+You can **create a new deviation report** using the create_deviation tool. Use this when:
+- The operator reports a production issue, contamination event, process failure, or non-conformance
+- The user says something like "log a deviation", "we had a spill", "contamination found", "equipment failed"
+- The user describes an incident that needs formal documentation
+
+At minimum you need a title, description, and category. Ask the operator for discovered_by and classification if not provided. If the operator mentions affected batches, include them as a comma-separated string.
+
+## Updating Deviation Status
+You can **update a deviation's status or classification** using the update_deviation tool. Use this when:
+- The operator wants to move a deviation through the workflow (e.g., reported → under_investigation → root_cause_identified)
+- The operator wants to change the classification or set the product disposition
+- The operator provides a root cause or scope assessment
+
+You can identify the deviation by numeric database ID or the DEV-YYYY-NNN identifier. Only fields that are provided will be updated.
+
+## Querying Trends and Patterns
+You can **search and analyze QMS records** using the query_trends tool. Use this when:
+- The operator asks questions like "show me all Rhodotorula deviations", "how many open CAPAs do we have?"
+- The operator wants to see trends: "what deviations happened last month?", "any recurring equipment issues?"
+- The operator asks for counts, summaries, or patterns across record types
+
+This is a read-only tool — it searches deviations, CAPAs, complaints, and batch tests. You can filter by text, status, category, and date range. Use this data to provide insights and identify patterns.
+
+## Drafting Root Cause Analysis
+You can **draft a root cause analysis** for a deviation using the draft_root_cause tool. Use this when:
+- The operator asks "help me with the root cause" or "analyze this deviation"
+- The operator wants a 5-Why, fishbone, or narrative root cause analysis
+- You're helping investigate a deviation and need historical context
+
+The tool fetches the deviation, similar past deviations, and related CAPAs. It does NOT call the AI — instead it returns all the context to you so you can draft the analysis in your response. The operator should review and edit before applying.
+
+## Auto-Filling CAPA Drafts
+You can **draft a complete CAPA** from a deviation using the auto_fill_capa tool. Use this when:
+- The operator asks "draft a CAPA for this deviation" or "what would a CAPA look like?"
+- The operator wants to see a proposed CAPA before creating it
+- You want to suggest corrective/preventive actions based on historical patterns
+
+This tool does NOT create the CAPA — it returns a draft with empty fields for you to fill based on the deviation data and historical CAPAs. Present the draft to the operator for review. If they approve, use create_capa_from_deviation or create_capa to actually create it.
 
 ## Important Rules
 - Never fabricate lot numbers, batch IDs, test results, or specific KKI data
