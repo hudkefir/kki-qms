@@ -457,7 +457,7 @@ export function previewSOPUpdates(currentSOP, extractedContent) {
 
   const fieldMap = [
     ['scope', 'scope'],
-    ['procedure', 'procedure'],
+    ['procedure', 'procedure_text'],
     ['responsibilities', 'responsibilities'],
     ['materials_equipment', 'materials_equipment'],
     ['references', 'sop_references'],

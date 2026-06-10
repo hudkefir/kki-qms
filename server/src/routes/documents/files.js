@@ -21,6 +21,11 @@ const upload = multer({
   },
 });
 
+/** Strip characters that could break out of a Content-Disposition header value */
+function safeHeaderFilename(name) {
+  return String(name).replace(/["\r\n]/g, '');
+}
+
 const router = Router();
 
 // POST /api/sops/:id/upload
@@ -117,7 +122,7 @@ router.get('/files/:id/download', requireAuth, async (req, res) => {
     });
 
     const buffer = await downloadFile(file.filename);
-    res.setHeader('Content-Disposition', `attachment; filename="${file.original_name}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeHeaderFilename(file.original_name)}"`);
     res.setHeader('Content-Type', file.file_type);
     res.send(buffer);
   } catch (err) {
@@ -133,7 +138,7 @@ router.get('/files/:id/preview', requireAuth, async (req, res) => {
     if (!file) return res.status(404).json({ error: 'File not found' });
 
     const buffer = await downloadFile(file.filename);
-    res.setHeader('Content-Disposition', `inline; filename="${file.original_name}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${safeHeaderFilename(file.original_name)}"`);
     res.setHeader('Content-Type', file.file_type);
     res.send(buffer);
   } catch (err) {
