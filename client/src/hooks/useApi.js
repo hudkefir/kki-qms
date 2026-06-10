@@ -33,6 +33,19 @@ export function useFetch(url, deps = []) {
   return { data, loading, error, refetch: fetchData };
 }
 
+export async function apiGet(url) {
+  const res = await fetch(url, { credentials: 'include' });
+  if (res.status === 401) {
+    window.location.reload();
+    throw new Error('Session expired');
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function apiPost(url, body) {
   const isFormData = body instanceof FormData;
   const res = await fetch(url, {

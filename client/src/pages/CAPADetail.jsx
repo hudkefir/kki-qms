@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useFetch, apiPut, apiPost, apiDelete } from '../hooks/useApi';
+import { useFetch, apiGet, apiPut, apiPost, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/LoadingSpinner';
 import FormattedText from '../components/FormattedText';
@@ -297,6 +297,77 @@ const ACTION_STATUS_NEXT = {
   completed: 'pending',
 };
 
+function ActionItemNotes({ capaId, itemId, canEdit }) {
+  const [notes, setNotes] = useState(null);
+  const [text, setText] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    try {
+      const data = await apiGet(`/api/capas/${capaId}/action-items/${itemId}/notes`);
+      setNotes(data);
+    } catch (err) { setNotes([]); }
+  };
+
+  useEffect(() => { load(); }, [capaId, itemId]);
+
+  const addNote = async (e) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setSaving(true);
+    try {
+      await apiPost(`/api/capas/${capaId}/action-items/${itemId}/notes`, { note: text });
+      setText('');
+      await load();
+    } catch (err) { alert('Error: ' + err.message); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="pl-2 border-l-2 border-indigo-100">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2">
+        <MessageSquare className="w-3.5 h-3.5" /> Notes
+      </div>
+      {notes === null ? (
+        <p className="text-xs text-gray-400 italic">Loading notes…</p>
+      ) : notes.length === 0 ? (
+        <p className="text-xs text-gray-400 italic">No notes yet.</p>
+      ) : (
+        <ul className="space-y-2 mb-2">
+          {notes.map(n => (
+            <li key={n.id} className="text-sm text-gray-700 bg-gray-50 rounded-lg px-3 py-2">
+              <div className="whitespace-pre-wrap">{n.note}</div>
+              <div className="mt-1 text-[11px] text-gray-400 flex items-center gap-1">
+                <User className="w-3 h-3" /> {n.author}
+                <span>·</span>
+                <span>{n.created_at}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {canEdit && (
+        <form onSubmit={addNote} className="flex items-start gap-2">
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            rows={1}
+            placeholder="Add a note…"
+            className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+          />
+          <button
+            type="submit"
+            disabled={saving || !text.trim()}
+            className="shrink-0 px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {saving ? '…' : 'Add'}
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
 function ActionItemsSection({ capaId, actionItems, canEdit, onRefetch }) {
   const [showForm, setShowForm] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
@@ -387,9 +458,14 @@ function ActionItemsSection({ capaId, actionItems, canEdit, onRefetch }) {
                 )}
               </div>
             </div>
-            {expandedId === item.id && item.description && (
-              <div className="mt-2 pl-2 text-sm text-gray-600 border-l-2 border-gray-200">
-                {item.description}
+            {expandedId === item.id && (
+              <div className="mt-2 space-y-3">
+                {item.description && (
+                  <div className="pl-2 text-sm text-gray-600 border-l-2 border-gray-200">
+                    {item.description}
+                  </div>
+                )}
+                <ActionItemNotes capaId={capaId} itemId={item.id} canEdit={canEdit} />
               </div>
             )}
           </div>

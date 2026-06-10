@@ -149,6 +149,24 @@ const AI_TOOLS = [
     },
   },
   {
+    name: 'add_action_item_note',
+    description: `Add a timestamped note/comment to an existing CAPA action item. Use this when the user wants to log progress, leave a comment, record an update, or attach context to a specific task without changing its status. The note is appended to the action item's running notes thread and attributed to Jarvis. The existing notes for each action item are shown in your context under Related Records → actionItems[].notes so you can reference prior notes before adding a new one.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        action_item_id: {
+          type: 'integer',
+          description: 'The ID of the action item to add the note to (from the actionItems list in context)',
+        },
+        note: {
+          type: 'string',
+          description: 'The note/comment text. Write in professional GMP style.',
+        },
+      },
+      required: ['action_item_id', 'note'],
+    },
+  },
+  {
     name: 'create_capa_from_deviation',
     description: `Create a CAPA (Corrective and Preventive Action) from a deviation report. Use this when the user asks to create a CAPA from a deviation, or wants to initiate corrective actions for a deviation. The tool auto-generates corrective and preventive actions from the deviation's root cause, description, and category. The user can optionally provide overrides for corrective_action, preventive_action, responsible_person, and target_date.`,
     input_schema: {
@@ -450,6 +468,35 @@ async function executeToolCall(toolName, toolInput, ctx = {}) {
       title: item.title,
       old_status: oldStatus,
       new_status: status,
+    };
+  }
+
+  if (toolName === 'add_action_item_note') {
+    const { action_item_id, note } = toolInput;
+    if (!note || !note.trim()) {
+      return { success: false, error: 'note is required' };
+    }
+
+    const item = await db.get('SELECT ai.*, c.capa_id as capa_identifier FROM capa_action_items ai JOIN capas c ON ai.capa_id = c.id WHERE ai.id = $1', [action_item_id]);
+    if (!item) {
+      return { success: false, error: `Action item #${action_item_id} not found` };
+    }
+
+    await db.run(
+      `INSERT INTO capa_action_item_notes (action_item_id, note, author, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`,
+      [action_item_id, note.trim(), 'Jarvis (AI)']
+    );
+
+    await logAudit(req, 'ai_add_action_item_note', 'capa_action_item_notes', item.capa_id, item.capa_identifier || item.capa_id, {
+      new_values: { action_item_id, title: item.title, note: note.trim() },
+      source: 'jarvis_ai',
+    });
+
+    return {
+      success: true,
+      message: `Added a note to task "${item.title}".`,
+      title: item.title,
+      note: note.trim(),
     };
   }
 
@@ -1260,6 +1307,14 @@ When viewing a CAPA, you can also **update action item status** using the update
 
 The action items for the current CAPA are shown in your context under Related Records → actionItems. Match the user's request to the correct action_item_id from that list.
 
+## Adding Notes to Tasks
+You can append a timestamped note/comment to an existing action item using the add_action_item_note tool. Use this when:
+- The user wants to log progress or leave a comment on a task without changing its status
+- The user says "add a note to task X" or "record that we did Y on that task"
+- You want to document context, blockers, or follow-ups on a specific action item
+
+Each action item's existing notes are shown in your context under Related Records → actionItems[].notes (with author and timestamp). Read those before adding a new note so you can reference prior entries and avoid duplication. Notes you add are attributed to "Jarvis (AI)".
+
 ## Creating CAPAs from Deviations
 When viewing a deviation, you can **create a CAPA directly** using the create_capa_from_deviation tool. Use this when:
 - The user asks to create a CAPA from the current deviation
@@ -1482,7 +1537,14 @@ router.post('/ai/chat', async (req, res) => {
                   // Fetch existing action items so Jarvis knows what tasks already exist
                   try {
                     const actionItems = await db.all(`SELECT id, title, description, assigned_to, due_date, status, created_at FROM capa_action_items WHERE capa_id = $1 ORDER BY created_at ASC`, [context.recordId]);
-                    if (actionItems?.length) relatedRecords.actionItems = actionItems;
+                    if (actionItems?.length) {
+                      for (const ai of actionItems) {
+                        try {
+                          ai.notes = await db.all(`SELECT note, author, created_at FROM capa_action_item_notes WHERE action_item_id = $1 ORDER BY created_at ASC`, [ai.id]);
+                        } catch (e) { ai.notes = []; }
+                      }
+                      relatedRecords.actionItems = actionItems;
+                    }
                   } catch (e) { /* non-fatal */ }
                 } else if (context.recordType === 'complaints') {
                   if (record.linked_ccr_id) {
@@ -1609,6 +1671,20 @@ router.post('/ai/chat', async (req, res) => {
     }
     const userName = req.session?.user?.display_name || req.session?.user?.username || 'Operator';
     systemPrompt += `\n\nThe current user is: ${userName} (role: ${req.session?.user?.role || 'unknown'})`;
+
+    // Surface the current user's open CAPA action items so Jarvis can reference/update them
+    try {
+      const myTasks = await db.all(
+        `SELECT ai.id, ai.title, ai.due_date, ai.status, ai.capa_id, c.capa_id AS capa_ref
+         FROM capa_action_items ai JOIN capas c ON ai.capa_id = c.id
+         WHERE ai.assigned_to = $1 AND ai.status != 'completed' AND c.archived = 0
+         ORDER BY ai.due_date ASC NULLS LAST LIMIT 25`,
+        [userName]
+      );
+      if (myTasks?.length) {
+        systemPrompt += `\n\n## ${userName}'s Open Tasks (assigned CAPA action items)\nThese are the current user's open tasks. You can update their status with update_action_item_status or add notes with add_action_item_note (reference them by action_item_id):\n${JSON.stringify(myTasks, null, 2)}`;
+      }
+    } catch (e) { /* non-fatal */ }
 
     // Stream response via SSE
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');

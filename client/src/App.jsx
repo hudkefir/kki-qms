@@ -21,6 +21,7 @@ import PlannerBatchDetail from './pages/PlannerBatchDetail';
 import PlannerPODetail from './pages/PlannerPODetail';
 import Fermentation from './pages/Fermentation';
 import DailyTasks from './pages/DailyTasks';
+import MyTasks from './pages/MyTasks';
 import InventoryCounts from './pages/InventoryCounts';
 import InventoryCountDetail from './pages/InventoryCountDetail';
 import PickLists from './pages/PickLists';
@@ -131,6 +132,7 @@ export default function App() {
         { to: '/ccrs', icon: FileCheck, label: 'CCRs' },
         { to: '/deviations', icon: AlertOctagon, label: 'Deviations' },
         { to: '/capas', icon: ShieldCheck, label: 'CAPAs' },
+        { to: '/my-tasks', icon: ListTodo, label: 'My Tasks' },
         { to: '/change-requests', icon: GitPullRequest, label: 'Change Control' },
         { to: '/batch-testing', icon: FlaskConical, label: 'Batch Testing' },
         { to: '/equipment', icon: Cog, label: 'Equipment' },
@@ -288,6 +290,7 @@ export default function App() {
             <Route path="/deviations/:id" element={<DeviationDetail />} />
             <Route path="/capas" element={<CAPAs />} />
             <Route path="/capas/:id" element={<CAPADetail />} />
+            <Route path="/my-tasks" element={<MyTasks />} />
             <Route path="/equipment" element={<Equipment />} />
             <Route path="/equipment/:id" element={<EquipmentDetail />} />
             <Route path="/maintenance" element={<Maintenance />} />
