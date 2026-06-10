@@ -371,8 +371,9 @@ router.get('/deviations/:id/audit-trail', async (req, res) => {
 // GET /api/deviations
 router.get('/deviations', async (req, res) => {
   try {
-    const { status, classification, category, search } = req.query;
+    const { status, classification, category, search, include_archived } = req.query;
     let query = 'SELECT * FROM deviation_reports WHERE 1=1';
+    if (include_archived !== 'true') { query += ' AND (archived = 0 OR archived IS NULL)'; }
     const params = [];
 
     if (status) { query += ' AND status = ?'; params.push(status); }
@@ -560,6 +561,46 @@ router.delete('/deviations/:id', requireRole('admin'), async (req, res) => {
     logAudit(req, 'delete_deviation', 'deviation_reports', req.params.id, dev.report_id, { deleted: dev.title });
     broadcast('deviation_deleted', { id: req.params.id });
     res.json({ success: true });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PATCH /api/deviations/:id/archive
+router.patch('/deviations/:id/archive', requireWriteAccess, async (req, res) => {
+  try {
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+    if (!dev) return res.status(404).json({ error: 'Deviation not found' });
+    if (dev.archived === 1) return res.json({ message: 'Already archived', deviation: dev });
+
+    const sessionUser = req.session?.user;
+    const updatedBy = sessionUser?.display_name || sessionUser?.username || '';
+    await db.run('UPDATE deviation_reports SET archived = 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [updatedBy, req.params.id]);
+    const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+
+    logAudit(req, 'archive_deviation', 'deviation_reports', updated.id, updated.report_id, { old_values: { archived: 0 }, new_values: { archived: 1 } });
+    broadcast({ type: 'deviation_archived', deviation: updated });
+    res.json(updated);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PATCH /api/deviations/:id/unarchive
+router.patch('/deviations/:id/unarchive', requireWriteAccess, async (req, res) => {
+  try {
+    const dev = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+    if (!dev) return res.status(404).json({ error: 'Deviation not found' });
+    if (!dev.archived) return res.json({ message: 'Not archived', deviation: dev });
+
+    const sessionUser = req.session?.user;
+    const updatedBy = sessionUser?.display_name || sessionUser?.username || '';
+    await db.run('UPDATE deviation_reports SET archived = 0, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [updatedBy, req.params.id]);
+    const updated = await db.get('SELECT * FROM deviation_reports WHERE id = ?', [req.params.id]);
+
+    logAudit(req, 'unarchive_deviation', 'deviation_reports', updated.id, updated.report_id, { old_values: { archived: 1 }, new_values: { archived: 0 } });
+    broadcast({ type: 'deviation_unarchived', deviation: updated });
+    res.json(updated);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
@@ -910,8 +951,9 @@ router.get('/deviations/:id/similar', async (req, res) => {
 // GET /api/capas
 router.get('/capas', async (req, res) => {
   try {
-    const { status, source_type, overdue, search } = req.query;
+    const { status, source_type, overdue, search, include_archived } = req.query;
     let query = 'SELECT * FROM capas WHERE 1=1';
+    if (include_archived !== 'true') { query += ' AND (archived = 0 OR archived IS NULL)'; }
     const params = [];
 
     if (status) { query += ' AND status = ?'; params.push(status); }
@@ -1468,6 +1510,39 @@ router.get('/change-control/dashboard', async (req, res) => {
 
 // ==================== CAPA ACTION ITEMS ====================
 
+// GET /api/action-items — aggregate action items across all CAPAs (task inbox / My Tasks)
+// Query params: ?mine=true (assigned to current user), ?assigned_to=Name, ?status=pending
+router.get('/action-items', async (req, res) => {
+  try {
+    const { assigned_to, status, mine } = req.query;
+    const where = ['c.archived = 0'];
+    const params = [];
+    if (mine === 'true') {
+      const me = req.session?.user?.display_name || req.session?.user?.username || '';
+      where.push('ai.assigned_to = ?');
+      params.push(me);
+    } else if (assigned_to) {
+      where.push('ai.assigned_to = ?');
+      params.push(assigned_to);
+    }
+    if (status) {
+      where.push('ai.status = ?');
+      params.push(status);
+    }
+    const sql = `SELECT ai.id, ai.title, ai.description, ai.assigned_to, ai.due_date, ai.status,
+                        ai.created_at, ai.completed_at, ai.capa_id,
+                        c.capa_id AS capa_ref, c.title AS capa_title, c.status AS capa_status
+                 FROM capa_action_items ai
+                 JOIN capas c ON ai.capa_id = c.id
+                 WHERE ${where.join(' AND ')}
+                 ORDER BY (ai.status = 'completed'), ai.due_date ASC NULLS LAST, ai.created_at ASC`;
+    const rows = await db.all(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/capas/:id/action-items
 router.get('/capas/:id/action-items', async (req, res) => {
   try {
@@ -1542,6 +1617,46 @@ router.put('/capas/:id/action-items/:itemId', requireWriteAccess, async (req, re
   }
 });
 
+// PATCH /api/capas/:id/archive
+router.patch('/capas/:id/archive', requireWriteAccess, async (req, res) => {
+  try {
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
+    if (!capa) return res.status(404).json({ error: 'CAPA not found' });
+    if (capa.archived === 1) return res.json({ message: 'Already archived', capa });
+
+    const sessionUser = req.session?.user;
+    const updatedBy = sessionUser?.display_name || sessionUser?.username || '';
+    await db.run('UPDATE capas SET archived = 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [updatedBy, req.params.id]);
+    const updated = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
+
+    logAudit(req, 'archive_capa', 'capas', updated.id, updated.capa_id, { old_values: { archived: 0 }, new_values: { archived: 1 } });
+    broadcast({ type: 'capa_archived', capa: updated });
+    res.json(updated);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PATCH /api/capas/:id/unarchive
+router.patch('/capas/:id/unarchive', requireWriteAccess, async (req, res) => {
+  try {
+    const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
+    if (!capa) return res.status(404).json({ error: 'CAPA not found' });
+    if (!capa.archived) return res.json({ message: 'Not archived', capa });
+
+    const sessionUser = req.session?.user;
+    const updatedBy = sessionUser?.display_name || sessionUser?.username || '';
+    await db.run('UPDATE capas SET archived = 0, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [updatedBy, req.params.id]);
+    const updated = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
+
+    logAudit(req, 'unarchive_capa', 'capas', updated.id, updated.capa_id, { old_values: { archived: 1 }, new_values: { archived: 0 } });
+    broadcast({ type: 'capa_unarchived', capa: updated });
+    res.json(updated);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // DELETE /api/capas/:id/action-items/:itemId
 router.delete('/capas/:id/action-items/:itemId', requireWriteAccess, async (req, res) => {
   try {
@@ -1553,6 +1668,45 @@ router.delete('/capas/:id/action-items/:itemId', requireWriteAccess, async (req,
     logAudit(req, 'delete_capa_action_item', 'capa_action_items', req.params.itemId, capa?.capa_id, { deleted: item.title });
     broadcast('capa_action_item_deleted', { id: Number(req.params.itemId), capa_id: Number(req.params.id) });
     res.json({ success: true });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==================== CAPA ACTION ITEM NOTES ====================
+
+// GET /api/capas/:id/action-items/:itemId/notes
+router.get('/capas/:id/action-items/:itemId/notes', async (req, res) => {
+  try {
+    const item = await db.get('SELECT * FROM capa_action_items WHERE id = ? AND capa_id = ?', [req.params.itemId, req.params.id]);
+    if (!item) return res.status(404).json({ error: 'Action item not found' });
+    const notes = await db.all('SELECT * FROM capa_action_item_notes WHERE action_item_id = ? ORDER BY created_at ASC', [req.params.itemId]);
+    res.json(notes);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/capas/:id/action-items/:itemId/notes
+router.post('/capas/:id/action-items/:itemId/notes', requireWriteAccess, async (req, res) => {
+  try {
+    const item = await db.get('SELECT * FROM capa_action_items WHERE id = ? AND capa_id = ?', [req.params.itemId, req.params.id]);
+    if (!item) return res.status(404).json({ error: 'Action item not found' });
+
+    const { note } = req.body;
+    if (!note || !note.trim()) return res.status(400).json({ error: 'note is required' });
+
+    const author = req.session?.user?.display_name || req.session?.user?.username || 'Unknown';
+    const info = await db.run(
+      'INSERT INTO capa_action_item_notes (action_item_id, note, author) VALUES (?, ?, ?)',
+      [req.params.itemId, note.trim(), author]
+    );
+
+    const created = await db.get('SELECT * FROM capa_action_item_notes WHERE id = ?', [info.lastInsertRowid]);
+    const capa = await db.get('SELECT capa_id FROM capas WHERE id = ?', [req.params.id]);
+    logAudit(req, 'create_capa_action_item_note', 'capa_action_item_notes', created.id, capa?.capa_id, { new_values: { action_item_id: Number(req.params.itemId), note: note.trim() } });
+    broadcast('capa_action_item_note_created', { ...created, capa_id: Number(req.params.id) });
+    res.status(201).json(created);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
