@@ -196,7 +196,7 @@ function EditableCard({ icon: Icon, iconColor, title, value, rawValue, placehold
   };
 
   const handleCancel = () => {
-    setDraft(value || '');
+    setDraft(editableValue);
     setEditing(false);
   };
 
@@ -206,7 +206,7 @@ function EditableCard({ icon: Icon, iconColor, title, value, rawValue, placehold
         <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
           {Icon && <Icon className={`w-4 h-4 ${iconColor}`} />}
           {title}
-          {aiSuggestProps && editing && <AiSuggestButton {...aiSuggestProps} onSuggestion={(text) => { setDraft(text); aiSuggestProps.onSuggestion?.(text); }} />}
+          {aiSuggestProps && editing && <AiSuggestButton {...aiSuggestProps} onSuggestion={(text) => { setDraft(typeof text === 'string' ? text : ''); aiSuggestProps.onSuggestion?.(text); }} />}
         </h3>
         {isAdmin && !editing && (
           <button
