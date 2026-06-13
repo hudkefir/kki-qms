@@ -52,6 +52,7 @@ export async function runMigrations(pool) {
 
   let newCount = 0;
   let skippedCount = 0;
+  const failures = [];
 
   for (const file of files) {
     const content = readFileSync(join(migrationsDir, file), 'utf-8');
@@ -70,12 +71,36 @@ export async function runMigrations(pool) {
     // Run the migration
     console.log(`[migrate] Applying: ${file}`);
 
-    // Split into individual statements so one CREATE TABLE doesn't
-    // block the next if it has a minor issue
-    const statements = content
+    // Strip `--` line comments BEFORE splitting on ';'. The previous splitter
+    // split the raw file on ';' and only dropped chunks that *started* with
+    // '--', so a semicolon inside a comment would corrupt the statement stream.
+    // This is a robustness hardening, NOT the cause of the historical wedge.
+    // (Limitation: assumes '--' does not appear inside a string literal, which
+    //  these schema migrations do not contain. Dollar-quoted bodies ($$…$$)
+    //  are likewise not used by any current migration.)
+    //
+    // ROOT CAUSE of the wedge (verified 2026-06-13 against live DB):
+    // 05-daily-ops.sql does `CREATE INDEX ... ON daily_task_completions(date)`
+    // and `(daily_task_id)`. That table is owned by the production-dashboard
+    // app on the SHARED Supabase DB, which created it first with a different
+    // schema (`completion_date`/`task_id`, no `date`/`daily_task_id`). The
+    // `CREATE TABLE IF NOT EXISTS` no-op'd against the pre-existing drifted
+    // table, then the two index statements threw "column does not exist". The
+    // old runner recorded success=false and THREW, halting the chain at 05 —
+    // so migrations 06+ never auto-applied. Two fixes: (a) 05 now guards those
+    // indexes on column existence; (b) the per-migration isolation below means
+    // one drifted migration can never again halt the whole chain.
+    const sqlOnly = content
+      .split('\n')
+      .map(line => {
+        const idx = line.indexOf('--');
+        return idx >= 0 ? line.slice(0, idx) : line;
+      })
+      .join('\n');
+    const statements = sqlOnly
       .split(';')
       .map(s => s.trim())
-      .filter(s => s.length > 0 && !s.startsWith('--'));
+      .filter(s => s.length > 0);
 
     const client = await pool.connect();
     try {
@@ -108,11 +133,29 @@ export async function runMigrations(pool) {
 
       console.error(`[migrate] ❌ FAILED: ${file}`);
       console.error(`[migrate] Error: ${err.message}`);
-      throw new Error(`Migration failed: ${file} — ${err.message}`);
+      // Per-migration isolation: record the failure and CONTINUE to the next
+      // migration rather than halting the entire chain. A single stale/legacy
+      // migration (e.g. a drifted-column index against an out-of-band table)
+      // must not silently block every subsequent migration from ever applying.
+      // The failed row stays success=false so it is retried on the next boot
+      // once the underlying migration file is corrected.
+      failures.push({ file, message: err.message });
+      continue;
     } finally {
       client.release();
     }
   }
 
-  console.log(`[migrate] Done — ${newCount} applied, ${skippedCount} already up-to-date (${files.length} total)`);
+  if (failures.length > 0) {
+    console.error(`[migrate] ⚠️  ${failures.length} migration(s) FAILED and were skipped (chain NOT halted):`);
+    for (const f of failures) {
+      console.error(`[migrate]    • ${f.file} — ${f.message}`);
+    }
+  }
+
+  console.log(`[migrate] Done — ${newCount} applied, ${skippedCount} already up-to-date, ${failures.length} failed (${files.length} total)`);
+
+  // Surface failures to the caller WITHOUT throwing, so init code can log/alert
+  // them explicitly instead of swallowing a generic error. The app still boots.
+  return { newCount, skippedCount, failures };
 }

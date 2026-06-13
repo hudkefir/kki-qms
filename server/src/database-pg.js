@@ -135,11 +135,22 @@ const db = {
 
 // ─── Initialize on import ────────────────────────────────────────────────────
 try {
-  await runMigrations(pool);
-  console.log('PostgreSQL connected and tables verified');
+  const result = await runMigrations(pool);
+  if (result?.failures?.length) {
+    // runMigrations no longer throws on a failed migration — it isolates the
+    // failure and continues the chain. Surface it LOUDLY here instead of the
+    // old "tables likely already exist" swallow that hid a wedged runner for
+    // weeks. App still boots (tables generally pre-exist), but the failure is
+    // explicit and actionable in the logs.
+    console.error(`PostgreSQL init: ${result.failures.length} migration(s) failed — see [migrate] log above. NOT fatal; investigate the listed files.`);
+  } else {
+    console.log('PostgreSQL connected and tables verified');
+  }
 } catch (err) {
-  console.error('PostgreSQL init error:', err.message);
-  // Don't crash — tables likely already exist in Supabase
+  // Defensive: runMigrations should not throw anymore, but if a bootstrap-level
+  // error (e.g. cannot create schema_migrations) occurs, log it and keep the
+  // app up rather than crash-looping a live service.
+  console.error('PostgreSQL init error (bootstrap):', err.message);
 }
 
 /**

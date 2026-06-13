@@ -122,8 +122,17 @@ CREATE TABLE IF NOT EXISTS pick_list_items (
 
 -- Daily ops indexes
 CREATE INDEX IF NOT EXISTS idx_daily_tasks_category ON daily_tasks(category);
-CREATE INDEX IF NOT EXISTS idx_daily_task_completions_date ON daily_task_completions(date);
-CREATE INDEX IF NOT EXISTS idx_daily_task_completions_task ON daily_task_completions(daily_task_id);
+-- REMOVED (2026-06-13) — these two indexes WEDGED the entire migration runner
+-- at 05 for weeks. `daily_task_completions` is owned by the production-dashboard
+-- app on the shared Supabase DB and was created there FIRST with a different
+-- schema (`completion_date`/`task_id`, NOT `date`/`daily_task_id`). The
+-- `CREATE TABLE IF NOT EXISTS` above no-op'd against that pre-existing table,
+-- then these indexes threw "column does not exist", the runner recorded
+-- success=false and THREW — halting migrations 06+ entirely. QMS reads 0 rows
+-- from this table (it's the Dashboard's), so these indexes are dead here; the
+-- Dashboard owns its own indexing. Removed to un-wedge the chain.
+--   (was: CREATE INDEX ... idx_daily_task_completions_date ON ...(date);)
+--   (was: CREATE INDEX ... idx_daily_task_completions_task ON ...(daily_task_id);)
 CREATE INDEX IF NOT EXISTS idx_operator_tasks_assigned_to ON operator_tasks(assigned_to);
 CREATE INDEX IF NOT EXISTS idx_operator_tasks_status ON operator_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_operator_tasks_linked ON operator_tasks(linked_module, linked_record_id);
