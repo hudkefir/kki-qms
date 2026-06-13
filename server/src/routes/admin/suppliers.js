@@ -342,8 +342,12 @@ router.get("/suppliers/:id/documents/:docId/download", async (req, res) => {
   try {
     const doc = await db.get("SELECT * FROM supplier_documents WHERE id = ? AND supplier_id = ?", [req.params.docId, req.params.id]);
     if (!doc) return res.status(404).json({ error: "Document not found" });
-    res.download(join(supplierDocsDir, doc.filename), doc.original_name);
+    const buffer = await downloadFile(doc.filename);
+    res.setHeader('Content-Disposition', `attachment; filename="${doc.original_name}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.send(buffer);
   } catch (err) {
+    console.error("Supplier doc download error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -355,7 +359,7 @@ router.delete("/suppliers/:id/documents/:docId", requireRole("admin"), async (re
     if (!doc) return res.status(404).json({ error: "Document not found" });
 
     // Remove file from Supabase storage
-    try { await deleteFile('supplier-docs/' + doc.filename); } catch (e) { /* file may already be gone */ }
+    try { await deleteFile(doc.filename); } catch (e) { /* file may already be gone */ }
 
     await db.run("DELETE FROM supplier_documents WHERE id = ?", [doc.id]);
 
