@@ -64,10 +64,74 @@ try {
       created_by TEXT DEFAULT '',
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS supplier_checklist (
+      id SERIAL PRIMARY KEY,
+      supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+      item_name TEXT NOT NULL,
+      item_category TEXT DEFAULT 'documentation',
+      required INTEGER DEFAULT 1,
+      completed INTEGER DEFAULT 0,
+      completed_date TEXT,
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT (CURRENT_TIMESTAMP),
+      updated_at TEXT DEFAULT (CURRENT_TIMESTAMP)
+    );
+    CREATE INDEX IF NOT EXISTS idx_supplier_checklist_supplier ON supplier_checklist(supplier_id);
   `);
 } catch (e) {
   console.log('Supplier tables already exist or migration error:', e.message);
 }
+
+// ==================== STANDARD CHECKLIST TEMPLATE ====================
+// Default required-document set seeded for every supplier. Items are required
+// by default; staff toggle individual items to "N/A" (optional) per supplier
+// via the PATCH endpoint. This drives the green-check completion % .
+const STANDARD_CHECKLIST = [
+  { item_name: 'Supplier Evaluation Checklist (KK-FRM-00900)', item_category: 'documentation' },
+  { item_name: 'Certificate of Analysis (COA)',                item_category: 'quality' },
+  { item_name: 'Food Safety Certification (SQF/BRC/GFSI)',     item_category: 'certification' },
+  { item_name: 'Product Specification Sheet',                  item_category: 'documentation' },
+  { item_name: 'Certificate of Insurance (COI)',               item_category: 'compliance' },
+];
+
+/**
+ * Idempotently seed the standard checklist for one supplier.
+ * No-op if the supplier already has ANY checklist rows (so we never clobber
+ * existing per-supplier customisation or N/A toggles).
+ * @returns {Promise<number>} number of items inserted (0 if skipped)
+ */
+async function seedChecklistForSupplier(supplierId) {
+  const existing = await db.get('SELECT COUNT(*) as c FROM supplier_checklist WHERE supplier_id = ?', [supplierId]);
+  if (existing && existing.c > 0) return 0;
+  let inserted = 0;
+  for (const item of STANDARD_CHECKLIST) {
+    await db.run(
+      'INSERT INTO supplier_checklist (supplier_id, item_name, item_category, required, completed) VALUES (?, ?, ?, 1, 0)',
+      [supplierId, item.item_name, item.item_category]
+    );
+    inserted++;
+  }
+  return inserted;
+}
+
+// One-time boot backfill: give every existing supplier with an empty checklist
+// the standard set, so green-check bars populate instead of showing "not configured".
+(async () => {
+  try {
+    const suppliers = await db.all('SELECT id FROM suppliers');
+    let seededSuppliers = 0, seededItems = 0;
+    for (const s of suppliers) {
+      const n = await seedChecklistForSupplier(s.id);
+      if (n > 0) { seededSuppliers++; seededItems += n; }
+    }
+    if (seededSuppliers > 0) {
+      console.log(`[supplier_checklist] backfill seeded ${seededItems} items across ${seededSuppliers} suppliers`);
+    }
+  } catch (e) {
+    console.log('[supplier_checklist] backfill skipped:', e.message);
+  }
+})();
 
 // GET /api/suppliers
 router.get('/suppliers', async (req, res) => {
@@ -185,6 +249,8 @@ router.post('/suppliers', requireWriteAccess, async (req, res) => {
     const info = await db.run('INSERT INTO suppliers (name, contact_name, contact_email, contact_phone, address, products_supplied, status, approval_date, next_review_date, risk_level, certification, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [name, contact_name, contact_email, contact_phone, address, products_supplied, status, approval_date, next_review_date, risk_level, certification, notes, created_by]);
 
     const created = await db.get('SELECT * FROM suppliers WHERE id = ?', [info.lastInsertRowid]);
+    // Seed the standard required-document checklist so the green-check bar is populated from day one.
+    try { await seedChecklistForSupplier(created.id); } catch (seedErr) { console.log('Checklist seed on create failed:', seedErr.message); }
     logAudit(req, 'create_supplier', 'suppliers', created.id, name, { new_values: sanitized });
     broadcast('supplier_created', created);
     res.status(201).json(created);
@@ -428,6 +494,27 @@ router.patch("/suppliers/:id/checklist/:itemId", requireWriteAccess, async (req,
     updates.push("updated_at = CURRENT_TIMESTAMP"); params.push(req.params.itemId);
     await db.run("UPDATE supplier_checklist SET " + updates.join(", ") + " WHERE id = ?", params);
     res.json(await db.get("SELECT * FROM supplier_checklist WHERE id = ?", [req.params.itemId]));
+  } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
+// DELETE /api/suppliers/:id/checklist/:itemId — permanently remove a requirement
+router.delete("/suppliers/:id/checklist/:itemId", requireWriteAccess, async (req, res) => {
+  try {
+    const item = await db.get("SELECT * FROM supplier_checklist WHERE id = ? AND supplier_id = ?", [req.params.itemId, req.params.id]);
+    if (!item) return res.status(404).json({ error: "Checklist item not found" });
+    await db.run("DELETE FROM supplier_checklist WHERE id = ?", [req.params.itemId]);
+    logAudit(req, "delete_checklist_item", "supplier_checklist", item.id, item.item_name, { old_values: { item_name: item.item_name } });
+    res.json({ success: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
+});
+
+// POST /api/suppliers/:id/checklist/seed — (re)seed standard checklist for a supplier (idempotent: skips if items exist)
+router.post("/suppliers/:id/checklist/seed", requireWriteAccess, async (req, res) => {
+  try {
+    const supplier = await db.get("SELECT * FROM suppliers WHERE id = ?", [req.params.id]);
+    if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const inserted = await seedChecklistForSupplier(req.params.id);
+    res.json({ success: true, inserted });
   } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 

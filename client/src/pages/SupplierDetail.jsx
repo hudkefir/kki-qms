@@ -109,6 +109,23 @@ export default function SupplierDetail() {
     } catch (err) { alert('Error: ' + err.message); }
   };
 
+  const handleAddRequirement = async () => {
+    const name = prompt('Document / requirement name (e.g. "Allergen Statement", "Organic Certificate"):');
+    if (!name || !name.trim()) return;
+    try {
+      await apiPost(`/api/suppliers/${id}/checklist`, { item_name: name.trim(), required: true, completed: false });
+      refetchChecklist();
+    } catch (err) { alert('Error: ' + err.message); }
+  };
+
+  const handleDeleteRequirement = async (itemId, itemName) => {
+    if (!confirm(`Remove "${itemName}" from this supplier's requirements? This deletes it entirely (use N/A to keep it on record).`)) return;
+    try {
+      await apiDelete(`/api/suppliers/${id}/checklist/${itemId}`);
+      refetchChecklist();
+    } catch (err) { alert('Error: ' + err.message); }
+  };
+
   if (loading) return <LoadingSpinner message="Loading supplier..." />;
   if (error || !supplier) return (
     <div className="text-center py-16">
@@ -499,27 +516,38 @@ export default function SupplierDetail() {
               </p>
             )}
           </div>
-          {checklist && (
-            <div className="flex items-center gap-2">
-              <div className="w-32 bg-gray-200 rounded-full h-3">
-                <div
-                  className={`h-3 rounded-full transition-all ${
-                    checklist.percentage === 100 ? 'bg-green-500' :
-                    checklist.percentage >= 50 ? 'bg-blue-500' :
-                    'bg-amber-500'
-                  }`}
-                  style={{ width: checklist.percentage + '%' }}
-                />
+          <div className="flex items-center gap-3">
+            {checklist && checklist.total_required > 0 && (
+              <div className="flex items-center gap-2">
+                <div className="w-32 bg-gray-200 rounded-full h-3">
+                  <div
+                    className={`h-3 rounded-full transition-all ${
+                      checklist.percentage === 100 ? 'bg-green-500' :
+                      checklist.percentage >= 50 ? 'bg-blue-500' :
+                      'bg-amber-500'
+                    }`}
+                    style={{ width: checklist.percentage + '%' }}
+                  />
+                </div>
+                <span className={`text-sm font-bold ${
+                  checklist.percentage === 100 ? 'text-green-600' :
+                  checklist.percentage >= 50 ? 'text-blue-600' :
+                  'text-amber-600'
+                }`}>
+                  {checklist.percentage}%
+                </span>
               </div>
-              <span className={`text-sm font-bold ${
-                checklist.percentage === 100 ? 'text-green-600' :
-                checklist.percentage >= 50 ? 'text-blue-600' :
-                'text-amber-600'
-              }`}>
-                {checklist.percentage}%
-              </span>
-            </div>
-          )}
+            )}
+            {canWrite() && (
+              <button
+                onClick={handleAddRequirement}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-navy-600 hover:text-navy-800 hover:bg-navy-50 rounded-lg border border-gray-200 hover:border-navy-200 transition-colors"
+                title="Add a document requirement"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add requirement
+              </button>
+            )}
+          </div>
         </div>
 
         {checklistLoading ? (
@@ -573,6 +601,15 @@ export default function SupplierDetail() {
                       N/A
                     </button>
                   )}
+                  {canWrite() && (
+                    <button
+                      onClick={() => handleDeleteRequirement(item.id, item.item_name)}
+                      className="flex-shrink-0 p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                      title="Delete requirement"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -612,7 +649,17 @@ export default function SupplierDetail() {
             )}
           </div>
         ) : (
-          <p className="text-sm text-gray-400">No checklist items configured</p>
+          <div className="text-center py-6">
+            <p className="text-sm text-gray-400 mb-3">No checklist items configured</p>
+            {canWrite() && (
+              <button
+                onClick={handleAddRequirement}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-navy-600 hover:text-navy-800 hover:bg-navy-50 rounded-lg border border-gray-200 hover:border-navy-200 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add first requirement
+              </button>
+            )}
+          </div>
         )}
       </div>
 
