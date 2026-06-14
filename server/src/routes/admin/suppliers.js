@@ -83,29 +83,57 @@ try {
   console.log('Supplier tables already exist or migration error:', e.message);
 }
 
-// ==================== STANDARD CHECKLIST TEMPLATE ====================
-// Default required-document set seeded for every supplier. Items are required
-// by default; staff toggle individual items to "N/A" (optional) per supplier
-// via the PATCH endpoint. This drives the green-check completion % .
-const STANDARD_CHECKLIST = [
-  { item_name: 'Supplier Evaluation Checklist (KK-FRM-00900)', item_category: 'documentation' },
-  { item_name: 'Certificate of Analysis (COA)',                item_category: 'quality' },
-  { item_name: 'Food Safety Certification (SQF/BRC/GFSI)',     item_category: 'certification' },
-  { item_name: 'Product Specification Sheet',                  item_category: 'documentation' },
-  { item_name: 'Certificate of Insurance (COI)',               item_category: 'compliance' },
-];
+// ==================== STANDARD CHECKLIST TEMPLATES (BY TYPE) ====================
+// The required-document set differs by supplier type. Items are required by
+// default for their type; staff toggle individual items to "N/A" (optional)
+// per supplier via the PATCH endpoint. This drives the green-check completion %.
+//
+// Type sets (approved by Hudson 2026-06-14):
+//   ingredient  : Eval + COA + Food Safety (SQF) + COI
+//   packaging   : Eval + Product Spec + COI
+//   distributor : Eval only
+//   default     : full set (used when type can't be inferred — safest fallback)
+const DOC = {
+  EVAL: { item_name: 'Supplier Evaluation Checklist (KK-FRM-00900)', item_category: 'documentation' },
+  COA:  { item_name: 'Certificate of Analysis (COA)',                item_category: 'quality' },
+  SQF:  { item_name: 'Food Safety Certification (SQF/BRC/GFSI)',     item_category: 'certification' },
+  SPEC: { item_name: 'Product Specification Sheet',                  item_category: 'documentation' },
+  COI:  { item_name: 'Certificate of Insurance (COI)',               item_category: 'compliance' },
+};
+
+const CHECKLIST_TEMPLATES = {
+  ingredient:  [DOC.EVAL, DOC.COA, DOC.SQF, DOC.COI],
+  packaging:   [DOC.EVAL, DOC.SPEC, DOC.COI],
+  distributor: [DOC.EVAL],
+  default:     [DOC.EVAL, DOC.COA, DOC.SQF, DOC.SPEC, DOC.COI],
+};
 
 /**
- * Idempotently seed the standard checklist for one supplier.
+ * Infer a supplier's type from its free-text fields. There is no dedicated
+ * `type` column, so we classify from products_supplied / notes / name.
+ * Returns one of: 'ingredient' | 'packaging' | 'distributor' | 'default'.
+ */
+function inferSupplierType(supplier) {
+  const hay = `${supplier.products_supplied || ''} ${supplier.notes || ''} ${supplier.name || ''}`.toLowerCase();
+  if (/\b(distribut|wholesale|unfi|kehe|onfc)\b/.test(hay)) return 'distributor';
+  if (/\b(label|packag|jar|cap|bottle|container|carton|film|bopp|closure|lid)\b/.test(hay)) return 'packaging';
+  if (/\b(coconut milk|syrup|monin|ingredient|coa|culture|sweetener|flavou?r|powder|extract|sugar|aroy)\b/.test(hay)) return 'ingredient';
+  return 'default';
+}
+
+/**
+ * Idempotently seed the type-appropriate checklist for one supplier.
  * No-op if the supplier already has ANY checklist rows (so we never clobber
- * existing per-supplier customisation or N/A toggles).
+ * existing per-supplier customisation, completions, or N/A toggles).
  * @returns {Promise<number>} number of items inserted (0 if skipped)
  */
 async function seedChecklistForSupplier(supplierId) {
   const existing = await db.get('SELECT COUNT(*) as c FROM supplier_checklist WHERE supplier_id = ?', [supplierId]);
   if (existing && existing.c > 0) return 0;
+  const supplier = await db.get('SELECT name, products_supplied, notes FROM suppliers WHERE id = ?', [supplierId]);
+  const template = CHECKLIST_TEMPLATES[inferSupplierType(supplier || {})] || CHECKLIST_TEMPLATES.default;
   let inserted = 0;
-  for (const item of STANDARD_CHECKLIST) {
+  for (const item of template) {
     await db.run(
       'INSERT INTO supplier_checklist (supplier_id, item_name, item_category, required, completed) VALUES (?, ?, ?, 1, 0)',
       [supplierId, item.item_name, item.item_category]
