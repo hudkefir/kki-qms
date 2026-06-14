@@ -115,8 +115,10 @@ const CHECKLIST_TEMPLATES = {
  */
 function inferSupplierType(supplier) {
   const hay = `${supplier.products_supplied || ''} ${supplier.notes || ''} ${supplier.name || ''}`.toLowerCase();
-  if (/\b(distribut|wholesale|unfi|kehe|onfc)\b/.test(hay)) return 'distributor';
-  if (/\b(label|packag|jar|cap|bottle|container|carton|film|bopp|closure|lid)\b/.test(hay)) return 'packaging';
+  // Stem-match (no trailing \b) so plurals/gerunds classify correctly:
+  // "Distributors"/"Distribution", "Containers", "Impackaging"/"Packaging", "Labels".
+  if (/distribut|wholesale|\bunfi\b|\bkehe\b|\bonfc\b/.test(hay)) return 'distributor';
+  if (/packag|\blabels?\b|\bjars?\b|\bbottles?\b|\bcaps?\b|\bcontainers?\b|\bcartons?\b|\bfilm\b|\bbopp\b|\bclosures?\b|\blids?\b/.test(hay)) return 'packaging';
   if (/\b(coconut milk|syrup|monin|ingredient|coa|culture|sweetener|flavou?r|powder|extract|sugar|aroy)\b/.test(hay)) return 'ingredient';
   return 'default';
 }
