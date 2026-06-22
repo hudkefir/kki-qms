@@ -1,0 +1,14 @@
+{
+  "bucket": "gs://REPLACE-WITH-YOUR-BACKUP-BUCKET",
+  "gcs_service_account": "~/.openclaw/secrets/gcs-backup-sa.json",
+  "gcloud_config_dir": "~/.openclaw/gcloud-backup",
+  "status_file": "/tmp/qms-backup-status.json",
+  "domains": {
+    "qms": {
+      "_comment": "Per-domain LOGICAL JSON export. Use include_prefixes/include_tables to scope to one domain's tables so this complements (not duplicates) any full-cluster pg_dump. Omit both to export every REST-exposed table.",
+      "source_file": "~/.openclaw/secrets/supabase.json",
+      "include_prefixes": ["capa", "deviation", "complaint", "sop", "audit"],
+      "include_tables": ["qms_sequence"]
+    }
+  }
+}

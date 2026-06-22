@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.kefirkultures.qms-backup</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>/Users/hudsonbay/Projects/kki-qms/scripts/backup/backup_qms.py</string>
+    </array>
+
+    <!-- Run every hour (3600s). Persists across reboots while in ~/Library/LaunchAgents. -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/hudsonbay/Library/Logs/qms-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/hudsonbay/Library/Logs/qms-backup.log</string>
+</dict>
+</plist>

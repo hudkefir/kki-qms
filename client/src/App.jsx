@@ -110,12 +110,16 @@ export default function App() {
   }
 
   const isOperator = user.role === 'operator';
+  // Production nav is hidden on the qms.kefirkultures.com domain (quality-only)
+  // until the ERP cutover. Auto-reappears when served from the erp. domain or localhost.
+  // Reversible: delete this line + restore the group inline to undo.
+  const hideProductionNav = typeof window !== 'undefined' && window.location.hostname === 'qms.kefirkultures.com';
   const navGroups = [
     { items: [
       { to: '/my-tasks', icon: LayoutDashboard, label: 'My Dashboard', end: true },
       { to: isOperator ? '/overview' : '/', icon: Home, label: 'Overview', end: !isOperator },
     ] },
-    { label: '🏭 Production',
+    ...(hideProductionNav ? [] : [{ label: '🏭 Production',
       items: [
         { to: '/production', icon: Factory, label: 'Production Dashboard' },
         { to: '/production/fermentation', icon: Beaker, label: 'Fermentation' },
@@ -124,7 +128,7 @@ export default function App() {
         { to: '/production/taskboard', icon: ListTodo, label: 'Production Tasks' },
         { to: '/production/boms', icon: FileSpreadsheet, label: 'BOMs / Recipes' },
       ]
-    },
+    }]),
     { label: '📋 Quality',
       items: [
         { to: '/document-guide', icon: HelpCircle, label: 'Document Guide' },
