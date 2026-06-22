@@ -2,31 +2,13 @@ import { Router } from 'express';
 import db from '../../database-pg.js';
 import { requireWriteAccess } from '../../authMiddleware.js';
 import { logAudit } from '../../auditMiddleware.js';
+// Reuse the working DB-backed OAuth token path from sos.js. The previous local
+// helper checked config.access_token against a static SOS_API_KEY shape, which
+// was always undefined → every call 503'd. sosApiFetch() here manages the
+// rotating OAuth token (sos_oauth table) and refresh/retry internally.
+import { sosApiFetch } from './sos.js';
 
 const router = Router();
-
-// SOS Inventory helpers (reuse same config as sosRoutes.js)
-function getSOSConfig() {
-  if (process.env.SOS_API_KEY) {
-    return { apiKey: process.env.SOS_API_KEY };
-  }
-  console.error('SOS_API_KEY environment variable not set');
-  return null;
-}
-
-async function sosApiFetch(path, token) {
-  const res = await fetch(`https://api.sosinventory.com${path}`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`SOS API ${res.status}: ${text}`);
-  }
-  return res.json();
-}
 
 // GET /api/picklists — list all pick lists
 router.get('/picklists', async (req, res) => {
@@ -204,12 +186,7 @@ router.get('/picklists/:id/print', async (req, res) => {
 // GET /api/picklists/sos/salesorders — pull sales orders from SOS Inventory
 router.get('/picklists/sos/salesorders', async (req, res) => {
   try {
-    const config = getSOSConfig();
-    if (!config || !config.access_token) {
-      return res.status(503).json({ error: 'SOS Inventory credentials not configured' });
-    }
-
-    const result = await sosApiFetch('/api/v2/salesorder?status=20', config.access_token);
+    const result = await sosApiFetch('/api/v2/salesorder?status=20');
     const orders = result.data || result || [];
 
     // Map to simplified format
@@ -231,7 +208,7 @@ router.get('/picklists/sos/salesorders', async (req, res) => {
     res.json(mapped);
   } catch (err) {
     console.error('SOS sales orders error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

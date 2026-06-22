@@ -113,7 +113,7 @@ async function refreshToken() {
   return inFlight;
 }
 
-async function getAccessToken() {
+export async function getAccessToken() {
   await ensureTable();
   const cur = await db.get(`SELECT access_token, expires_at FROM sos_oauth WHERE provider = 'sos'`);
   if (!cur) return null;
@@ -124,7 +124,7 @@ async function getAccessToken() {
 }
 
 // SOS API call with one automatic refresh-and-retry on 401 (token expired early/revoked).
-async function sosApiFetch(path, { retried = false } = {}) {
+export async function sosApiFetch(path, { retried = false } = {}) {
   const token = await getAccessToken();
   if (!token) { const e = new Error('SOS credentials not configured'); e.status = 503; throw e; }
   const res = await fetch(`${SOS_BASE}${path}`, {
@@ -156,25 +156,33 @@ router.get('/sos/lot/:lot', requireAuth, async (req, res) => {
     let items = [];
     let error = null;
 
-    // Try 1: Search lots
-    try {
-      const lotResult = await sosApiFetch(`/api/v2/lot?number=${encodeURIComponent(lot)}`);
+    // Try 1 + Try 2 run concurrently — the lot search and the item search are
+    // independent, so issuing them in parallel cuts the round-trip time roughly
+    // in half vs. the previous sequential calls.
+    const [lotRes, itemRes] = await Promise.allSettled([
+      sosApiFetch(`/api/v2/lot?number=${encodeURIComponent(lot)}`),
+      sosApiFetch(`/api/v2/item?lotnumber=${encodeURIComponent(lot)}`),
+    ]);
+
+    // Lot search result
+    if (lotRes.status === 'fulfilled') {
+      const lotResult = lotRes.value;
       if (lotResult && (lotResult.data?.length > 0 || lotResult.length > 0)) {
         lotData = lotResult.data || lotResult;
       }
-    } catch (e) {
-      if (e.status === 503) throw e;
-      error = e.message;
+    } else {
+      if (lotRes.reason?.status === 503) throw lotRes.reason;
+      error = lotRes.reason?.message;
     }
 
-    // Try 2: Search items with lot filter
-    try {
-      const itemResult = await sosApiFetch(`/api/v2/item?lotnumber=${encodeURIComponent(lot)}`);
+    // Item search result
+    if (itemRes.status === 'fulfilled') {
+      const itemResult = itemRes.value;
       if (itemResult && (itemResult.data?.length > 0 || itemResult.length > 0)) {
         items = itemResult.data || itemResult;
       }
-    } catch (e) {
-      if (!error) error = e.message;
+    } else {
+      if (!error) error = itemRes.reason?.message;
     }
 
     // Try 3: Search serial/lot numbers
