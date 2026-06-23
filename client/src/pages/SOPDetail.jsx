@@ -28,6 +28,8 @@ import {
   RefreshCw,
   X,
   Trash2,
+  Archive,
+  Star,
 } from 'lucide-react';
 import { useFetch, apiPut, apiPost, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
@@ -330,6 +332,28 @@ export default function SOPDetail() {
     } finally {
       setDeleting(false);
       setDeleteFileTarget(null);
+    }
+  };
+
+  const handlePromoteFile = async (fileId) => {
+    try {
+      await apiPost(`/api/files/${fileId}/promote`);
+      refetchFiles();
+      setEditFeedback({ type: 'success', message: 'File promoted to current version' });
+      setTimeout(() => setEditFeedback(null), 4000);
+    } catch (err) {
+      alert('Failed to promote file: ' + err.message);
+    }
+  };
+
+  const handleArchiveFile = async (fileId) => {
+    try {
+      await apiPost(`/api/files/${fileId}/archive`);
+      refetchFiles();
+      setEditFeedback({ type: 'success', message: 'File archived' });
+      setTimeout(() => setEditFeedback(null), 4000);
+    } catch (err) {
+      alert('Failed to archive file: ' + err.message);
     }
   };
 
@@ -909,14 +933,45 @@ export default function SOPDetail() {
                         </div>
                         <div className="divide-y divide-gray-100">
                           {versions.map(f => (
-                            <div key={f.id} className="px-4 py-2.5 flex items-center justify-between hover:bg-gray-50">
+                            <div key={f.id} className={`px-4 py-2.5 flex items-center justify-between hover:bg-gray-50 ${f.is_current === false ? 'opacity-50' : ''}`}>
                               <div className="flex items-center gap-3">
                                 <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded">v{f.version}</span>
+                                {f.is_current !== false ? (
+                                  <span className="text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <Star className="w-3 h-3" />
+                                    Current
+                                  </span>
+                                ) : (
+                                  <span className="text-xs font-medium text-gray-400 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <Archive className="w-3 h-3" />
+                                    Archived
+                                  </span>
+                                )}
                                 <span className="text-xs text-gray-500">{formatFileSize(f.file_size)}</span>
                                 <span className="text-xs text-gray-400">by {f.uploaded_by}</span>
                                 <span className="text-xs text-gray-400">{formatDate(f.uploaded_at)}</span>
                               </div>
                               <div className="flex items-center gap-2">
+                                {canWrite() && f.is_current === false && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handlePromoteFile(f.id); }}
+                                    className="flex items-center gap-1 text-xs text-green-600 hover:text-green-800 font-medium"
+                                    title="Promote to current version"
+                                  >
+                                    <Star className="w-3.5 h-3.5" />
+                                    Promote
+                                  </button>
+                                )}
+                                {canWrite() && f.is_current !== false && versions.length > 1 && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleArchiveFile(f.id); }}
+                                    className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-800 font-medium"
+                                    title="Archive this version"
+                                  >
+                                    <Archive className="w-3.5 h-3.5" />
+                                    Archive
+                                  </button>
+                                )}
                                 <button
                                   onClick={(e) => { e.stopPropagation(); openSopFileViewer(f); }}
                                   className="text-xs text-blue-500 hover:text-blue-700"

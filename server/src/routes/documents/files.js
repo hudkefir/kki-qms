@@ -62,9 +62,15 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
     // Upload to Supabase Storage
     await uploadFile(storagePath, req.file.buffer, fileType);
 
+    // Demote all previous versions of this file to archived
+    await db.run(
+      'UPDATE sop_files SET is_current = FALSE WHERE sop_id = ? AND original_name = ?',
+      [req.params.id, req.file.originalname]
+    );
+
     const info = await db.run(`
-      INSERT INTO sop_files (sop_id, filename, original_name, file_type, file_size, version, uploaded_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO sop_files (sop_id, filename, original_name, file_type, file_size, version, uploaded_by, is_current)
+      VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)
     `, [
       req.params.id,
       storagePath,
@@ -215,6 +221,69 @@ router.delete('/files/:id', requireAuth, requireRole('admin'), async (req, res) 
   } catch (err) {
     console.error('File delete error:', err);
     res.status(500).json({ error: 'File deletion failed' });
+  }
+});
+
+// POST /api/files/:id/promote — make this file the current version, archive all others
+router.post('/files/:id/promote', requireAuth, requireWriteAccess, async (req, res) => {
+  try {
+    if (!/^\d+$/.test(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid file ID' });
+    }
+
+    const file = await db.get(
+      'SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?',
+      [req.params.id]
+    );
+    if (!file) return res.status(404).json({ error: 'File not found' });
+
+    // Archive all versions of this file name under this SOP
+    await db.run(
+      'UPDATE sop_files SET is_current = FALSE WHERE sop_id = ? AND original_name = ?',
+      [file.sop_id, file.original_name]
+    );
+
+    // Promote the selected one
+    await db.run('UPDATE sop_files SET is_current = TRUE WHERE id = ?', [req.params.id]);
+
+    logAudit(req, 'promote_file', 'sops', file.sop_id, file.sop_number, {
+      filename: file.original_name,
+      version: file.version,
+      promoted_by: req.session.user.username,
+    });
+
+    res.json({ success: true, message: `v${file.version} promoted to current` });
+  } catch (err) {
+    console.error('File promote error:', err);
+    res.status(500).json({ error: 'File promotion failed' });
+  }
+});
+
+// POST /api/files/:id/archive — mark this file as archived (not current)
+router.post('/files/:id/archive', requireAuth, requireWriteAccess, async (req, res) => {
+  try {
+    if (!/^\d+$/.test(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid file ID' });
+    }
+
+    const file = await db.get(
+      'SELECT sf.*, s.sop_number FROM sop_files sf JOIN sops s ON sf.sop_id = s.id WHERE sf.id = ?',
+      [req.params.id]
+    );
+    if (!file) return res.status(404).json({ error: 'File not found' });
+
+    await db.run('UPDATE sop_files SET is_current = FALSE WHERE id = ?', [req.params.id]);
+
+    logAudit(req, 'archive_file', 'sops', file.sop_id, file.sop_number, {
+      filename: file.original_name,
+      version: file.version,
+      archived_by: req.session.user.username,
+    });
+
+    res.json({ success: true, message: `v${file.version} archived` });
+  } catch (err) {
+    console.error('File archive error:', err);
+    res.status(500).json({ error: 'File archival failed' });
   }
 });
 
