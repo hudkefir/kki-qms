@@ -307,6 +307,66 @@ router.post('/sop-categories', requireWriteAccess, async (req, res) => {
   }
 });
 
+// PUT /api/sop-categories/:id  — rename / activate / reorder (admin only)
+router.put('/sop-categories/:id', requireRole('admin'), async (req, res) => {
+  try {
+    const cat = await db.get('SELECT * FROM sop_categories WHERE id = ?', [req.params.id]);
+    if (!cat) return res.status(404).json({ error: 'Category not found' });
+
+    const sanitized = sanitizeBody(req.body);
+    const updates = [];
+    const params = [];
+    if (sanitized.name !== undefined && sanitized.name.trim()) {
+      updates.push('name = ?'); params.push(sanitized.name.trim());
+    }
+    if (sanitized.is_active !== undefined) {
+      updates.push('is_active = ?'); params.push(!!sanitized.is_active);
+    }
+    if (sanitized.sort_order !== undefined) {
+      updates.push('sort_order = ?'); params.push(parseInt(sanitized.sort_order, 10) || 0);
+    }
+    if (updates.length === 0) return res.json(cat);
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(req.params.id);
+    await db.run(`UPDATE sop_categories SET ${updates.join(', ')} WHERE id = ?`, params);
+
+    // Controlled list governs the label: cascade a rename to SOPs using this code
+    // so denormalized category_name stays consistent.
+    if (sanitized.name !== undefined && sanitized.name.trim() && sanitized.name.trim() !== cat.name) {
+      await db.run('UPDATE sops SET category_name = ? WHERE category_code = ?', [sanitized.name.trim(), cat.code]);
+    }
+
+    const updated = await db.get('SELECT * FROM sop_categories WHERE id = ?', [req.params.id]);
+    logAudit(req, 'update_sop_category', 'sop_categories', updated.id, cat.code, { old_values: cat, new_values: updated });
+    res.json(updated);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/sop-categories/:id  — remove if unused, else block (admin only)
+router.delete('/sop-categories/:id', requireRole('admin'), async (req, res) => {
+  try {
+    const cat = await db.get('SELECT * FROM sop_categories WHERE id = ?', [req.params.id]);
+    if (!cat) return res.status(404).json({ error: 'Category not found' });
+
+    const inUse = (await db.get('SELECT COUNT(*) as count FROM sops WHERE category_code = ?', [cat.code])).count;
+    if (Number(inUse) > 0) {
+      return res.status(409).json({
+        error: `Cannot delete: ${inUse} SOP(s) use this category. Deactivate it instead to hide it from the picker.`,
+        count: Number(inUse),
+      });
+    }
+
+    await db.run('DELETE FROM sop_categories WHERE id = ?', [req.params.id]);
+    logAudit(req, 'delete_sop_category', 'sop_categories', cat.id, cat.code, { old_values: cat });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // DELETE /api/sops/:id (admin only)
 router.delete('/sops/:id', requireRole('admin'), async (req, res) => {
   try {

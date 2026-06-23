@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
-import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail, ListTodo, LayoutDashboard, HelpCircle, Factory, Droplets, FileSpreadsheet } from 'lucide-react';
+import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail, ListTodo, LayoutDashboard, HelpCircle, Factory, Droplets, FileSpreadsheet, Tags } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -46,6 +46,7 @@ import Journal from './pages/Journal';
 import EmailScan from './pages/EmailScan';
 import OperatorDashboard from './pages/OperatorDashboard';
 import OperatorTasksAdmin from './pages/OperatorTasksAdmin';
+import SOPCategoriesAdmin from './pages/SOPCategoriesAdmin';
 import DocumentGuide from './pages/DocumentGuide';
 import ProductionDashboard from './pages/production/ProductionDashboard';
 import FermentationSchedule from './pages/production/FermentationSchedule';
@@ -165,6 +166,7 @@ export default function App() {
     ...(hasRole('admin') ? [{ label: 'Admin',
       items: [
         { to: '/admin/tasks', icon: ListTodo, label: 'Task Admin' },
+        { to: '/admin/sop-categories', icon: Tags, label: 'SOP Categories' },
         { to: '/users', icon: Users, label: 'Users' },
         { to: '/audit-logs', icon: ScrollText, label: 'Audit Log' },
       ]
@@ -317,6 +319,11 @@ export default function App() {
             <Route path="/admin/tasks" element={
               <ProtectedRoute roles={["admin"]} label="Admin">
                 <OperatorTasksAdmin />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/sop-categories" element={
+              <ProtectedRoute roles={["admin"]} label="Admin">
+                <SOPCategoriesAdmin />
               </ProtectedRoute>
             } />
             <Route path="/audit-logs" element={
