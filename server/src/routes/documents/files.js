@@ -42,6 +42,23 @@ function bumpVersion(current) {
   return parts.join('.');
 }
 
+/**
+ * Major bump: increment the FIRST numeric segment by 1 and zero the rest.
+ *   "1.0"   -> "2.0"
+ *   "1.3"   -> "2.0"
+ *   "0.9.2" -> "1.0.0"
+ * Used when the uploader flags the revision as a procedural (major) change.
+ * Falls back to "1.0" when the current value is missing/non-numeric.
+ */
+function bumpMajor(current) {
+  const parts = String(current || '1.0').trim().split('.');
+  const n = parseInt(parts[0], 10);
+  if (Number.isNaN(n)) return '1.0';
+  parts[0] = String(n + 1);
+  for (let i = 1; i < parts.length; i++) parts[i] = '0';
+  return parts.join('.');
+}
+
 const router = Router();
 
 // POST /api/sops/:id/upload
@@ -100,13 +117,24 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
     const created = await db.get('SELECT * FROM sop_files WHERE id = ?', [info.lastInsertRowid]);
 
     // Update the controlled-document version on upload.
-    // A version encoded in the filename (e.g. ..._v2.0.docx) is the manual
-    // override and wins (QA-controlled). Otherwise auto-bump the last segment.
+    // Precedence: (1) a version encoded in the filename (..._v2.0.docx) is the
+    // manual override and always wins; (2) else a "major" revision flag from the
+    // uploader bumps the whole number (1.x -> 2.0); (3) else default minor bump.
     const versionMatch = req.file.originalname.match(/_v(\d+(?:[._]\d+)+)/i);
+    const bumpType = String(req.body?.bump || 'minor').toLowerCase() === 'major' ? 'major' : 'minor';
     const previousDocVersion = sop.version;
-    const newDocVersion = versionMatch
-      ? versionMatch[1].replace(/_/g, '.')
-      : bumpVersion(sop.version);
+    let versionSource;
+    let newDocVersion;
+    if (versionMatch) {
+      newDocVersion = versionMatch[1].replace(/_/g, '.');
+      versionSource = 'filename';
+    } else if (bumpType === 'major') {
+      newDocVersion = bumpMajor(sop.version);
+      versionSource = 'major_bump';
+    } else {
+      newDocVersion = bumpVersion(sop.version);
+      versionSource = 'minor_bump';
+    }
     await db.run(
       "UPDATE sops SET version = ?, updated_at = datetime('now') WHERE id = ?",
       [newDocVersion, req.params.id]
@@ -118,7 +146,7 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
       size: req.file.size,
       doc_version_from: previousDocVersion,
       doc_version_to: newDocVersion,
-      version_source: versionMatch ? 'filename' : 'auto_bump',
+      version_source: versionSource,
     });
 
     res.status(201).json(created);

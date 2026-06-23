@@ -40,6 +40,32 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import FormattedText from '../components/FormattedText';
 import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
+
+// --- Version preview helpers (mirror server/src/routes/documents/files.js) ---
+function previewMinor(current) {
+  const parts = String(current || '1.0').trim().split('.');
+  const i = parts.length - 1;
+  const n = parseInt(parts[i], 10);
+  if (Number.isNaN(n)) return '1.0';
+  parts[i] = String(n + 1);
+  return parts.join('.');
+}
+function previewMajor(current) {
+  const parts = String(current || '1.0').trim().split('.');
+  const n = parseInt(parts[0], 10);
+  if (Number.isNaN(n)) return '1.0';
+  parts[0] = String(n + 1);
+  for (let i = 1; i < parts.length; i++) parts[i] = '0';
+  return parts.join('.');
+}
+// Filename-encoded version (..._v2.0.docx) is the manual override and wins.
+function previewNextVersion(current, filename, major) {
+  const m = String(filename || '').match(/_v(\d+(?:[._]\d+)+)/i);
+  if (m) return { value: m[1].replace(/_/g, '.'), source: 'filename' };
+  return major
+    ? { value: previewMajor(current), source: 'major' }
+    : { value: previewMinor(current), source: 'minor' };
+}
 import LinkedDocuments from '../components/LinkedDocuments';
 import SOPForms from '../components/SOPForms';
 
@@ -84,6 +110,8 @@ export default function SOPDetail() {
 
   // File upload
   const [uploading, setUploading] = useState(false);
+  const [pendingUpload, setPendingUpload] = useState(null); // staged File awaiting bump choice
+  const [majorRevision, setMajorRevision] = useState(false);
 
   // File delete
   const [deleteFileTarget, setDeleteFileTarget] = useState(null);
@@ -301,14 +329,24 @@ export default function SOPDetail() {
     }
   };
 
-  const handleFileUpload = async (e) => {
+  // Stage the selected file and open the revision dialog (instead of uploading
+  // immediately) so the uploader can declare minor vs. major before it writes
+  // to the controlled record.
+  const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setPendingUpload(file);
+    setMajorRevision(false);
+    e.target.value = '';
+  };
 
+  const handleConfirmUpload = async () => {
+    if (!pendingUpload) return;
     setUploading(true);
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', pendingUpload);
+      formData.append('bump', majorRevision ? 'major' : 'minor');
       const res = await fetch(`/api/sops/${id}/upload`, {
         method: 'POST',
         credentials: 'include',
@@ -319,11 +357,12 @@ export default function SOPDetail() {
         throw new Error(data.error || 'Upload failed');
       }
       refetchFiles();
+      setPendingUpload(null);
+      setMajorRevision(false);
     } catch (err) {
       alert('Upload failed: ' + err.message);
     } finally {
       setUploading(false);
-      e.target.value = '';
     }
   };
 
@@ -894,7 +933,7 @@ export default function SOPDetail() {
                       <input
                         type="file"
                         accept=".pdf,.docx,.doc"
-                        onChange={handleFileUpload}
+                        onChange={handleFileSelect}
                         disabled={uploading}
                         className="hidden"
                       />
@@ -1408,6 +1447,68 @@ export default function SOPDetail() {
       </Modal>
 
       {/* Delete File Confirmation Modal */}
+      {pendingUpload && (() => {
+        const preview = previewNextVersion(sop.version, pendingUpload.name, majorRevision);
+        const fromFilename = preview.source === 'filename';
+        return (
+          <Modal isOpen={true} onClose={() => { if (!uploading) { setPendingUpload(null); setMajorRevision(false); } }} title="Upload New Revision">
+            <div className="p-4 space-y-4">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-400">File</div>
+                <div className="text-sm font-medium text-gray-900 break-all">{pendingUpload.name}</div>
+              </div>
+
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-gray-500">Document version</span>
+                <span className="font-semibold text-gray-700">{sop.version || '1.0'}</span>
+                <ChevronRight className="w-4 h-4 text-gray-400" />
+                <span className="font-bold text-navy-800">{preview.value}</span>
+              </div>
+
+              {fromFilename ? (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Version <strong>{preview.value}</strong> is taken from the filename and overrides the toggle below (QA-controlled manual version).
+                </p>
+              ) : (
+                <label className="flex items-start gap-2.5 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
+                  <input
+                    type="checkbox"
+                    checked={majorRevision}
+                    onChange={(e) => setMajorRevision(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-navy-800 focus:ring-navy-700"
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium text-gray-900">Major revision</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">
+                      Check this only if the <strong>procedure changed</strong> — new/removed steps, a changed CCP or critical limit, different equipment or materials (triggers re-training/re-approval). Bumps the whole number (→ {previewMajor(sop.version)}). Leave unchecked for clarifications/wording fixes (minor → {previewMinor(sop.version)}).
+                    </span>
+                  </span>
+                </label>
+              )}
+
+              <p className="text-xs text-gray-400">The current file moves to revision history — nothing is deleted.</p>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  onClick={() => { setPendingUpload(null); setMajorRevision(false); }}
+                  disabled={uploading}
+                  className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmUpload}
+                  disabled={uploading}
+                  className="px-3 py-1.5 text-sm text-white bg-navy-800 hover:bg-navy-700 rounded-lg disabled:opacity-50"
+                >
+                  {uploading ? 'Uploading…' : `Upload as ${preview.value}`}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
+
       {deleteFileTarget && (
         <Modal isOpen={true} onClose={() => setDeleteFileTarget(null)} title="Delete File">
           <div className="p-4">
