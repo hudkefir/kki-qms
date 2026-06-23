@@ -80,6 +80,17 @@ app.use(requestLogger);
 // Trust proxy for correct IP in audit logs
 app.set('trust proxy', 1);
 
+// Block secret-scanner probes (bots blindly requesting /.env, /.git, etc.).
+// These dotfile paths match no real route, so they'd fall through to the catch-all
+// and time out as 504s — noise in the error log. Return a fast 404 instead.
+// Log-hygiene only: no secrets were ever exposed; this just stops logging the failed knocks.
+app.use((req, res, next) => {
+  if (/\.(env|git)(\/|$|\.)/i.test(req.path)) {
+    return res.status(404).type('text/plain').send('Not Found');
+  }
+  next();
+});
+
 // Session middleware — Postgres-backed (shared cookie across *.kefirkultures.com)
 app.use(session({
   store: new PgStore({
