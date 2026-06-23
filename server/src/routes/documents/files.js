@@ -59,6 +59,24 @@ function bumpMajor(current) {
   return parts.join('.');
 }
 
+/**
+ * Compare two dotted version strings numerically, segment by segment.
+ * Missing segments count as 0. Returns >0 if a>b, <0 if a<b, 0 if equal.
+ *   compareVersions('1.1', '1.0')   ->  1
+ *   compareVersions('1.0', '1.0')   ->  0
+ *   compareVersions('0.9.2', '1.0') -> -1
+ */
+function compareVersions(a, b) {
+  const pa = String(a || '0').trim().split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = String(b || '0').trim().split('.').map((x) => parseInt(x, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
 const router = Router();
 
 // POST /api/sops/:id/upload
@@ -117,16 +135,19 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
     const created = await db.get('SELECT * FROM sop_files WHERE id = ?', [info.lastInsertRowid]);
 
     // Update the controlled-document version on upload.
-    // Precedence: (1) a version encoded in the filename (..._v2.0.docx) is the
-    // manual override and always wins; (2) else a "major" revision flag from the
-    // uploader bumps the whole number (1.x -> 2.0); (3) else default minor bump.
+    // Precedence: (1) a version encoded in the filename (..._v2.0.docx) is a
+    // manual override, but ONLY when it is strictly HIGHER than the current
+    // version — otherwise the static "_v1_0" that every SOP file is named with
+    // would pin the version forever and defeat the auto-bump; (2) a "major"
+    // revision flag bumps the whole number (1.x -> 2.0); (3) else minor bump.
     const versionMatch = req.file.originalname.match(/_v(\d+(?:[._]\d+)+)/i);
+    const filenameVersion = versionMatch ? versionMatch[1].replace(/_/g, '.') : null;
     const bumpType = String(req.body?.bump || 'minor').toLowerCase() === 'major' ? 'major' : 'minor';
     const previousDocVersion = sop.version;
     let versionSource;
     let newDocVersion;
-    if (versionMatch) {
-      newDocVersion = versionMatch[1].replace(/_/g, '.');
+    if (filenameVersion && compareVersions(filenameVersion, sop.version) > 0) {
+      newDocVersion = filenameVersion;
       versionSource = 'filename';
     } else if (bumpType === 'major') {
       newDocVersion = bumpMajor(sop.version);
