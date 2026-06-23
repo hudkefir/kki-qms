@@ -417,11 +417,16 @@ export default function SOPDetail() {
   const sopFiles = files || [];
 
   // Group files by original name, latest version first
+  // All controlled-document files for this SOP form ONE lineage — newest is the
+  // controlled copy, older ones are revision history — regardless of filename.
+  // (Filenames carry a version like _v0_9_1 / _v1_0, so grouping by name would
+  // wrongly render each upload as its own "Controlled" card.)
   const groupedFiles = {};
-  sopFiles.forEach(f => {
-    if (!groupedFiles[f.original_name]) groupedFiles[f.original_name] = [];
-    groupedFiles[f.original_name].push(f);
-  });
+  if (sopFiles.length > 0) {
+    const sorted = [...sopFiles].sort((a, b) => (b.id || 0) - (a.id || 0));
+    const current = sorted.find(v => v.is_current !== false) || sorted[0];
+    groupedFiles[current.original_name] = sorted;
+  }
 
   // Open a sop_file in the viewer modal (reuse viewerDoc state with a type flag)
   const openSopFileViewer = (file) => {

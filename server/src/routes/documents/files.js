@@ -97,8 +97,8 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
 
     // Determine version
     const lastFile = await db.get(
-      'SELECT MAX(version) as maxVersion FROM sop_files WHERE sop_id = ? AND original_name = ?',
-      [req.params.id, req.file.originalname]
+      'SELECT MAX(version) as maxVersion FROM sop_files WHERE sop_id = ?',
+      [req.params.id]
     );
     const version = (lastFile?.maxVersion || 0) + 1;
 
@@ -113,10 +113,14 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
     // Upload to Supabase Storage
     await uploadFile(storagePath, req.file.buffer, fileType);
 
-    // Demote all previous versions of this file to archived
+    // Demote ALL previous controlled files for this SOP to archived. The
+    // controlled document is one lineage per SOP regardless of filename — files
+    // are named with the version embedded (..._v1_0.docx), so scoping the demote
+    // to the same name would leave the prior version still flagged current and
+    // render two "Controlled" cards.
     await db.run(
-      'UPDATE sop_files SET is_current = FALSE WHERE sop_id = ? AND original_name = ?',
-      [req.params.id, req.file.originalname]
+      'UPDATE sop_files SET is_current = FALSE WHERE sop_id = ?',
+      [req.params.id]
     );
 
     const info = await db.run(`
@@ -311,10 +315,10 @@ router.post('/files/:id/promote', requireAuth, requireWriteAccess, async (req, r
     );
     if (!file) return res.status(404).json({ error: 'File not found' });
 
-    // Archive all versions of this file name under this SOP
+    // Archive every controlled file under this SOP (one current per SOP, not per name)
     await db.run(
-      'UPDATE sop_files SET is_current = FALSE WHERE sop_id = ? AND original_name = ?',
-      [file.sop_id, file.original_name]
+      'UPDATE sop_files SET is_current = FALSE WHERE sop_id = ?',
+      [file.sop_id]
     );
 
     // Promote the selected one
