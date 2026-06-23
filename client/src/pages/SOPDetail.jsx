@@ -30,6 +30,9 @@ import {
   Trash2,
   Archive,
   Star,
+  ChevronDown,
+  ChevronRight,
+  ShieldCheck,
 } from 'lucide-react';
 import { useFetch, apiPut, apiPost, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
@@ -85,6 +88,9 @@ export default function SOPDetail() {
   // File delete
   const [deleteFileTarget, setDeleteFileTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Revision history expand/collapse (per file group)
+  const [expandedHistory, setExpandedHistory] = useState({});
 
   // Document viewer
   const [viewerDoc, setViewerDoc] = useState(null);
@@ -878,13 +884,13 @@ export default function SOPDetail() {
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">SOP Files</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">The official current version of this SOP. Upload new versions here when approved.</p>
+                    <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Controlled Document</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">The official current file for this SOP. Uploading a new file supersedes the current one — older files are kept in revision history, never deleted.</p>
                   </div>
                   {canWrite() && (
                     <label className="flex items-center gap-1.5 px-3 py-1.5 bg-navy-800 text-white rounded-lg text-sm font-medium hover:bg-navy-700 cursor-pointer transition-colors">
                       <Upload className="w-4 h-4" />
-                      {uploading ? 'Uploading...' : 'Upload File'}
+                      {uploading ? 'Uploading...' : 'Upload New File'}
                       <input
                         type="file"
                         accept=".pdf,.docx,.doc"
@@ -905,101 +911,138 @@ export default function SOPDetail() {
                     {canWrite() && <p className="text-xs text-gray-400 mt-1">Upload the SOP document (PDF or DOCX)</p>}
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {Object.entries(groupedFiles).map(([name, versions]) => (
-                      <div key={name} className="border border-gray-200 rounded-lg overflow-hidden">
-                        <div className="bg-gray-50 px-4 py-3 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <File className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm font-medium text-gray-900">{name}</span>
-                            <span className="text-xs text-gray-400">{versions.length} version{versions.length > 1 ? 's' : ''}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); openSopFileViewer(versions[0]); }}
-                              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              View
-                            </button>
-                            <a
-                              href={`/api/files/${versions[0].id}/download`}
-                              className="flex items-center gap-1 text-xs text-navy-600 hover:text-navy-800 font-medium"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              Download
-                            </a>
-                          </div>
-                        </div>
-                        <div className="divide-y divide-gray-100">
-                          {versions.map(f => (
-                            <div key={f.id} className={`px-4 py-2.5 flex items-center justify-between hover:bg-gray-50 ${f.is_current === false ? 'opacity-50' : ''}`}>
-                              <div className="flex items-center gap-3">
-                                <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded">v{f.version}</span>
-                                {f.is_current !== false ? (
-                                  <span className="text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                    <Star className="w-3 h-3" />
-                                    Current
-                                  </span>
-                                ) : (
-                                  <span className="text-xs font-medium text-gray-400 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                    <Archive className="w-3 h-3" />
-                                    Archived
-                                  </span>
-                                )}
-                                <span className="text-xs text-gray-500">{formatFileSize(f.file_size)}</span>
-                                <span className="text-xs text-gray-400">by {f.uploaded_by}</span>
-                                <span className="text-xs text-gray-400">{formatDate(f.uploaded_at)}</span>
+                  <div className="space-y-5">
+                    {Object.entries(groupedFiles).map(([name, versions]) => {
+                      const current = versions.find(v => v.is_current !== false) || versions[0];
+                      const history = versions.filter(v => v.id !== current.id);
+                      const isOpen = !!expandedHistory[name];
+                      return (
+                        <div key={name} className="space-y-2">
+                          {/* Controlled Document card */}
+                          <div className="border border-navy-200 rounded-lg overflow-hidden ring-1 ring-navy-100">
+                            <div className="bg-navy-50/60 px-4 py-3 flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-lg bg-navy-800 text-white flex items-center justify-center shrink-0">
+                                  <File className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-sm font-semibold text-gray-900 truncate">{name}</span>
+                                    <span className="text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
+                                      <ShieldCheck className="w-3 h-3" />
+                                      Controlled
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
+                                    <span>{formatFileSize(current.file_size)}</span>
+                                    <span>by {current.uploaded_by}</span>
+                                    <span>{formatDate(current.uploaded_at)}</span>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                {canWrite() && f.is_current === false && (
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handlePromoteFile(f.id); }}
-                                    className="flex items-center gap-1 text-xs text-green-600 hover:text-green-800 font-medium"
-                                    title="Promote to current version"
-                                  >
-                                    <Star className="w-3.5 h-3.5" />
-                                    Promote
-                                  </button>
-                                )}
-                                {canWrite() && f.is_current !== false && versions.length > 1 && (
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handleArchiveFile(f.id); }}
-                                    className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-800 font-medium"
-                                    title="Archive this version"
-                                  >
-                                    <Archive className="w-3.5 h-3.5" />
-                                    Archive
-                                  </button>
-                                )}
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); openSopFileViewer(f); }}
-                                  className="text-xs text-blue-500 hover:text-blue-700"
-                                  title="View in browser"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                </button>
-                                <a
-                                  href={`/api/files/${f.id}/download`}
-                                  className="text-xs text-gray-400 hover:text-navy-600"
-                                >
-                                  <Download className="w-3.5 h-3.5" />
-                                </a>
-                                {hasRole('admin') && (
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); setDeleteFileTarget(f); }}
-                                    className="text-xs text-gray-300 hover:text-red-600"
-                                    title="Delete file"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
+                              <div className="text-right shrink-0">
+                                <div className="text-[10px] uppercase tracking-wide text-gray-400">Document Version</div>
+                                <div className="text-lg font-bold text-navy-800 leading-tight">{sop.version || '-'}</div>
                               </div>
                             </div>
-                          ))}
+                            <div className="px-4 py-2.5 flex items-center justify-end gap-3 border-t border-navy-100 bg-white">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openSopFileViewer(current); }}
+                                className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                View
+                              </button>
+                              <a
+                                href={`/api/files/${current.id}/download`}
+                                className="flex items-center gap-1 text-xs text-navy-600 hover:text-navy-800 font-medium"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                Download
+                              </a>
+                              {hasRole('admin') && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setDeleteFileTarget(current); }}
+                                  className="flex items-center gap-1 text-xs text-gray-300 hover:text-red-600"
+                                  title="Delete file (admin)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Revision history (collapsed) */}
+                          {history.length > 0 && (
+                            <div className="border border-gray-200 rounded-lg overflow-hidden">
+                              <button
+                                onClick={() => setExpandedHistory(prev => ({ ...prev, [name]: !prev[name] }))}
+                                className="w-full px-4 py-2.5 flex items-center justify-between text-left hover:bg-gray-50"
+                              >
+                                <span className="flex items-center gap-2 text-xs font-medium text-gray-600">
+                                  <History className="w-3.5 h-3.5 text-gray-400" />
+                                  Revision History
+                                  <span className="text-gray-400">({history.length} previous file{history.length > 1 ? 's' : ''})</span>
+                                </span>
+                                {isOpen ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+                              </button>
+                              {isOpen && (
+                                <div className="divide-y divide-gray-100 border-t border-gray-200">
+                                  {history.map((f, idx) => (
+                                    <div key={f.id} className="px-4 py-2.5 flex items-center justify-between hover:bg-gray-50">
+                                      <div className="flex items-center gap-3">
+                                        <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded">Rev {f.version}</span>
+                                        <span className="text-xs font-medium text-gray-400 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                          <Archive className="w-3 h-3" />
+                                          Superseded
+                                        </span>
+                                        <span className="text-xs text-gray-500">{formatFileSize(f.file_size)}</span>
+                                        <span className="text-xs text-gray-400">by {f.uploaded_by}</span>
+                                        <span className="text-xs text-gray-400">{formatDate(f.uploaded_at)}</span>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        {canWrite() && (
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); handlePromoteFile(f.id); }}
+                                            className="flex items-center gap-1 text-xs text-green-600 hover:text-green-800 font-medium"
+                                            title="Restore as the controlled document"
+                                          >
+                                            <RefreshCw className="w-3.5 h-3.5" />
+                                            Restore
+                                          </button>
+                                        )}
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); openSopFileViewer(f); }}
+                                          className="text-xs text-blue-500 hover:text-blue-700"
+                                          title="View in browser"
+                                        >
+                                          <Eye className="w-3.5 h-3.5" />
+                                        </button>
+                                        <a
+                                          href={`/api/files/${f.id}/download`}
+                                          className="text-xs text-gray-400 hover:text-navy-600"
+                                        >
+                                          <Download className="w-3.5 h-3.5" />
+                                        </a>
+                                        {hasRole('admin') && (
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); setDeleteFileTarget(f); }}
+                                            className="text-xs text-gray-300 hover:text-red-600"
+                                            title="Delete file (admin)"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
