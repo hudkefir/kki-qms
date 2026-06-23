@@ -1,0 +1,25 @@
+-- ============================================================================
+-- 32-drop-sops-increment-version-trigger.sql
+-- APPLIED TO PROD 2026-06-22 by Jarvis (manually, then tracked here).
+--
+-- Bug: SOP document upload failed with "File Upload Failed". Real Postgres
+-- error: `operator does not exist: text + integer`.
+--
+-- Root cause: an UNTRACKED trigger `increment_version_trigger` existed on the
+-- `sops` table, calling the shared `increment_version()` function which runs
+-- `NEW.version := OLD.version + 1`. That works on the ~48 other tables whose
+-- `version` column is INTEGER, but `sops.version` is TEXT (e.g. "1.0"), so
+-- "1.0" + 1 is invalid → every UPDATE to a sops row threw → upload 500'd.
+--
+-- The application already sets sops.version itself (parsed from the filename,
+-- e.g. _v1.0), so this trigger was both REDUNDANT and BROKEN on sops.
+--
+-- Fix: drop the trigger ON sops ONLY. The increment_version() FUNCTION is
+-- shared by ~48 other tables (batches, lots, capas, master_bprs, users, …)
+-- where it works correctly on their INTEGER version columns — so the function
+-- is intentionally LEFT IN PLACE. Do NOT drop the function.
+--
+-- Idempotent: IF EXISTS makes this safe to re-run.
+-- ============================================================================
+
+DROP TRIGGER IF EXISTS increment_version_trigger ON sops;
