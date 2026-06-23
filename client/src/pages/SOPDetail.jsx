@@ -355,6 +355,7 @@ export default function SOPDetail() {
         throw new Error(data.error || 'Upload failed');
       }
       refetchFiles();
+      refetch();
       setPendingUpload(null);
       setMajorRevision(false);
     } catch (err) {
