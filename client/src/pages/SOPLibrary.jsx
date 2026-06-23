@@ -41,15 +41,23 @@ export default function SOPLibrary() {
     description: '',
   });
   const [addError, setAddError] = useState('');
+  const [addingNewCat, setAddingNewCat] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
 
   const { data: sopsData, loading, error, refetch } = useFetch('/api/sops');
   const sops = sopsData?.sops || sopsData || [];
 
+  // Controlled category list (source of truth for the picker + filter).
+  const { data: catData, refetch: refetchCats } = useFetch('/api/sop-categories');
+  const catList = catData?.categories || catData || [];
+
   const categories = useMemo(() => {
     const cats = new Set();
+    (Array.isArray(catList) ? catList : []).forEach(c => { if (c.name) cats.add(c.name); });
+    // Include any names present on SOPs but not yet in the lookup (legacy safety).
     sops.forEach(s => { if (s.category_name) cats.add(s.category_name); });
     return ['', ...Array.from(cats).sort()];
-  }, [sops]);
+  }, [catList, sops]);
 
   const filtered = useMemo(() => {
     let result = [...sops];
@@ -101,7 +109,25 @@ export default function SOPLibrary() {
         sop_number: '', title: '', category_name: '', category_code: '', status: 'draft',
         owner: '', version: '1.0', description: '',
       });
+      setAddingNewCat(false);
+      setNewCatName('');
       refetch();
+    } catch (err) {
+      setAddError(err.message);
+    }
+  };
+
+  // "+ Add new" category escape hatch — creates a controlled category, then selects it.
+  const handleCreateCategory = async () => {
+    const name = newCatName.trim();
+    if (!name) return;
+    setAddError('');
+    try {
+      const cat = await apiPost('/api/sop-categories', { name });
+      await refetchCats();
+      setAddForm(f => ({ ...f, category_name: cat.name, category_code: cat.code }));
+      setAddingNewCat(false);
+      setNewCatName('');
     } catch (err) {
       setAddError(err.message);
     }
@@ -375,13 +401,43 @@ export default function SOPLibrary() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-              <input
-                type="text"
-                value={addForm.category_name}
-                onChange={e => setAddForm(f => ({ ...f, category_name: e.target.value, category_code: e.target.value.toLowerCase().replace(/\s+/g, '_') }))}
-                placeholder="e.g. Production"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500"
-              />
+              {addingNewCat ? (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    autoFocus
+                    value={newCatName}
+                    onChange={e => setNewCatName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateCategory(); } }}
+                    placeholder="New category name"
+                    className="flex-1 min-w-0 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500"
+                  />
+                  <button type="button" onClick={handleCreateCategory}
+                    className="px-3 py-2 bg-navy-600 text-white rounded-lg text-sm hover:bg-navy-700">Add</button>
+                  <button type="button" onClick={() => { setAddingNewCat(false); setNewCatName(''); }}
+                    className="px-2 py-2 text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+                </div>
+              ) : (
+                <select
+                  value={addForm.category_name}
+                  onChange={e => {
+                    if (e.target.value === '__new__') { setAddingNewCat(true); return; }
+                    const sel = catList.find(c => c.name === e.target.value);
+                    setAddForm(f => ({
+                      ...f,
+                      category_name: e.target.value,
+                      category_code: sel ? sel.code : e.target.value.toLowerCase().replace(/\s+/g, '_'),
+                    }));
+                  }}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500 bg-white"
+                >
+                  <option value="">Select a category…</option>
+                  {(Array.isArray(catList) ? catList : []).map(c => (
+                    <option key={c.id || c.code} value={c.name}>{c.name}</option>
+                  ))}
+                  <option value="__new__">+ Add new category…</option>
+                </select>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Owner</label>

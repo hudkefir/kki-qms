@@ -252,6 +252,61 @@ router.post('/sops', requireWriteAccess, async (req, res) => {
   }
 });
 
+// ==================== SOP CATEGORIES (controlled lookup) ====================
+
+// Derive a machine-safe code slug from a human category name.
+function slugifyCategory(name) {
+  return String(name || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+// GET /api/sop-categories  — controlled list for the picker
+router.get('/sop-categories', async (req, res) => {
+  try {
+    const includeInactive = req.query.all === '1';
+    const where = includeInactive ? '' : 'WHERE is_active = true';
+    const cats = await db.all(
+      `SELECT * FROM sop_categories ${where} ORDER BY sort_order, name`
+    );
+    res.json(cats);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/sop-categories  — add a new category ("+ Add new" escape hatch)
+router.post('/sop-categories', requireWriteAccess, async (req, res) => {
+  try {
+    const sanitized = sanitizeBody(req.body);
+    const name = (sanitized.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const code = (sanitized.code && sanitized.code.trim()) || slugifyCategory(name);
+    if (!code) return res.status(400).json({ error: 'could not derive a valid code from name' });
+
+    const existing = await db.get('SELECT * FROM sop_categories WHERE code = ?', [code]);
+    if (existing) {
+      // Idempotent: if it already exists, reactivate + return it rather than erroring.
+      if (!existing.is_active) {
+        await db.run('UPDATE sop_categories SET is_active = true, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [existing.id]);
+      }
+      return res.status(200).json({ ...existing, is_active: true });
+    }
+
+    const info = await db.run(
+      'INSERT INTO sop_categories (code, name) VALUES (?, ?)',
+      [code, name]
+    );
+    const created = await db.get('SELECT * FROM sop_categories WHERE id = ?', [info.lastInsertRowid]);
+    logAudit(req, 'create_sop_category', 'sop_categories', created.id, code, { new_values: { code, name } });
+    res.status(201).json(created);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // DELETE /api/sops/:id (admin only)
 router.delete('/sops/:id', requireRole('admin'), async (req, res) => {
   try {

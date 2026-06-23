@@ -126,6 +126,8 @@ export default function SOPDetail() {
   const { data: files, refetch: refetchFiles } = useFetch(`/api/sops/${id}/files`);
   const { data: linkedDocs } = useFetch(`/api/documents?linked_type=sop&linked_id=${id}`);
   const { data: sopForms } = useFetch(`/api/sops/${id}/forms`);
+  const { data: catData } = useFetch('/api/sop-categories');
+  const catList = catData?.categories || catData || [];
 
   if (loading) return <LoadingSpinner message="Loading SOP..." />;
   if (error || !sop) {
@@ -687,14 +689,29 @@ export default function SOPDetail() {
                   {/* Category */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Category Name</label>
-                      <input type="text" value={ef('category_name')} onChange={e => setEf('category_name', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Category Code</label>
-                      <input type="text" value={ef('category_code')} onChange={e => setEf('category_code', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500" />
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                      <select
+                        value={ef('category_name')}
+                        onChange={e => {
+                          const sel = (Array.isArray(catList) ? catList : []).find(c => c.name === e.target.value);
+                          setEditForm(f => ({
+                            ...f,
+                            category_name: e.target.value,
+                            category_code: sel ? sel.code : e.target.value.toLowerCase().replace(/\s+/g, '_'),
+                          }));
+                        }}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500 bg-white"
+                      >
+                        <option value="">Select a category…</option>
+                        {(Array.isArray(catList) ? catList : []).map(c => (
+                          <option key={c.id || c.code} value={c.name}>{c.name}</option>
+                        ))}
+                        {/* Preserve a legacy value not yet in the controlled list */}
+                        {ef('category_name') && !(Array.isArray(catList) ? catList : []).some(c => c.name === ef('category_name')) && (
+                          <option value={ef('category_name')}>{ef('category_name')} (legacy)</option>
+                        )}
+                      </select>
+                      <p className="mt-1 text-[11px] text-gray-400">Category code is derived automatically from your selection.</p>
                     </div>
                   </div>
 
@@ -778,10 +795,6 @@ export default function SOPDetail() {
                       <div>
                         <p className="text-[11px] text-gray-400 uppercase tracking-wide">Category</p>
                         <p className="text-sm font-medium text-gray-900">{sop.category_name || '-'}</p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] text-gray-400 uppercase tracking-wide">Category Code</p>
-                        <p className="text-sm font-medium text-gray-900">{sop.category_code || '-'}</p>
                       </div>
                     </div>
                   </div>
