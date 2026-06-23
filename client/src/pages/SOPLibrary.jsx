@@ -18,13 +18,11 @@ import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
 
 const STATUS_OPTIONS = ['', 'active', 'in_review', 'approved', 'draft', 'archived'];
-const COSTCO_OPTIONS = ['', 'clean', 'needs_costco_strip', 'not_yet_built'];
 
 export default function SOPLibrary() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [costcoFilter, setCostcoFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sortField, setSortField] = useState('sop_number');
   const [sortDir, setSortDir] = useState('asc');
@@ -38,7 +36,6 @@ export default function SOPLibrary() {
     category_name: '',
     category_code: '',
     status: 'draft',
-    costco_cleanup_status: 'not_yet_built',
     owner: '',
     version: '1.0',
     description: '',
@@ -66,7 +63,6 @@ export default function SOPLibrary() {
       );
     }
     if (statusFilter) result = result.filter(s => s.status === statusFilter);
-    if (costcoFilter) result = result.filter(s => s.costco_cleanup_status === costcoFilter);
     if (categoryFilter) result = result.filter(s => s.category_name === categoryFilter);
 
     result.sort((a, b) => {
@@ -77,7 +73,7 @@ export default function SOPLibrary() {
     });
 
     return result;
-  }, [sops, search, statusFilter, costcoFilter, categoryFilter, sortField, sortDir]);
+  }, [sops, search, statusFilter, categoryFilter, sortField, sortDir]);
 
   const handleSort = (field) => {
     if (sortField === field) {
@@ -103,7 +99,7 @@ export default function SOPLibrary() {
       setShowAdd(false);
       setAddForm({
         sop_number: '', title: '', category_name: '', category_code: '', status: 'draft',
-        costco_cleanup_status: 'not_yet_built', owner: '', version: '1.0', description: '',
+        owner: '', version: '1.0', description: '',
       });
       refetch();
     } catch (err) {
@@ -138,7 +134,7 @@ export default function SOPLibrary() {
     return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  const activeFilters = [statusFilter, costcoFilter, categoryFilter].filter(Boolean).length;
+  const activeFilters = [statusFilter, categoryFilter].filter(Boolean).length;
 
   if (loading) return <LoadingSpinner message="Loading SOPs..." />;
   if (error) {
@@ -161,7 +157,6 @@ export default function SOPLibrary() {
     { key: 'category_name', label: 'Category', width: 'w-40' },
     { key: 'version', label: 'Ver.', width: 'w-16' },
     { key: 'status', label: 'Status', width: 'w-28' },
-    { key: 'costco_cleanup_status', label: 'Costco', width: 'w-32' },
     { key: 'owner', label: 'Owner', width: 'w-28' },
     { key: 'next_review_date', label: 'Review Due', width: 'w-28' },
     { key: 'updated_at', label: 'Updated', width: 'w-28' },
@@ -243,20 +238,9 @@ export default function SOPLibrary() {
             ))}
           </select>
 
-          <select
-            value={costcoFilter}
-            onChange={e => setCostcoFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500 bg-white"
-          >
-            <option value="">All Costco Status</option>
-            {COSTCO_OPTIONS.filter(Boolean).map(s => (
-              <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
-            ))}
-          </select>
-
           {activeFilters > 0 && (
             <button
-              onClick={() => { setStatusFilter(''); setCostcoFilter(''); setCategoryFilter(''); }}
+              onClick={() => { setStatusFilter(''); setCategoryFilter(''); }}
               className="text-xs text-navy-600 hover:text-navy-800 font-medium"
             >
               Clear filters ({activeFilters})
@@ -315,9 +299,6 @@ export default function SOPLibrary() {
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={sop.status} type="status" />
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={sop.costco_cleanup_status} type="costco" />
                     </td>
                     <td className="px-4 py-3">
                       <span className="text-sm text-gray-600">{sop.owner || '-'}</span>
@@ -423,18 +404,6 @@ export default function SOPLibrary() {
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500 bg-white"
               >
                 {STATUS_OPTIONS.filter(Boolean).map(s => (
-                  <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Costco Status</label>
-              <select
-                value={addForm.costco_cleanup_status}
-                onChange={e => setAddForm(f => ({ ...f, costco_cleanup_status: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500 bg-white"
-              >
-                {COSTCO_OPTIONS.filter(Boolean).map(s => (
                   <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
                 ))}
               </select>

@@ -68,7 +68,7 @@ router.put('/admin/sops/:id', async (req, res) => {
   try {
     const fields = [
       'sop_number', 'title', 'category_code', 'category_name', 'version',
-      'status', 'costco_cleanup_status', 'owner', 'reviewer', 'approver',
+      'status', 'owner', 'reviewer', 'approver',
       'effective_date', 'next_review_date', 'description', 'notes',
       'scope', 'procedure_text', 'responsibilities', 'materials_equipment', 'sop_references'
     ];

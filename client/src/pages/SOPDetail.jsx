@@ -79,7 +79,6 @@ const TABS = [
 ];
 
 const STATUS_OPTIONS = ['active', 'in_review', 'approved', 'draft', 'archived'];
-const COSTCO_OPTIONS = ['clean', 'needs_costco_strip', 'not_yet_built'];
 const AUDIT_STATUSES = ['met', 'partial', 'not_met', 'na'];
 
 export default function SOPDetail() {
@@ -177,7 +176,6 @@ export default function SOPDetail() {
       sop_number: sop.sop_number || '',
       version: sop.version || '',
       status: sop.status || 'draft',
-      costco_cleanup_status: sop.costco_cleanup_status || 'not_yet_built',
       owner: sop.owner || '',
       reviewer: sop.reviewer || '',
       approver: sop.approver || '',
@@ -481,7 +479,6 @@ export default function SOPDetail() {
                 {sop.sop_number}
               </span>
               <StatusBadge status={sop.status} type="status" />
-              <StatusBadge status={sop.costco_cleanup_status} type="costco" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900">{sop.title}</h1>
           </div>
@@ -630,8 +627,8 @@ export default function SOPDetail() {
                     </div>
                   </div>
 
-                  {/* Version, Status, Costco Status */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Version, Status */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Version</label>
                       <input type="text" value={ef('version')} onChange={e => setEf('version', e.target.value)}
@@ -642,15 +639,6 @@ export default function SOPDetail() {
                       <select value={ef('status')} onChange={e => setEf('status', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500 bg-white">
                         {STATUS_OPTIONS.map(s => (
-                          <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Costco Status</label>
-                      <select value={ef('costco_cleanup_status')} onChange={e => setEf('costco_cleanup_status', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500 bg-white">
-                        {COSTCO_OPTIONS.map(s => (
                           <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
                         ))}
                       </select>
@@ -784,10 +772,6 @@ export default function SOPDetail() {
                       <div>
                         <p className="text-[11px] text-gray-400 uppercase tracking-wide">Category</p>
                         <p className="text-sm font-medium text-gray-900">{sop.category_name || '-'}</p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] text-gray-400 uppercase tracking-wide">Costco Cleanup Status</p>
-                        <StatusBadge status={sop.costco_cleanup_status} type="costco" />
                       </div>
                       <div>
                         <p className="text-[11px] text-gray-400 uppercase tracking-wide">Category Code</p>

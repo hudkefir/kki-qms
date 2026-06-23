@@ -46,14 +46,16 @@ export default function Dashboard() {
 
   const stats = dashboard || {};
   const totalSOPs = stats.totalSops || sops.length || 0;
-  const clean = stats.cleanCount || sops.filter(s => s.costco_cleanup_status === 'clean').length || 0;
-  const needsStrip = stats.needsCostcoStripCount || sops.filter(s => s.costco_cleanup_status === 'needs_costco_strip').length || 0;
-  const notBuilt = stats.notYetBuiltCount || sops.filter(s => s.costco_cleanup_status === 'not_yet_built').length || 0;
+  // Audit readiness now derives from SOP approval status (Costco cleanup tracker retired).
+  const isReady = s => s.status === 'active' || s.status === 'approved';
+  const clean = sops.filter(isReady).length;
+  const inReview = sops.filter(s => s.status === 'in_review').length;
+  const draftCount = sops.filter(s => s.status === 'draft').length;
   const readiness = totalSOPs > 0 ? Math.round((clean / totalSOPs) * 100) : 0;
   const daysUntil = getDaysUntilAudit();
 
-  const blockers = sops.filter(s => s.costco_cleanup_status === 'not_yet_built');
-  const warnings = sops.filter(s => s.costco_cleanup_status === 'needs_costco_strip');
+  const blockers = sops.filter(s => s.status === 'draft');
+  const warnings = sops.filter(s => s.status === 'in_review');
 
   // Category breakdown
   const categories = {};
@@ -61,7 +63,7 @@ export default function Dashboard() {
     const cat = s.category_name || 'Uncategorized';
     if (!categories[cat]) categories[cat] = { total: 0, clean: 0 };
     categories[cat].total++;
-    if (s.costco_cleanup_status === 'clean') categories[cat].clean++;
+    if (isReady(s)) categories[cat].clean++;
   });
 
   const qa = qaData || {};
@@ -97,9 +99,9 @@ export default function Dashboard() {
 
   const sopStatCards = [
     { label: 'Total SOPs', value: totalSOPs, icon: FileText, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
-    { label: 'Audit Ready', value: clean, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100', badge: clean > 0 ? 'Clean' : null, badgeColor: 'bg-green-100 text-green-700' },
-    { label: 'Needs Costco Strip', value: needsStrip, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100', badge: needsStrip > 0 ? 'Action Needed' : null, badgeColor: 'bg-amber-100 text-amber-700' },
-    { label: 'Not Yet Built', value: notBuilt, icon: XCircle, color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100', badge: notBuilt > 0 ? 'BLOCKER' : null, badgeColor: 'bg-red-100 text-red-700' },
+    { label: 'Audit Ready', value: clean, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100', badge: clean > 0 ? 'Approved' : null, badgeColor: 'bg-green-100 text-green-700' },
+    { label: 'In Review', value: inReview, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100', badge: inReview > 0 ? 'In Progress' : null, badgeColor: 'bg-amber-100 text-amber-700' },
+    { label: 'Draft', value: draftCount, icon: XCircle, color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100', badge: draftCount > 0 ? 'Not Approved' : null, badgeColor: 'bg-red-100 text-red-700' },
   ];
 
   return (
@@ -472,7 +474,7 @@ export default function Dashboard() {
                   <XCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{sop.sop_number} - {sop.title}</p>
-                    <p className="text-xs text-red-600">Not Yet Built - Requires immediate action</p>
+                    <p className="text-xs text-red-600">Draft - Not yet approved</p>
                   </div>
                   <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600" />
                 </Link>
@@ -482,7 +484,7 @@ export default function Dashboard() {
                   <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{sop.sop_number} - {sop.title}</p>
-                    <p className="text-xs text-amber-600">Needs Costco strip removal</p>
+                    <p className="text-xs text-amber-600">In review - Pending approval</p>
                   </div>
                   <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600" />
                 </Link>

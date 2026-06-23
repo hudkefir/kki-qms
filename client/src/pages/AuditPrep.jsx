@@ -81,8 +81,9 @@ export default function AuditPrep() {
         }
         categoryMap[cat].totalReqs++;
         categoryMap[cat].sops.add(sop.sop_number);
-        if (sop.costco_cleanup_status === 'clean') { met++; categoryMap[cat].met++; }
-        else if (sop.costco_cleanup_status === 'needs_costco_strip') { partial++; categoryMap[cat].partial++; }
+        // Readiness now derives from SOP approval status (Costco cleanup tracker retired).
+        if (sop.status === 'active' || sop.status === 'approved') { met++; categoryMap[cat].met++; }
+        else if (sop.status === 'in_review') { partial++; categoryMap[cat].partial++; }
         else { notMet++; categoryMap[cat].notMet++; }
       });
     }

@@ -14,15 +14,14 @@ const router = Router();
 router.get('/dashboard', async (req, res) => {
   try {
     const totalSops = (await db.get('SELECT COUNT(*) as count FROM sops')).count;
-    const cleanCount = (await db.get("SELECT COUNT(*) as count FROM sops WHERE costco_cleanup_status = 'clean'")).count;
-    const needsCostcoStripCount = (await db.get("SELECT COUNT(*) as count FROM sops WHERE costco_cleanup_status = 'needs_costco_strip'")).count;
-    const notYetBuiltCount = (await db.get("SELECT COUNT(*) as count FROM sops WHERE costco_cleanup_status = 'not_yet_built'")).count;
+    // Audit readiness derives from SOP approval status (Costco cleanup tracker retired).
+    const cleanCount = (await db.get("SELECT COUNT(*) as count FROM sops WHERE status IN ('active','approved')")).count;
     const auditReadinessPercent = totalSops > 0 ? Math.round((cleanCount / totalSops) * 100) : 0;
 
     const categoryCounts = await db.all(`
       SELECT category_name,
         COUNT(*) as count,
-        SUM(CASE WHEN costco_cleanup_status = 'clean' THEN 1 ELSE 0 END) as cleanCount
+        SUM(CASE WHEN status IN ('active','approved') THEN 1 ELSE 0 END) as cleanCount
       FROM sops
       GROUP BY category_name
       ORDER BY category_name
@@ -53,8 +52,6 @@ router.get('/dashboard', async (req, res) => {
     res.json({
       totalSops,
       cleanCount,
-      needsCostcoStripCount,
-      notYetBuiltCount,
       auditReadinessPercent,
       categoryCounts,
       recentActivity,
@@ -86,7 +83,7 @@ router.get('/dashboard', async (req, res) => {
 // GET /api/sops
 router.get('/sops', async (req, res) => {
   try {
-    const { status, category, costco_status, search } = req.query;
+    const { status, category, search } = req.query;
     let query = 'SELECT * FROM sops WHERE 1=1';
     const params = [];
 
@@ -97,10 +94,6 @@ router.get('/sops', async (req, res) => {
     if (category) {
       query += ' AND category_code = ?';
       params.push(category);
-    }
-    if (costco_status) {
-      query += ' AND costco_cleanup_status = ?';
-      params.push(costco_status);
     }
     if (search) {
       query += ' AND (title LIKE ? OR sop_number LIKE ?)';
@@ -152,7 +145,7 @@ router.put('/sops/:id', requireWriteAccess, async (req, res) => {
     const sanitized = sanitizeBody(req.body);
     const fields = [
       'sop_number', 'title', 'category_code', 'category_name', 'version',
-      'status', 'costco_cleanup_status', 'owner', 'reviewer', 'approver',
+      'status', 'owner', 'reviewer', 'approver',
       'effective_date', 'next_review_date', 'last_updated', 'description', 'notes',
       'scope', 'procedure_text', 'responsibilities', 'materials_equipment', 'sop_references'
     ];
@@ -229,7 +222,7 @@ router.post('/sops', requireWriteAccess, async (req, res) => {
     const sanitized = sanitizeBody(req.body);
     const {
       sop_number, title, category_code, category_name,
-      version = '1.0', status = 'draft', costco_cleanup_status = 'not_yet_built',
+      version = '1.0', status = 'draft',
       owner = '', reviewer = '', approver = '',
       effective_date = null, next_review_date = null,
       description = '', notes = ''
@@ -245,13 +238,13 @@ router.post('/sops', requireWriteAccess, async (req, res) => {
     const createdBy = sessionUser?.display_name || sessionUser?.username || '';
 
     const info = await db.run(`
-      INSERT INTO sops (sop_number, title, category_code, category_name, version, status, costco_cleanup_status, owner, reviewer, approver, effective_date, next_review_date, last_updated, description, notes, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [sop_number, title, category_code, category_name, version, status, costco_cleanup_status, owner, reviewer, approver, effective_date, next_review_date, now, description, notes, createdBy]);
+      INSERT INTO sops (sop_number, title, category_code, category_name, version, status, owner, reviewer, approver, effective_date, next_review_date, last_updated, description, notes, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [sop_number, title, category_code, category_name, version, status, owner, reviewer, approver, effective_date, next_review_date, now, description, notes, createdBy]);
 
     const created = await db.get('SELECT * FROM sops WHERE id = ?', [info.lastInsertRowid]);
 
-    logAudit(req, 'create_sops', 'sops', created.id, sop_number, { new_values: { sop_number, title, category_code, category_name, version, status, costco_cleanup_status } });
+    logAudit(req, 'create_sops', 'sops', created.id, sop_number, { new_values: { sop_number, title, category_code, category_name, version, status } });
     broadcast('sop_created', created);
     res.status(201).json(created);
   } catch (err) {
@@ -367,7 +360,7 @@ router.get('/audit', async (req, res) => {
   try {
     const { status } = req.query;
     let query = `
-      SELECT ac.*, s.sop_number, s.title, s.category_name, s.costco_cleanup_status
+      SELECT ac.*, s.sop_number, s.title, s.category_name
       FROM audit_checklist ac
       JOIN sops s ON ac.sop_id = s.id
     `;
@@ -429,7 +422,7 @@ router.put('/audit/:id', requireWriteAccess, async (req, res) => {
     await db.run(`UPDATE audit_checklist SET ${updates.join(', ')} WHERE id = ?`, params);
 
     const updated = await db.get(`
-      SELECT ac.*, s.sop_number, s.title, s.category_name, s.costco_cleanup_status
+      SELECT ac.*, s.sop_number, s.title, s.category_name
       FROM audit_checklist ac
       JOIN sops s ON ac.sop_id = s.id
       WHERE ac.id = ?
@@ -460,9 +453,7 @@ router.get('/categories', async (req, res) => {
         category_code as code,
         category_name as name,
         COUNT(*) as sopCount,
-        SUM(CASE WHEN costco_cleanup_status = 'clean' THEN 1 ELSE 0 END) as cleanCount,
-        SUM(CASE WHEN costco_cleanup_status = 'needs_costco_strip' THEN 1 ELSE 0 END) as needsStripCount,
-        SUM(CASE WHEN costco_cleanup_status = 'not_yet_built' THEN 1 ELSE 0 END) as notBuiltCount
+        SUM(CASE WHEN status IN ('active','approved') THEN 1 ELSE 0 END) as cleanCount
       FROM sops
       GROUP BY category_code, category_name
       ORDER BY category_code
