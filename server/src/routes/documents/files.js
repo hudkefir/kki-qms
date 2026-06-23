@@ -26,6 +26,22 @@ function safeHeaderFilename(name) {
   return String(name).replace(/["\r\n]/g, '');
 }
 
+/**
+ * Bump the document version on a new file upload.
+ * Increments the LAST numeric segment by 1 (minor bump):
+ *   "1.0"   -> "1.1"
+ *   "0.9.2" -> "0.9.3"
+ * Falls back to "1.0" when the current value is missing/non-numeric.
+ */
+function bumpVersion(current) {
+  const parts = String(current || '1.0').trim().split('.');
+  const lastIdx = parts.length - 1;
+  const n = parseInt(parts[lastIdx], 10);
+  if (Number.isNaN(n)) return '1.0';
+  parts[lastIdx] = String(n + 1);
+  return parts.join('.');
+}
+
 const router = Router();
 
 // POST /api/sops/:id/upload
@@ -83,17 +99,26 @@ router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('
 
     const created = await db.get('SELECT * FROM sop_files WHERE id = ?', [info.lastInsertRowid]);
 
-    // Auto-update SOP version from filename
-    const versionMatch = req.file.originalname.match(/_v(\d+[._]\d+)/i);
-    if (versionMatch) {
-      const newVersion = versionMatch[1].replace('_', '.');
-      await db.run('UPDATE sops SET version = ?, updated_at = datetime(\'now\') WHERE id = ?', [newVersion, req.params.id]);
-    }
+    // Update the controlled-document version on upload.
+    // A version encoded in the filename (e.g. ..._v2.0.docx) is the manual
+    // override and wins (QA-controlled). Otherwise auto-bump the last segment.
+    const versionMatch = req.file.originalname.match(/_v(\d+(?:[._]\d+)+)/i);
+    const previousDocVersion = sop.version;
+    const newDocVersion = versionMatch
+      ? versionMatch[1].replace(/_/g, '.')
+      : bumpVersion(sop.version);
+    await db.run(
+      "UPDATE sops SET version = ?, updated_at = datetime('now') WHERE id = ?",
+      [newDocVersion, req.params.id]
+    );
 
     logAudit(req, 'upload_file', 'sops', req.params.id, sop.sop_number, {
       filename: req.file.originalname,
       version,
       size: req.file.size,
+      doc_version_from: previousDocVersion,
+      doc_version_to: newDocVersion,
+      version_source: versionMatch ? 'filename' : 'auto_bump',
     });
 
     res.status(201).json(created);
