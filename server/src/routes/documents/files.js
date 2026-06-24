@@ -6,6 +6,7 @@ import { requireAuth, requireWriteAccess, requireRole } from '../../authMiddlewa
 import { logAudit } from '../../auditMiddleware.js';
 import { sanitizeFilename } from '../../sanitize.js';
 import { uploadFile, downloadFile, deleteFile } from '../../supabase.js';
+import { parseSOPDocx } from '../../sopParse.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -78,6 +79,32 @@ function compareVersions(a, b) {
 }
 
 const router = Router();
+
+// POST /api/sops/parse — Tier A preview: parse a dropped .docx into tagged
+// pre-fill fields. Does NOT persist anything; the UI confirms before save.
+router.post('/sops/parse', requireAuth, requireWriteAccess, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    if (req.file.size === 0) return res.status(400).json({ error: 'Uploaded file is empty' });
+
+    const ext = extname(req.file.originalname).toLowerCase();
+    if (ext !== '.docx') {
+      return res.status(415).json({ error: 'Parse-on-upload supports .docx only (Tier A)' });
+    }
+
+    const result = await parseSOPDocx(req.file.buffer, req.file.originalname);
+    if (!result.ok) return res.status(422).json({ error: result.error });
+
+    res.json({
+      fields: result.fields,
+      warnings: result.warnings,
+      filename: req.file.originalname,
+    });
+  } catch (err) {
+    console.error('SOP parse error:', err);
+    res.status(500).json({ error: 'SOP parse failed' });
+  }
+});
 
 // POST /api/sops/:id/upload
 router.post('/sops/:id/upload', requireAuth, requireWriteAccess, upload.single('file'), async (req, res) => {

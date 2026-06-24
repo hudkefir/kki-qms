@@ -225,7 +225,8 @@ router.post('/sops', requireWriteAccess, async (req, res) => {
       version = '1.0', status = 'draft',
       owner = '', reviewer = '', approver = '',
       effective_date = null, next_review_date = null,
-      description = '', notes = ''
+      description = '', notes = '',
+      scope = '', responsibilities = '', sop_references = ''
     } = sanitized;
 
     if (!sop_number || !title || !category_code || !category_name) {
@@ -238,9 +239,9 @@ router.post('/sops', requireWriteAccess, async (req, res) => {
     const createdBy = sessionUser?.display_name || sessionUser?.username || '';
 
     const info = await db.run(`
-      INSERT INTO sops (sop_number, title, category_code, category_name, version, status, owner, reviewer, approver, effective_date, next_review_date, last_updated, description, notes, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [sop_number, title, category_code, category_name, version, status, owner, reviewer, approver, effective_date, next_review_date, now, description, notes, createdBy]);
+      INSERT INTO sops (sop_number, title, category_code, category_name, version, status, owner, reviewer, approver, effective_date, next_review_date, last_updated, description, notes, scope, responsibilities, sop_references, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [sop_number, title, category_code, category_name, version, status, owner, reviewer, approver, effective_date, next_review_date, now, description, notes, scope, responsibilities, sop_references, createdBy]);
 
     const created = await db.get('SELECT * FROM sops WHERE id = ?', [info.lastInsertRowid]);
 
