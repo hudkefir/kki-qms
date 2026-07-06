@@ -11,6 +11,9 @@ import {
   BookOpen,
   RefreshCw,
   Zap,
+  UploadCloud,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 import { useFetch, apiPost } from '../hooks/useApi';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -30,7 +33,7 @@ export default function SOPLibrary() {
   const [showBulkReader, setShowBulkReader] = useState(false);
   const [bulkReading, setBulkReading] = useState(false);
   const [bulkResults, setBulkResults] = useState(null);
-  const [addForm, setAddForm] = useState({
+  const emptyAddForm = {
     sop_number: '',
     title: '',
     category_name: '',
@@ -39,10 +42,28 @@ export default function SOPLibrary() {
     owner: '',
     version: '1.0',
     description: '',
-  });
+    reviewer: '',
+    approver: '',
+    effective_date: '',
+    next_review_date: '',
+    scope: '',
+    responsibilities: '',
+    sop_references: '',
+  };
+  const [addForm, setAddForm] = useState(emptyAddForm);
   const [addError, setAddError] = useState('');
   const [addingNewCat, setAddingNewCat] = useState(false);
   const [newCatName, setNewCatName] = useState('');
+
+  // Parse-on-upload (Tier A) state
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState('');
+  const [parseWarnings, setParseWarnings] = useState([]);
+  const [fieldMeta, setFieldMeta] = useState({}); // field -> { source, confidence }
+  const [parsedFile, setParsedFile] = useState(null); // File to attach after create
+  const [confirmReviewed, setConfirmReviewed] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const { data: sopsData, loading, error, refetch } = useFetch('/api/sops');
   const sops = sopsData?.sops || sopsData || [];
@@ -99,21 +120,93 @@ export default function SOPLibrary() {
       : <ChevronDown className="w-3 h-3 text-navy-600" />;
   };
 
+  const resetAddModal = () => {
+    setShowAdd(false);
+    setAddForm(emptyAddForm);
+    setAddingNewCat(false);
+    setNewCatName('');
+    setParseError('');
+    setParseWarnings([]);
+    setFieldMeta({});
+    setParsedFile(null);
+    setConfirmReviewed(false);
+    setParsing(false);
+    setSaving(false);
+  };
+
+  // Drop-first intake: parse a .docx into pre-filled fields (no save yet).
+  const handleParseFile = async (file) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.docx')) {
+      setParseError('Only .docx files can be parsed (Tier A). Use manual entry for PDFs.');
+      return;
+    }
+    setParsing(true);
+    setParseError('');
+    setParseWarnings([]);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await apiPost('/api/sops/parse', fd);
+      const f = res.fields || {};
+      const val = (k) => (f[k] && f[k].value != null ? f[k].value : '');
+      // Map a parsed category name onto the controlled list if it matches.
+      const parsedCat = val('category_name');
+      const matchedCat = catList.find(c => c.name === parsedCat);
+      setAddForm(prev => ({
+        ...prev,
+        sop_number: val('sop_number') || prev.sop_number,
+        title: val('title') || prev.title,
+        version: val('version') || prev.version,
+        owner: val('owner') || prev.owner,
+        reviewer: val('reviewer') || prev.reviewer,
+        approver: val('approver') || prev.approver,
+        effective_date: val('effective_date') || prev.effective_date,
+        next_review_date: val('next_review_date') || prev.next_review_date,
+        scope: val('scope') || prev.scope,
+        responsibilities: val('responsibilities') || prev.responsibilities,
+        sop_references: val('sop_references') || prev.sop_references,
+        category_name: matchedCat ? matchedCat.name : prev.category_name,
+        category_code: matchedCat ? matchedCat.code : prev.category_code,
+      }));
+      const meta = {};
+      for (const [k, v] of Object.entries(f)) meta[k] = { source: v.source, confidence: v.confidence };
+      setFieldMeta(meta);
+      setParseWarnings(res.warnings || []);
+      setParsedFile(file);
+      setConfirmReviewed(false);
+    } catch (err) {
+      setParseError(err.message || 'Parse failed');
+    } finally {
+      setParsing(false);
+    }
+  };
+
   const handleAdd = async (e) => {
     e.preventDefault();
     setAddError('');
+    setSaving(true);
     try {
-      await apiPost('/api/sops', addForm);
-      setShowAdd(false);
-      setAddForm({
-        sop_number: '', title: '', category_name: '', category_code: '', status: 'draft',
-        owner: '', version: '1.0', description: '',
-      });
-      setAddingNewCat(false);
-      setNewCatName('');
+      const created = await apiPost('/api/sops', addForm);
+      // Drop-first: attach the dropped file, reusing the existing version-bump path.
+      if (parsedFile && created?.id) {
+        try {
+          const fd = new FormData();
+          fd.append('file', parsedFile);
+          await apiPost(`/api/sops/${created.id}/upload`, fd);
+        } catch (uErr) {
+          // SOP record exists; surface attach failure without losing the create.
+          setAddError(`SOP created, but file attach failed: ${uErr.message}`);
+          setSaving(false);
+          refetch();
+          return;
+        }
+      }
+      resetAddModal();
       refetch();
     } catch (err) {
       setAddError(err.message);
+      setSaving(false);
     }
   };
 
@@ -175,6 +268,22 @@ export default function SOPLibrary() {
   const isOverdue = (dateStr) => {
     if (!dateStr) return false;
     return new Date(dateStr) < new Date();
+  };
+
+  // Confidence chip shown next to a field after a parse.
+  const Chip = ({ field }) => {
+    const m = fieldMeta[field];
+    if (!m) return null;
+    const high = m.confidence === 'high';
+    return (
+      <span
+        title={`source: ${m.source}`}
+        className={`ml-2 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${high ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
+      >
+        {high ? <CheckCircle2 className="w-2.5 h-2.5" /> : <AlertTriangle className="w-2.5 h-2.5" />}
+        {high ? 'parsed' : 'review'}
+      </span>
+    );
   };
 
   const columns = [
@@ -355,7 +464,7 @@ export default function SOPLibrary() {
       </div>
 
       {/* Add SOP Modal */}
-      <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Add New SOP">
+      <Modal isOpen={showAdd} onClose={resetAddModal} title="Add New SOP">
         <form onSubmit={handleAdd} className="space-y-4">
           {addError && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">
@@ -363,9 +472,47 @@ export default function SOPLibrary() {
             </div>
           )}
 
+          {/* Drop-first intake — parse a controlled .docx to auto-fill below */}
+          <div
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => { e.preventDefault(); setDragOver(false); handleParseFile(e.dataTransfer.files?.[0]); }}
+            className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${dragOver ? 'border-navy-500 bg-navy-50' : 'border-gray-300 bg-gray-50'}`}
+          >
+            <input
+              id="sop-drop-input"
+              type="file"
+              accept=".docx"
+              className="hidden"
+              onChange={e => handleParseFile(e.target.files?.[0])}
+            />
+            <label htmlFor="sop-drop-input" className="cursor-pointer flex flex-col items-center gap-1">
+              {parsing
+                ? <RefreshCw className="w-6 h-6 text-navy-500 animate-spin" />
+                : <UploadCloud className="w-6 h-6 text-gray-400" />}
+              <span className="text-sm font-medium text-gray-700">
+                {parsing ? 'Parsing…' : parsedFile ? parsedFile.name : 'Drop a controlled SOP .docx to auto-fill'}
+              </span>
+              <span className="text-xs text-gray-400">
+                Fields pre-fill below — <span className="text-green-600 font-medium">green</span> = from header cell, <span className="text-amber-600 font-medium">amber</span> = confirm/correct
+              </span>
+            </label>
+          </div>
+
+          {parseError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">
+              {parseError}
+            </div>
+          )}
+          {parseWarnings.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-lg p-3">
+              <strong>Needs review:</strong> {parseWarnings.join('; ')}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">SOP Number *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">SOP Number * <Chip field="sop_number" /></label>
               <input
                 type="text"
                 required
@@ -376,7 +523,7 @@ export default function SOPLibrary() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Version</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Version <Chip field="version" /></label>
               <input
                 type="text"
                 value={addForm.version}
@@ -387,7 +534,7 @@ export default function SOPLibrary() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Title * <Chip field="title" /></label>
             <input
               type="text"
               required
@@ -400,7 +547,7 @@ export default function SOPLibrary() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category <Chip field="category_name" /></label>
               {addingNewCat ? (
                 <div className="flex gap-2">
                   <input
@@ -440,12 +587,56 @@ export default function SOPLibrary() {
               )}
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Owner</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Owner / Prepared By <Chip field="owner" /></label>
               <input
                 type="text"
                 value={addForm.owner}
                 onChange={e => setAddForm(f => ({ ...f, owner: e.target.value }))}
                 placeholder="Owner name"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Reviewer <Chip field="reviewer" /></label>
+              <input
+                type="text"
+                value={addForm.reviewer}
+                onChange={e => setAddForm(f => ({ ...f, reviewer: e.target.value }))}
+                placeholder="Reviewer name"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Approver / Approved By <Chip field="approver" /></label>
+              <input
+                type="text"
+                value={addForm.approver}
+                onChange={e => setAddForm(f => ({ ...f, approver: e.target.value }))}
+                placeholder="Approver name"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Effective Date <Chip field="effective_date" /></label>
+              <input
+                type="date"
+                value={addForm.effective_date || ''}
+                onChange={e => setAddForm(f => ({ ...f, effective_date: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Next Review Date <Chip field="next_review_date" /></label>
+              <input
+                type="date"
+                value={addForm.next_review_date || ''}
+                onChange={e => setAddForm(f => ({ ...f, next_review_date: e.target.value }))}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500"
               />
             </div>
@@ -477,19 +668,65 @@ export default function SOPLibrary() {
             />
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Scope <Chip field="scope" /></label>
+            <textarea
+              value={addForm.scope}
+              onChange={e => setAddForm(f => ({ ...f, scope: e.target.value }))}
+              rows={2}
+              placeholder="Scope of the SOP..."
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500 resize-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Responsibilities <Chip field="responsibilities" /></label>
+            <textarea
+              value={addForm.responsibilities}
+              onChange={e => setAddForm(f => ({ ...f, responsibilities: e.target.value }))}
+              rows={2}
+              placeholder="Roles and responsibilities..."
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500 resize-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">References <Chip field="sop_references" /></label>
+            <textarea
+              value={addForm.sop_references}
+              onChange={e => setAddForm(f => ({ ...f, sop_references: e.target.value }))}
+              rows={2}
+              placeholder="Regulatory / internal references..."
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-navy-500 resize-none"
+            />
+          </div>
+
+          {parsedFile && (
+            <label className="flex items-start gap-2 text-sm text-gray-700 bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <input
+                type="checkbox"
+                checked={confirmReviewed}
+                onChange={e => setConfirmReviewed(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>I've reviewed the auto-filled fields and corrected the amber (needs-review) ones. This confirm is the intake verification step, and the dropped file will be attached on save.</span>
+            </label>
+          )}
+
           <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
-              onClick={() => setShowAdd(false)}
+              onClick={resetAddModal}
               className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-navy-800 text-white rounded-lg text-sm font-medium hover:bg-navy-700 transition-colors"
+              disabled={saving || (parsedFile && !confirmReviewed)}
+              className="px-4 py-2 bg-navy-800 text-white rounded-lg text-sm font-medium hover:bg-navy-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
-              Create SOP
+              {saving ? 'Saving…' : parsedFile ? 'Create SOP + Attach File' : 'Create SOP'}
             </button>
           </div>
         </form>
