@@ -5,6 +5,17 @@ Format: `## Build #N — YYYY-MM-DD` with bullet points per change.
 
 ---
 
+## Build #153 — 2026-07-05
+
+- Merged the `feat/sop-parse-on-upload` branch into `main` — **Tier A parse-on-upload pre-fill for SOP intake**. Uploading an SOP document now auto-extracts and pre-fills metadata (`server/src/sopParse.js`, ~228 lines), wired into `SOPLibrary.jsx`, `documents/files.js`, and the quality `dashboard.js`.
+- Repository made **public** on GitHub (`hudkefir/kki-qms`) for external collaboration. No secrets are exposed — `.env` is gitignored and no credentials are tracked.
+- Documentation refresh:
+  - `README.md` corrected to reflect the real stack — **PostgreSQL (Supabase) + Supabase Storage + Cloud Run**, React/Vite frontend, `@anthropic-ai/sdk` AI assistant. (Prior README incorrectly described a SQLite/`better-sqlite3` datastore, which is deprecated and unused.)
+  - Added `.env.example` documenting every required environment variable (names only, no values).
+  - Added a proprietary License & IP notice.
+
+---
+
 ## Build #136 — 2026-06-14
 
 - Supplier checklist seeding is now type-aware. New suppliers (and empty-checklist re-seeds) get the document set appropriate to their inferred type: ingredient = Eval + COA + Food Safety (SQF) + COI; packaging = Eval + Product Spec + COI; distributor = Eval only; full set as fallback. Type inferred from products_supplied / notes / name.
