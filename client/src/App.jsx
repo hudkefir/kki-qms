@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
-import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail, ListTodo, LayoutDashboard, HelpCircle, Factory, Droplets, FileSpreadsheet, Tags } from 'lucide-react';
+import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail, ListTodo, LayoutDashboard, HelpCircle, Factory, Droplets, FileSpreadsheet, Tags, ExternalLink } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -245,6 +245,20 @@ export default function App() {
               ))}
             </div>
           ))}
+
+          {/* Cross-navigation to the ERP dashboard (shared Supabase DB). */}
+          <div className="mt-3 pt-3 border-t border-navy-700/50">
+            <a
+              href="https://kki.kefirkultures.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-navy-300 hover:bg-navy-700 hover:text-white transition-colors"
+              title="Open the ERP dashboard in a new tab"
+            >
+              <ExternalLink className="w-4 h-4" />
+              ERP
+            </a>
+          </div>
         </div>
 
         <div className="px-4 py-4 border-t border-navy-700">

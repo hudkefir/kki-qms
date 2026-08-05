@@ -14,7 +14,7 @@ import {
   User, Pencil, X, FlaskConical, MessageSquare,
   RefreshCw, Activity, Tag, Paperclip, Trash2,
   ChevronDown, ChevronRight, ArrowDownCircle, Zap, Upload, Download, Filter,
-  ListTodo,
+  ListTodo, ExternalLink,
 } from 'lucide-react';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -1870,6 +1870,18 @@ export default function CAPADetail() {
                   {isAdmin && <Pencil className="w-3.5 h-3.5 inline ml-2 text-gray-300" />}
                 </h1>
               )}
+              {/* Deep link to the same record in the ERP dashboard. Both apps
+                  share one Supabase DB and route by the row's primary key `id`,
+                  so this lands on the identical CAPA. */}
+              <a
+                href={`https://kki.kefirkultures.com/quality/capas/${capa.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs font-medium text-gray-400 hover:text-indigo-600"
+                title="Open this CAPA in the ERP dashboard"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> Open in ERP
+              </a>
               <RecordInfoTooltip title={GMP_HELP.capa.info.title}>
                 <p><strong>What:</strong> {GMP_HELP.capa.info.what}</p>
                 <p><strong>When to create:</strong> {GMP_HELP.capa.info.when}</p>
