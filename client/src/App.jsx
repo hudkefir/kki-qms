@@ -250,10 +250,8 @@ export default function App() {
           <div className="mt-3 pt-3 border-t border-navy-700/50">
             <a
               href="https://kki.kefirkultures.com"
-              target="_blank"
-              rel="noopener noreferrer"
               className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-navy-300 hover:bg-navy-700 hover:text-white transition-colors"
-              title="Open the ERP dashboard in a new tab"
+              title="Back to the ERP dashboard"
             >
               <ExternalLink className="w-4 h-4" />
               ERP

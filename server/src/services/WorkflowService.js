@@ -100,12 +100,25 @@ const BATCH_WORKFLOW = {
 
 const CAPA_WORKFLOW = {
   name: 'capa',
-  states: ['open', 'investigating', 'action_required', 'verification', 'closed'],
+  // Canonical CAPA status set — approved by Hudson 2026-08-12 (A1-pre).
+  // Superset of live prod data (open, investigating, action_defined, in_progress,
+  // pending_review, closed). Renames vs old machine: action_required→action_defined,
+  // verification removed (closure is gated by the effectiveness check, not a state).
+  // Transition graph below is the provisional lifecycle; the enforcing DB trigger is
+  // NOT built here — it is finalized during A1-constraints after app-side burn-in.
+  states: ['open', 'investigating', 'action_defined', 'in_progress', 'pending_review', 'completed', 'approved', 'rejected', 'closed'],
   transitions: [
-    { from: 'open',             to: 'investigating',    guard: null },
-    { from: 'investigating',    to: 'action_required',  guard: null },
-    { from: 'action_required',  to: 'verification',     guard: null },
-    { from: 'verification',     to: 'closed',           guard: 'requiresVerification' },
+    { from: 'open',           to: 'investigating',  guard: null },
+    { from: 'investigating',  to: 'action_defined', guard: null },
+    { from: 'action_defined', to: 'in_progress',    guard: null },
+    { from: 'in_progress',    to: 'pending_review', guard: null },
+    { from: 'in_progress',    to: 'closed',         guard: 'requiresVerification' },
+    { from: 'pending_review', to: 'completed',      guard: null },
+    { from: 'pending_review', to: 'approved',       guard: null },
+    { from: 'pending_review', to: 'rejected',       guard: null },
+    { from: 'completed',      to: 'closed',         guard: 'requiresVerification' },
+    { from: 'approved',       to: 'closed',         guard: 'requiresVerification' },
+    { from: 'rejected',       to: 'closed',         guard: null },
   ],
   guards: { requiresVerification },
 };
@@ -123,13 +136,15 @@ const DEVIATION_WORKFLOW = {
 
 const CHANGE_REQUEST_WORKFLOW = {
   name: 'change_request',
-  states: ['draft', 'review', 'approved', 'implementing', 'closed', 'rejected'],
+  // Canonical CCR status set — approved by Hudson 2026-08-12 (A1-pre).
+  // Rename vs old machine: review→pending_review (aligns with live prod data).
+  states: ['draft', 'pending_review', 'approved', 'implementing', 'closed', 'rejected'],
   transitions: [
-    { from: 'draft',        to: 'review',       guard: null },
-    { from: 'review',       to: 'approved',     guard: 'requiresApprover' },
-    { from: 'review',       to: 'rejected',     guard: null },
-    { from: 'approved',     to: 'implementing', guard: null },
-    { from: 'implementing', to: 'closed',       guard: null },
+    { from: 'draft',          to: 'pending_review', guard: null },
+    { from: 'pending_review', to: 'approved',       guard: 'requiresApprover' },
+    { from: 'pending_review', to: 'rejected',       guard: null },
+    { from: 'approved',       to: 'implementing',   guard: null },
+    { from: 'implementing',   to: 'closed',         guard: null },
   ],
   guards: { requiresApprover },
 };

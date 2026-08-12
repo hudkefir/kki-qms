@@ -1,0 +1,938 @@
+{
+  "client/dist/assets/index-CFxLHkCh.js": {
+    "mtime": 1782265929896.4304,
+    "hash": "15359baa39e9891aa44be2405998c186"
+  },
+  "client/postcss.config.js": {
+    "mtime": 1777513864938.8618,
+    "hash": "c735540bb63936a123bc867d950c9f69"
+  },
+  "client/src/App.jsx": {
+    "mtime": 1782192533498.3674,
+    "hash": "1c680a687b44c70aa31b0a295b646def"
+  },
+  "client/src/components/AccessDenied.jsx": {
+    "mtime": 1777513864941.6711,
+    "hash": "dfcbef6640ea23cd30fea1f0733eebef"
+  },
+  "client/src/components/AiSuggestButton.jsx": {
+    "mtime": 1777598922850.9316,
+    "hash": "bc533c0aa98c577af62785b7543de582"
+  },
+  "client/src/components/BatchTestRecommendations.jsx": {
+    "mtime": 1777949147256.9204,
+    "hash": "f985e9885860877466d1a12e7b31b0b0"
+  },
+  "client/src/components/BuildVersion.jsx": {
+    "mtime": 1780585451963.0637,
+    "hash": "3af1a122962321550e5b634da7508078"
+  },
+  "client/src/components/CCRWizard.jsx": {
+    "mtime": 1777513864944.3215,
+    "hash": "c20b9db0a2b32056f6a2b2de97c3376f"
+  },
+  "client/src/components/ChatSidebar.jsx": {
+    "mtime": 1779125841278.21,
+    "hash": "aa0a2519bbac024c0e9566400b11f23c"
+  },
+  "client/src/components/FIFOAllocation.jsx": {
+    "mtime": 1777694192232.7808,
+    "hash": "2ce53995b21ed21030a411072419cc2d"
+  },
+  "client/src/components/FormattedText.jsx": {
+    "mtime": 1777513864942.11,
+    "hash": "1f506fa92311014a76856e4e3ff0177b"
+  },
+  "client/src/components/GmpFieldHelp.jsx": {
+    "mtime": 1777527015752.9792,
+    "hash": "3a4120b25ba52617ec24ed7c1f7a7e07"
+  },
+  "client/src/components/InventoryCount.jsx": {
+    "mtime": 1777694192232.9385,
+    "hash": "2bb1702ccc0b7a4db754bc1b3fea7f2e"
+  },
+  "client/src/components/LinkedDocuments.jsx": {
+    "mtime": 1777513864941.1104,
+    "hash": "bbd4443ca9f6a1399d45f07b9fbe12e3"
+  },
+  "client/src/components/LoadingSpinner.jsx": {
+    "mtime": 1777513864940.5322,
+    "hash": "62a79a97e102dea0ab82bc6041d2a182"
+  },
+  "client/src/components/Modal.jsx": {
+    "mtime": 1780585227047.2815,
+    "hash": "c7c1c8d22b7d80727d5de5606528e233"
+  },
+  "client/src/components/PlannerCalendar.jsx": {
+    "mtime": 1777694192233.0613,
+    "hash": "25bd070b446a33e5362cbc9043b1dde3"
+  },
+  "client/src/components/ProtectedRoute.jsx": {
+    "mtime": 1777513864943.7522,
+    "hash": "07926be286057ffc5ca4b64784db8cc5"
+  },
+  "client/src/components/RecordLinker.jsx": {
+    "mtime": 1777527015753.7473,
+    "hash": "5e22927d5f6c73abbb4d335d0711cec4"
+  },
+  "client/src/components/SOPForms.jsx": {
+    "mtime": 1777513864944.781,
+    "hash": "cf1b028176f61fcb420db77596edd654"
+  },
+  "client/src/components/StatusBadge.jsx": {
+    "mtime": 1782188965543.5034,
+    "hash": "23f9598d6af239824110f93e3420a9b5"
+  },
+  "client/src/components/TaskCreator.jsx": {
+    "mtime": 1778990132470.2837,
+    "hash": "62f5739a87a85ca86c00bcaf8c6e0d9d"
+  },
+  "client/src/config.js": {
+    "mtime": 1777513864940.1062,
+    "hash": "e88029e2a4b47897c780d191690b3e57"
+  },
+  "client/src/hooks/useApi.js": {
+    "mtime": 1781061297837.168,
+    "hash": "137b78b606846f37f1f736d00b387f7a"
+  },
+  "client/src/hooks/useAuth.jsx": {
+    "mtime": 1777513864945.777,
+    "hash": "e39283a78b2b904395b951eacd9031fa"
+  },
+  "client/src/hooks/useWebSocket.js": {
+    "mtime": 1777513864945.5403,
+    "hash": "7b6886fd33965914656a43a57165f148"
+  },
+  "client/src/main.jsx": {
+    "mtime": 1777513864946.0015,
+    "hash": "995ce09b5125b4d31e4a5067cfbbfb2f"
+  },
+  "client/src/pages/Analytics.jsx": {
+    "mtime": 1777513864948.8252,
+    "hash": "51ced9ec4345dd4bf5c9f6d2916269ad"
+  },
+  "client/src/pages/AuditLogs.jsx": {
+    "mtime": 1777513864950.8604,
+    "hash": "5fc312dc3f9b8720ea4013ed6d9df33f"
+  },
+  "client/src/pages/AuditPrep.jsx": {
+    "mtime": 1782188965543.6724,
+    "hash": "eeafada4ac75e697f481e659a7ad49c1"
+  },
+  "client/src/pages/BatchTestDetail.jsx": {
+    "mtime": 1777513864949.9922,
+    "hash": "cfb842dbdc4705a636769dec8fd7b34e"
+  },
+  "client/src/pages/BatchTesting-working.jsx": {
+    "mtime": 1777513864958.0105,
+    "hash": "c33754df2ecec43812ed5dbd41199891"
+  },
+  "client/src/pages/BatchTesting.jsx": {
+    "mtime": 1777513864949.6196,
+    "hash": "9c31a2dcc1acb1c6b41da90789b89611"
+  },
+  "client/src/pages/CAPADetail.jsx": {
+    "mtime": 1781061297837.8813,
+    "hash": "415871c08fcf569195bc8f2987efef5a"
+  },
+  "client/src/pages/CAPAs.jsx": {
+    "mtime": 1777513864954.5747,
+    "hash": "cff27659bef2da788f0ad889f64b04c5"
+  },
+  "client/src/pages/CCRDetail.jsx": {
+    "mtime": 1778048393680.5713,
+    "hash": "6a26b879aa2ba5b3d1d9b67b44ba25f8"
+  },
+  "client/src/pages/CCRs.jsx": {
+    "mtime": 1777513864953.0117,
+    "hash": "0256af08f78c0de61aae4e7d624dfd5c"
+  },
+  "client/src/pages/ChangeRequestDetail.jsx": {
+    "mtime": 1777527015755.064,
+    "hash": "e6aa8be35342a5eb88a79665d6f4e738"
+  },
+  "client/src/pages/ChangeRequests.jsx": {
+    "mtime": 1777513864951.523,
+    "hash": "a409c0ea4c695b9cc98df211d6312244"
+  },
+  "client/src/pages/ComplaintDetail.jsx": {
+    "mtime": 1778791536905.8389,
+    "hash": "29c366a5fe627546905bae9c87e72b1d"
+  },
+  "client/src/pages/Complaints.jsx": {
+    "mtime": 1777513864947.0327,
+    "hash": "c18cd09f13c87ee49bc4534bfbc47d10"
+  },
+  "client/src/pages/CrisisDetail.jsx": {
+    "mtime": 1777513864952.4792,
+    "hash": "ef72f7614b8addb6135a325848fb50b4"
+  },
+  "client/src/pages/DailyTasks.jsx": {
+    "mtime": 1777513864956.3445,
+    "hash": "e4bbd14c95b2412cfe12bb3f67a28937"
+  },
+  "client/src/pages/Dashboard.jsx": {
+    "mtime": 1782188965543.835,
+    "hash": "8a232316466871c22568001d965133e1"
+  },
+  "client/src/pages/DeviationDetail.jsx": {
+    "mtime": 1780594927590.7517,
+    "hash": "8b41d828147e750c2d05d260a823a6fa"
+  },
+  "client/src/pages/Deviations.jsx": {
+    "mtime": 1780594927592.4954,
+    "hash": "d98dc114ce22a8a35080516971eb0bc1"
+  },
+  "client/src/pages/DocumentGuide.jsx": {
+    "mtime": 1779114898334.192,
+    "hash": "1ace29e8f6d9f35a4858fb60f74eb485"
+  },
+  "client/src/pages/DocumentLibrary.jsx": {
+    "mtime": 1777513864956.7537,
+    "hash": "163c1ebe1815fe2dc6b74f39dd9e606a"
+  },
+  "client/src/pages/EmailScan.jsx": {
+    "mtime": 1778108507527.6067,
+    "hash": "55628adef7294fe87171d5be10f68742"
+  },
+  "client/src/pages/Equipment.jsx": {
+    "mtime": 1778771758477.1106,
+    "hash": "5d73c933bdfacfb408e467b250da5096"
+  },
+  "client/src/pages/EquipmentDetail.jsx": {
+    "mtime": 1778771486163.2666,
+    "hash": "a9ab8c5c0e1a3c4bc92c30e450691a5f"
+  },
+  "client/src/pages/Fermentation.jsx": {
+    "mtime": 1777694192233.2688,
+    "hash": "d13cf070bd8e52de0e7155dd902bf5a9"
+  },
+  "client/src/pages/InventoryCountDetail.jsx": {
+    "mtime": 1777606061701.2495,
+    "hash": "4203d6d4844a2952feafeb06643a9081"
+  },
+  "client/src/pages/InventoryCounts.jsx": {
+    "mtime": 1777606032346.8518,
+    "hash": "46bdc0746297eb85939792517640f076"
+  },
+  "client/src/pages/Journal.jsx": {
+    "mtime": 1779068648611.7703,
+    "hash": "cc1004aba4c36f6866582fb92b1baad5"
+  },
+  "client/src/pages/Login.jsx": {
+    "mtime": 1777513864953.8923,
+    "hash": "4b3e3b03bd2f9705b55f1babe5cfbfcf"
+  },
+  "client/src/pages/Maintenance.jsx": {
+    "mtime": 1777513864954.152,
+    "hash": "0754c9ba34dc6f3a6470003c1deda999"
+  },
+  "client/src/pages/MyTasks.jsx": {
+    "mtime": 1781061297838.1948,
+    "hash": "d791cb8515b4ddfcee504cacb7cd0966"
+  },
+  "client/src/pages/OperatorDashboard.jsx": {
+    "mtime": 1779127099127.0251,
+    "hash": "0c995a4d6b869e1cdda0a06646501450"
+  },
+  "client/src/pages/OperatorTasks.jsx": {
+    "mtime": 1778990053728.3599,
+    "hash": "a5dd560c46229cec3341ad35ad879942"
+  },
+  "client/src/pages/OperatorTasksAdmin.jsx": {
+    "mtime": 1778990098790.3123,
+    "hash": "fb43c70fdfe62d31df921b2ed59d6731"
+  },
+  "client/src/pages/PickListDetail.jsx": {
+    "mtime": 1777606165161.6946,
+    "hash": "c394461ca80c382ba2e2a3564d017fba"
+  },
+  "client/src/pages/PickLists.jsx": {
+    "mtime": 1777606223979.9163,
+    "hash": "843b9196f493d7e57daeed959f11935c"
+  },
+  "client/src/pages/Planner.jsx": {
+    "mtime": 1777695410202.3137,
+    "hash": "ff4ea2eb0588cd94b6e08b8edd326306"
+  },
+  "client/src/pages/PlannerBatchDetail.jsx": {
+    "mtime": 1777694192233.5544,
+    "hash": "3132e84605d5e168a120a924deb13494"
+  },
+  "client/src/pages/PlannerPODetail.jsx": {
+    "mtime": 1777694192233.9797,
+    "hash": "20429ad906ebf9f8a02c4d8bdaa604d1"
+  },
+  "client/src/pages/RecallCenter.jsx": {
+    "mtime": 1777513864947.6697,
+    "hash": "c3224a6eac2b728ee9dafd18f97396e9"
+  },
+  "client/src/pages/RecallDetail.jsx": {
+    "mtime": 1777513864952.1858,
+    "hash": "34325198a895afca2b448edc47889723"
+  },
+  "client/src/pages/SOPCategoriesAdmin.jsx": {
+    "mtime": 1782192533498.5442,
+    "hash": "8dcfb9cffa44ec16dc25d3010ee5b453"
+  },
+  "client/src/pages/SOPDetail.jsx": {
+    "mtime": 1782192279312.5461,
+    "hash": "c714663df3fa5d3e3a1fb42a82b36970"
+  },
+  "client/src/pages/SOPLibrary.jsx": {
+    "mtime": 1783300543050.1958,
+    "hash": "cd85e80dad339d173149ea68bc6cf1f9"
+  },
+  "client/src/pages/SupplierDetail.jsx": {
+    "mtime": 1781451714186.3735,
+    "hash": "482de4ad255f3982a519a132d5012c74"
+  },
+  "client/src/pages/Suppliers.jsx": {
+    "mtime": 1777513864949.3154,
+    "hash": "7f7801dd8687e9fa9f313531a9af983e"
+  },
+  "client/src/pages/TraceabilityDetail.jsx": {
+    "mtime": 1777513864951.1604,
+    "hash": "c862dc4ad0fd6f5557dbf358c44088e6"
+  },
+  "client/src/pages/UserManagement.jsx": {
+    "mtime": 1777513864957.222,
+    "hash": "edb0f9d60885a2b79ff20d8f8eda280c"
+  },
+  "client/src/pages/WorkOrderDetail.jsx": {
+    "mtime": 1777513864948.0627,
+    "hash": "025d8372216623e4bb09107ac0ee846a"
+  },
+  "client/src/pages/production/BOMs.jsx": {
+    "mtime": 1779602642387.2485,
+    "hash": "b9a87e70ed5ca0571bf43084db8173d0"
+  },
+  "client/src/pages/production/FermentationSchedule.jsx": {
+    "mtime": 1779602417364.7678,
+    "hash": "12a2c5a178247f549c6b8e0a05b26976"
+  },
+  "client/src/pages/production/PouringSchedule.jsx": {
+    "mtime": 1779602517105.2637,
+    "hash": "7031bdacd985533aa505bf55a41ba101"
+  },
+  "client/src/pages/production/ProductionDashboard.jsx": {
+    "mtime": 1779602353145.7966,
+    "hash": "a57f3dbd8e431aef2b80fff6cac6a8d1"
+  },
+  "client/src/pages/production/ProductionOrders.jsx": {
+    "mtime": 1779602470501.111,
+    "hash": "c4501a8b7e5e2a58c7f0a68223f7e6de"
+  },
+  "client/src/pages/production/ProductionTaskboard.jsx": {
+    "mtime": 1779602573098.3208,
+    "hash": "3e6389d24ca52d3587b7f2f22ee773e6"
+  },
+  "client/src/utils/api.js": {
+    "mtime": 1777513864939.5188,
+    "hash": "c6e3aec6954412f5d29f7e9854c17f60"
+  },
+  "client/tailwind.config.js": {
+    "mtime": 1777513864933.374,
+    "hash": "cf83964f335cb11b6e4645d1ae38bb08"
+  },
+  "client/vite.config.js": {
+    "mtime": 1777513864937.4182,
+    "hash": "8bfddbc55072621118d280acb3439330"
+  },
+  "scripts/backup/backup_qms.py": {
+    "mtime": 1782162558855.0645,
+    "hash": "1e83b12d43edad78ffca713c6c94c25e"
+  },
+  "scripts/backup/test_backup.py": {
+    "mtime": 1782162558855.5437,
+    "hash": "5c2d96283aff4ddb5346595978338703"
+  },
+  "scripts/seed-audit-checklist.js": {
+    "mtime": 1777309386553.7488,
+    "hash": "1981ae40cbbb8c11e963f9679e6cb436"
+  },
+  "server/src-sqlite-backup-20260428-000033/adminRoutes.js": {
+    "mtime": 1777585171111.5234,
+    "hash": "bc4eb15ca654a969c13c70bcce4cded2"
+  },
+  "server/src-sqlite-backup-20260428-000033/auditMiddleware.js": {
+    "mtime": 1777585171111.603,
+    "hash": "e43df7e9b6da0f95646b87e12d3cc8e3"
+  },
+  "server/src-sqlite-backup-20260428-000033/auditRoutes.js": {
+    "mtime": 1777585171111.802,
+    "hash": "cd02de28bd7166cce6fbaa452c734530"
+  },
+  "server/src-sqlite-backup-20260428-000033/authMiddleware.js": {
+    "mtime": 1777585171111.875,
+    "hash": "737ba8cc9d2ca1d8987e574f30234d86"
+  },
+  "server/src-sqlite-backup-20260428-000033/authRoutes.js": {
+    "mtime": 1777585171111.9756,
+    "hash": "154247b7d3c25e8cbddf0a2d31ab3690"
+  },
+  "server/src-sqlite-backup-20260428-000033/batchTestRoutes.js": {
+    "mtime": 1777585171112.1074,
+    "hash": "79b45ed73da5b0db245ce5d6589a5605"
+  },
+  "server/src-sqlite-backup-20260428-000033/changeControlRoutes.js": {
+    "mtime": 1777585171112.2744,
+    "hash": "9c3248a9d785c3bac3996087b8454266"
+  },
+  "server/src-sqlite-backup-20260428-000033/complaintRoutes.js": {
+    "mtime": 1777585171112.3818,
+    "hash": "38187d00aae2f8f989cb2c6d2d77ebef"
+  },
+  "server/src-sqlite-backup-20260428-000033/dailyTaskRoutes.js": {
+    "mtime": 1777585171112.6206,
+    "hash": "185652d7a35e38a17f604365dfbb049b"
+  },
+  "server/src-sqlite-backup-20260428-000033/database.js": {
+    "mtime": 1777585171112.7898,
+    "hash": "38d850edab16c9e6b1765e3758362da8"
+  },
+  "server/src-sqlite-backup-20260428-000033/documentRoutes.js": {
+    "mtime": 1777585171112.9045,
+    "hash": "527e0f27e1a700764cc28b9ea09b221a"
+  },
+  "server/src-sqlite-backup-20260428-000033/environmentalRoutes.js": {
+    "mtime": 1777585171112.9968,
+    "hash": "47e593c93a420492f18e3e606b4679a4"
+  },
+  "server/src-sqlite-backup-20260428-000033/fileRoutes.js": {
+    "mtime": 1777585171113.107,
+    "hash": "18aa1424a538e18782bb17f79a2ddbef"
+  },
+  "server/src-sqlite-backup-20260428-000033/formRoutes.js": {
+    "mtime": 1777585171113.1904,
+    "hash": "836f8f0f818169e7f9bf187b8e35e910"
+  },
+  "server/src-sqlite-backup-20260428-000033/index.js": {
+    "mtime": 1777585171113.4011,
+    "hash": "3851a72a49292d14fcd3ed4a624e16e9"
+  },
+  "server/src-sqlite-backup-20260428-000033/maintenanceRoutes.js": {
+    "mtime": 1777585171113.493,
+    "hash": "34274944aa760cd272caa1912ffbd75d"
+  },
+  "server/src-sqlite-backup-20260428-000033/plannerRoutes.js": {
+    "mtime": 1777585171113.5625,
+    "hash": "36022aaedc4cafeba56e39a61de64c77"
+  },
+  "server/src-sqlite-backup-20260428-000033/printRoutes.js": {
+    "mtime": 1777585171113.6636,
+    "hash": "1261a88fb2a775139d78a0470ef1e8d9"
+  },
+  "server/src-sqlite-backup-20260428-000033/recallRoutes.js": {
+    "mtime": 1777585171113.7886,
+    "hash": "a64735f268673034445d4b2e24961a1e"
+  },
+  "server/src-sqlite-backup-20260428-000033/requestLogger.js": {
+    "mtime": 1777585171113.8604,
+    "hash": "c7d9eda9eafe7319912847632e159c87"
+  },
+  "server/src-sqlite-backup-20260428-000033/routes.js": {
+    "mtime": 1777585171113.9487,
+    "hash": "fbc610240af3bf31d1097381207e4f96"
+  },
+  "server/src-sqlite-backup-20260428-000033/sanitize.js": {
+    "mtime": 1777585171114.1428,
+    "hash": "3cb759efdd384bf68ac690ecc47cfc5b"
+  },
+  "server/src-sqlite-backup-20260428-000033/simpleDocRoutes.js": {
+    "mtime": 1777585171114.2205,
+    "hash": "863d0454178a9bf86058b82f36c56ff6"
+  },
+  "server/src-sqlite-backup-20260428-000033/sopContentReader.js": {
+    "mtime": 1777585171114.3213,
+    "hash": "24e065be54c9290e6a611da9581c04ec"
+  },
+  "server/src-sqlite-backup-20260428-000033/sopDocumentRepair.js": {
+    "mtime": 1777585171114.3906,
+    "hash": "266bd30cfeb18debbcc7c899141500f4"
+  },
+  "server/src-sqlite-backup-20260428-000033/sosRoutes.js": {
+    "mtime": 1777585171114.4492,
+    "hash": "cb4571395d197ac4dd98adff71f5fbb7"
+  },
+  "server/src-sqlite-backup-20260428-000033/supplierRoutes.js": {
+    "mtime": 1777585171114.5212,
+    "hash": "94eb41a3ac91b562a4476a3c9ecda052"
+  },
+  "server/src-sqlite-backup-20260428-000033/taskboardRoutes.js": {
+    "mtime": 1777585171114.8406,
+    "hash": "7346948ddca94984b1034d51d03446c9"
+  },
+  "server/src-sqlite-backup-20260428-000033/validateId.js": {
+    "mtime": 1777585171114.903,
+    "hash": "91132c6efec9d4797b24b594bc03e770"
+  },
+  "server/src-sqlite-backup-20260428-000033/websocket.js": {
+    "mtime": 1777585171114.9585,
+    "hash": "8bfede28b2fcd0eaef8de4565bcb227c"
+  },
+  "server/src/auditMiddleware.js": {
+    "mtime": 1777529116495.9297,
+    "hash": "a986d156dbece328cb08920f63ae72d4"
+  },
+  "server/src/authMiddleware.js": {
+    "mtime": 1777527995586.6345,
+    "hash": "737ba8cc9d2ca1d8987e574f30234d86"
+  },
+  "server/src/database-pg.js": {
+    "mtime": 1781323658521.9272,
+    "hash": "068f244c49e98218cf6a315421e69034"
+  },
+  "server/src/index.js": {
+    "mtime": 1782179379849.0393,
+    "hash": "77639c7e7baeffe0795e447e36133c2a"
+  },
+  "server/src/migrate.js": {
+    "mtime": 1781324056236.9534,
+    "hash": "4634e526b647f602df86e6ad428c4f7b"
+  },
+  "server/src/migrations/00-migration-tracking.sql": {
+    "mtime": 1779642260936.28,
+    "hash": "85475e281780845977b6df9da5b0fd11"
+  },
+  "server/src/migrations/01-core.sql": {
+    "mtime": 1779060455204.2036,
+    "hash": "1a550bfa70deab1a139e837c4801dbbe"
+  },
+  "server/src/migrations/02-sops.sql": {
+    "mtime": 1779060468374.7573,
+    "hash": "1a8671e6d1ce01939608166988725395"
+  },
+  "server/src/migrations/03-quality.sql": {
+    "mtime": 1779060480616.3079,
+    "hash": "fcc33bfddabd1f9454d9ee5371cc17a7"
+  },
+  "server/src/migrations/04-capa-deviations.sql": {
+    "mtime": 1779060497678.0066,
+    "hash": "47411d203b107a9f1529bf5697552bbf"
+  },
+  "server/src/migrations/05-daily-ops.sql": {
+    "mtime": 1781324184343.41,
+    "hash": "2fa2dec2d8d1878190ce16eb18208d82"
+  },
+  "server/src/migrations/06-taskboard.sql": {
+    "mtime": 1779060523092.7083,
+    "hash": "ad18928018fe25baf2562f37a0919083"
+  },
+  "server/src/migrations/07-equipment.sql": {
+    "mtime": 1779060533394.5972,
+    "hash": "d82de9134c6293ebe3313c69e95c831b"
+  },
+  "server/src/migrations/08-recalls.sql": {
+    "mtime": 1779060545233.6543,
+    "hash": "7ab927b4afa6552913ba5c7cb34c630e"
+  },
+  "server/src/migrations/09-crisis-environmental.sql": {
+    "mtime": 1779060554215.613,
+    "hash": "6807e284c97248ef882ed432aa4b8ea0"
+  },
+  "server/src/migrations/10-suppliers.sql": {
+    "mtime": 1779060558925.5574,
+    "hash": "3a6d4913a031b628fb3b18527983704b"
+  },
+  "server/src/migrations/11-planner.sql": {
+    "mtime": 1779060575238.1472,
+    "hash": "5d556e672d34d6b06d3d3429a6665904"
+  },
+  "server/src/migrations/12-chat.sql": {
+    "mtime": 1779060577057.7402,
+    "hash": "67ecf1c284524571601b783bff5e1e1f"
+  },
+  "server/src/migrations/13-rca-structured.sql": {
+    "mtime": 1779116067416.7837,
+    "hash": "81826722409a3e375a64c0126d98efd6"
+  },
+  "server/src/migrations/14-deviation-attachments.sql": {
+    "mtime": 1780594927592.832,
+    "hash": "843c61fabd9782843fb4d796d078155f"
+  },
+  "server/src/migrations/15-deviation-comments.sql": {
+    "mtime": 1780594927593.055,
+    "hash": "765fcfa169a10ebb1c5743845bf52c69"
+  },
+  "server/src/migrations/16-deviation-approvals.sql": {
+    "mtime": 1780594927593.377,
+    "hash": "144efc1cda0cfd2b538c4d16c67f6285"
+  },
+  "server/src/migrations/17-archive-flags.sql": {
+    "mtime": 1781061297812.8093,
+    "hash": "2bd2002b4b243832d261d4ab9555760e"
+  },
+  "server/src/migrations/18-capa-action-item-notes.sql": {
+    "mtime": 1781061297838.4426,
+    "hash": "63ba720ec6731fada31d4daa46f657be"
+  },
+  "server/src/migrations/19-sop-approval-gate.sql": {
+    "mtime": 1781323759193.77,
+    "hash": "5eae97e01742e818580e000ed5605d9e"
+  },
+  "server/src/migrations/20-sop-approval-backfill.sql": {
+    "mtime": 1781324227230.1384,
+    "hash": "7931e2a8c78f9ddca7b30f302e70da91"
+  },
+  "server/src/migrations/31-add-migration-example.sql": {
+    "mtime": 1779642260936.2954,
+    "hash": "5a70f901ac703314a1497e05d1502bf6"
+  },
+  "server/src/migrations/32-drop-sops-increment-version-trigger.sql": {
+    "mtime": 1782180582008.3013,
+    "hash": "0493667533708da1b015165906a470c4"
+  },
+  "server/src/migrations/33-sop-files-is-current.sql": {
+    "mtime": 1782182426951.3398,
+    "hash": "e7b0393fabbe13ce756936cadc9f1042"
+  },
+  "server/src/migrations/34-harden-increment-version.sql": {
+    "mtime": 1782184115232.9927,
+    "hash": "ea878627f3bca35c1502ed2017b0f356"
+  },
+  "server/src/migrations/35-sop-categories.sql": {
+    "mtime": 1782192279312.8562,
+    "hash": "3c0a41b9e7f7047a4aa8adca47380e31"
+  },
+  "server/src/requestLogger.js": {
+    "mtime": 1777527995676.4631,
+    "hash": "c7d9eda9eafe7319912847632e159c87"
+  },
+  "server/src/routes/admin/admin.js": {
+    "mtime": 1782188965544.8,
+    "hash": "8d061475ff8564610e485211b3383f53"
+  },
+  "server/src/routes/admin/auth.js": {
+    "mtime": 1779581663723.309,
+    "hash": "39da1ae81eed42a7e4d6a892c97ff315"
+  },
+  "server/src/routes/admin/operatorTasks.js": {
+    "mtime": 1779581663723.3948,
+    "hash": "7317aeed46dfa98c9c907eca3dd95044"
+  },
+  "server/src/routes/admin/operators.js": {
+    "mtime": 1779581663723.475,
+    "hash": "9dfb6d981a36cf041aa468cd15044234"
+  },
+  "server/src/routes/admin/suppliers.js": {
+    "mtime": 1781479756011.6726,
+    "hash": "07d5758da5f04c80e57d1666b3bec533"
+  },
+  "server/src/routes/documents/documents.js": {
+    "mtime": 1779550652573.836,
+    "hash": "341c0d6f8a709fc9d8bbcfd2a9fa6c31"
+  },
+  "server/src/routes/documents/files.js": {
+    "mtime": 1783300543050.3684,
+    "hash": "2c3ec1cff41892767229bf38ca4cd04f"
+  },
+  "server/src/routes/documents/simpleDocs.js": {
+    "mtime": 1779550652577.3606,
+    "hash": "4c82d28ba1a51a10a28c7ff257bc2e01"
+  },
+  "server/src/routes/index.js": {
+    "mtime": 1779941057191.4724,
+    "hash": "e73f774ddbf3199402f52b4910cafcff"
+  },
+  "server/src/routes/inventory/items.js": {
+    "mtime": 1779940991446.0798,
+    "hash": "f98bac8b86351ac89d4f1147e2f8d0eb"
+  },
+  "server/src/routes/inventory/lots.js": {
+    "mtime": 1779941048107.1436,
+    "hash": "f2ac79d3c1f10ba21d25d96edee888e1"
+  },
+  "server/src/routes/inventory/picks.js": {
+    "mtime": 1782158757177.6365,
+    "hash": "1930ecec3e2c091f9da5aece751b693c"
+  },
+  "server/src/routes/inventory/sos.js": {
+    "mtime": 1782158757177.846,
+    "hash": "1cd7d00bcbba7b1b608569e77e197fe3"
+  },
+  "server/src/routes/inventory/stock.js": {
+    "mtime": 1779581663724.0977,
+    "hash": "897cfc83f50fd142bcb49cd644a395df"
+  },
+  "server/src/routes/legacy/journal.js": {
+    "mtime": 1779581663724.2031,
+    "hash": "95a27b4076a334d9a2666d7f56263917"
+  },
+  "server/src/routes/legacy/planner.js": {
+    "mtime": 1779581663724.3066,
+    "hash": "959b9563bb1359b07a7b900590ec3f69"
+  },
+  "server/src/routes/production/boms.js": {
+    "mtime": 1779581692985.8667,
+    "hash": "4843cec0a73584d20094d9d96eec794d"
+  },
+  "server/src/routes/production/dashboard.js": {
+    "mtime": 1779581692985.9797,
+    "hash": "3d56734f687289480ae591fed7ae893c"
+  },
+  "server/src/routes/production/fermentation.js": {
+    "mtime": 1779581692986.1152,
+    "hash": "65b2f86f78644d7f63ba878e74032ef9"
+  },
+  "server/src/routes/production/flavouring.js": {
+    "mtime": 1779581692986.2747,
+    "hash": "1ef1f7112a2e9c43f9a7685851082121"
+  },
+  "server/src/routes/production/index.js": {
+    "mtime": 1779581692986.4128,
+    "hash": "67f2609e47064a5f0fca3b89d58e758f"
+  },
+  "server/src/routes/production/orders.js": {
+    "mtime": 1779581692986.5405,
+    "hash": "ea01c23f042f09f352928f286d1c160c"
+  },
+  "server/src/routes/production/pours.js": {
+    "mtime": 1779581692986.672,
+    "hash": "c45c419997d3d528cac5c42a1953cced"
+  },
+  "server/src/routes/production/taskboard.js": {
+    "mtime": 1779581692986.839,
+    "hash": "2028983da3bbd71c2b08a84b0a493aa5"
+  },
+  "server/src/routes/quality/batchTests.js": {
+    "mtime": 1779581663724.4753,
+    "hash": "d42fd76cb3d1a505c62275b22c904f33"
+  },
+  "server/src/routes/quality/changeControls.js": {
+    "mtime": 1781061297813.2725,
+    "hash": "25f991ccd66884eacf42a53ac1e7e030"
+  },
+  "server/src/routes/quality/complaints.js": {
+    "mtime": 1779581663724.7163,
+    "hash": "4918b0734b41e53a4c02141f36c6fe72"
+  },
+  "server/src/routes/quality/dailyTasks.js": {
+    "mtime": 1779581663724.8206,
+    "hash": "6811883bf645731bd6936b3d09a2e627"
+  },
+  "server/src/routes/quality/dashboard.js": {
+    "mtime": 1783300543050.5242,
+    "hash": "435facabaff8916b5112f0bef8ddf156"
+  },
+  "server/src/routes/quality/environmental.js": {
+    "mtime": 1779581663725.01,
+    "hash": "4a9cdad37d072e34c9fa9770f622bb03"
+  },
+  "server/src/routes/quality/forms.js": {
+    "mtime": 1779581663725.0935,
+    "hash": "1388dbacaec9ac693c4fa3c8bb3d7e1b"
+  },
+  "server/src/routes/quality/links.js": {
+    "mtime": 1779581663725.1873,
+    "hash": "1038c1f6369c640ed77251325d2af9c0"
+  },
+  "server/src/routes/quality/maintenance.js": {
+    "mtime": 1779581663725.2686,
+    "hash": "e658787fcd5506c41afe288b49d2ecd9"
+  },
+  "server/src/routes/quality/print.js": {
+    "mtime": 1779581663725.4045,
+    "hash": "6743dc6093569cb7041f8c732a28056a"
+  },
+  "server/src/routes/quality/recalls.js": {
+    "mtime": 1779581663725.5115,
+    "hash": "c0ea1d20c0c5d95597c5efa4fa601e2a"
+  },
+  "server/src/routes/quality/taskboard.js": {
+    "mtime": 1779581663725.6267,
+    "hash": "c7746e2c0c602f3911f63233645e1878"
+  },
+  "server/src/routes/shared/ai.js": {
+    "mtime": 1781061297838.755,
+    "hash": "83abee712acd17767e57d44f98ee4be2"
+  },
+  "server/src/routes/shared/aiChat.js": {
+    "mtime": 1779581663725.8774,
+    "hash": "140d92d5af0516100d32d76267911b5e"
+  },
+  "server/src/routes/shared/audit.js": {
+    "mtime": 1779581663725.9785,
+    "hash": "7b4088382c1d8b4a1f2d728f8dad7db0"
+  },
+  "server/src/routes/shared/diagnostics.js": {
+    "mtime": 1779674048203.8562,
+    "hash": "ce15e9306474b36e8b32fea2cd64eba1"
+  },
+  "server/src/routes/shared/email.js": {
+    "mtime": 1779581663726.2146,
+    "hash": "41f1101e2db8d114c320fc903af7fb4d"
+  },
+  "server/src/sanitize.js": {
+    "mtime": 1777527995687.0457,
+    "hash": "3cb759efdd384bf68ac690ecc47cfc5b"
+  },
+  "server/src/services/AuditService.js": {
+    "mtime": 1779581692977.473,
+    "hash": "03b11871f9c7f7f9172725eb69818612"
+  },
+  "server/src/services/EventBus.js": {
+    "mtime": 1779581692977.6323,
+    "hash": "7e28435f56cfbdd395ea9606aac33cbd"
+  },
+  "server/src/services/WorkflowService.js": {
+    "mtime": 1779581692977.8074,
+    "hash": "ecbdf1da13f2dcbadf87aa661e032c3c"
+  },
+  "server/src/services/index.js": {
+    "mtime": 1779581692978.0059,
+    "hash": "e290ef98737f209cc029d48015e6309d"
+  },
+  "server/src/smokeTest.js": {
+    "mtime": 1779673781213.6816,
+    "hash": "45d8f744fdd33e99bfd34f00733da323"
+  },
+  "server/src/sopContentReader.js": {
+    "mtime": 1781062739483.4175,
+    "hash": "c4a76e8273d8bc7a4d187e702b3e46a3"
+  },
+  "server/src/sopDocumentRepair.js": {
+    "mtime": 1777585185046.747,
+    "hash": "7c8b9f468fdc879be346bf90039eb000"
+  },
+  "server/src/sopParse.js": {
+    "mtime": 1783300543050.8052,
+    "hash": "feee5a8c3dd06f8684f2ed1373d7b05d"
+  },
+  "server/src/supabase.js": {
+    "mtime": 1777527995712.8643,
+    "hash": "332cd3eeb27f4c04875bbc61e64cc2e2"
+  },
+  "server/src/validateId.js": {
+    "mtime": 1777527995728.1677,
+    "hash": "91132c6efec9d4797b24b594bc03e770"
+  },
+  "server/src/verify-schema.js": {
+    "mtime": 1779060972765.1733,
+    "hash": "371995a3cf5a0450fe72fb0aedc51b39"
+  },
+  "server/src/websocket.js": {
+    "mtime": 1777527995734.2415,
+    "hash": "8bfede28b2fcd0eaef8de4565bcb227c"
+  },
+  ".github/CICD-SETUP.md": {
+    "mtime": 1779581692981.7874,
+    "hash": "04d29210a359bccf6549a9a10ef0da69"
+  },
+  ".github/workflows/deploy.yml": {
+    "mtime": 1780585463450.3674,
+    "hash": "0585c81844338d5c6f88eadf7ed29d32"
+  },
+  "AGENTS.md": {
+    "mtime": 1782162558849.7734,
+    "hash": "44e3d4b147731617bb20a8a80b61b0e8"
+  },
+  "BUG_REPORT.md": {
+    "mtime": 1777309386536.1924,
+    "hash": "2e6173eba4625194494e9a0f17879ce2"
+  },
+  "CHANGELOG.md": {
+    "mtime": 1783300655957.623,
+    "hash": "56ce7a6c9beb371fdeadb41a2bcedeef"
+  },
+  "CLAUDE.md": {
+    "mtime": 1785387320437.75,
+    "hash": "10977f9f287d7da1dd0a5045dcbaef8d"
+  },
+  "CLOUDFLARE_SETUP_CHECKLIST.md": {
+    "mtime": 1777309386536.3376,
+    "hash": "fd55a9a538d74c156fa484e6b9a06f96"
+  },
+  "COST_OPTIMIZED_MONITORING.md": {
+    "mtime": 1777309386536.4756,
+    "hash": "ed2c53dddec69a18fc476d76b10142e9"
+  },
+  "HEARTBEAT.md": {
+    "mtime": 1782162558850.0066,
+    "hash": "bf26a0acb21fa55e345e4d66b29dcc42"
+  },
+  "IDENTITY.md": {
+    "mtime": 1782162558850.125,
+    "hash": "5a2c256cf07897d07195639d9efec936"
+  },
+  "PENDING_TASKS.md": {
+    "mtime": 1781324774768.2458,
+    "hash": "f507e7ac18059c5f007fb9b0cadaf596"
+  },
+  "QMS_MAINTENANCE_PLAN.md": {
+    "mtime": 1777309386536.802,
+    "hash": "2a4e94390dacea2f5a430704801dc93d"
+  },
+  "QMS_MONITORING_CONFIG.md": {
+    "mtime": 1777309386536.9114,
+    "hash": "a63acb393537f1c9ea8e17c1d4ca2875"
+  },
+  "QMS_SYSTEM_ASSESSMENT.md": {
+    "mtime": 1777309386537.1213,
+    "hash": "01d6575e59639f9b8a8623e5c05b9179"
+  },
+  "QMS_UPGRADE_PLAN.md": {
+    "mtime": 1777647187418.943,
+    "hash": "785217ce737304137733405a9938fd57"
+  },
+  "README.md": {
+    "mtime": 1783300628710.084,
+    "hash": "46c71d841c61baa0d30cb59179e7bdfb"
+  },
+  "READ_UPDATE_REPORT.md": {
+    "mtime": 1777309386537.3704,
+    "hash": "29583f1c394024866d6bc39220ba0b94"
+  },
+  "SOUL.md": {
+    "mtime": 1782162558850.2407,
+    "hash": "8263e278a75be62b07d6291346bd7554"
+  },
+  "TOOLS.md": {
+    "mtime": 1782162558850.3486,
+    "hash": "981c7c92a546f836030f8a43a80c8bb2"
+  },
+  "UI_TEST_REPORT.md": {
+    "mtime": 1777309386537.4788,
+    "hash": "caecbfb32d1e4a02bf6fa073823258c4"
+  },
+  "USER.md": {
+    "mtime": 1782162558850.4626,
+    "hash": "332f691dcdbc0f1d55a69ebc588941b3"
+  },
+  "VISUAL_TEST_REPORT.md": {
+    "mtime": 1777309386537.5872,
+    "hash": "4f9cef143affe96ca565eac193be57ae"
+  },
+  "claude-planner-prompt.txt": {
+    "mtime": 1777694192227.9285,
+    "hash": "ff1f7217a1a9052624274743154f7c97"
+  },
+  "client/dist/index.html": {
+    "mtime": 1782265929898.1929,
+    "hash": "e1b2482d9c618e2b686be3c0e9a6735c"
+  },
+  "client/index.html": {
+    "mtime": 1777513864932.8372,
+    "hash": "259c18c96c3e47a35d7f9ef7113e3291"
+  },
+  "cloudflare-tunnel-config.yml": {
+    "mtime": 1777309386551.2476,
+    "hash": "7e60147d6eed3e29e8a422672410af6f"
+  },
+  "planner-source-reference.html": {
+    "mtime": 1777698177772.236,
+    "hash": "577b949fd0258d494d3a9ecca75d917c"
+  },
+  "professional-tunnel-config.yml": {
+    "mtime": 1777309386551.8464,
+    "hash": "d755afa9e827516871ab09d9e9d3b6b1"
+  },
+  "client/dist/kki-icon.svg": {
+    "mtime": 1782265867823.4429,
+    "hash": "a3521d84861b1feade77e7104785789f"
+  },
+  "client/public/kki-icon.svg": {
+    "mtime": 1777513864937.8486,
+    "hash": "a3521d84861b1feade77e7104785789f"
+  }
+}
