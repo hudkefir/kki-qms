@@ -14,6 +14,137 @@ function checksum(content) {
 }
 
 /**
+ * Split a PostgreSQL migration into statements while removing comments that
+ * are outside quoted values and dollar-quoted bodies.
+ */
+export function splitSqlStatements(content) {
+  const statements = [];
+  let current = '';
+  let state = 'normal';
+  let dollarDelimiter = null;
+  let blockCommentDepth = 0;
+  let backslashEscapes = false;
+
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i];
+    const next = content[i + 1];
+
+    if (state === 'line-comment') {
+      if (char === '\n') {
+        current += char;
+        state = 'normal';
+      }
+      continue;
+    }
+
+    if (state === 'block-comment') {
+      if (char === '/' && next === '*') {
+        blockCommentDepth++;
+        i++;
+      } else if (char === '*' && next === '/') {
+        blockCommentDepth--;
+        i++;
+        if (blockCommentDepth === 0) state = 'normal';
+      } else if (char === '\n') {
+        current += char;
+      }
+      continue;
+    }
+
+    if (state === 'dollar-quote') {
+      if (content.startsWith(dollarDelimiter, i)) {
+        current += dollarDelimiter;
+        i += dollarDelimiter.length - 1;
+        dollarDelimiter = null;
+        state = 'normal';
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (state === 'single-quote') {
+      current += char;
+      if (backslashEscapes && char === '\\' && next !== undefined) {
+        current += next;
+        i++;
+      } else if (char === "'" && next === "'") {
+        current += next;
+        i++;
+      } else if (char === "'") {
+        state = 'normal';
+      }
+      continue;
+    }
+
+    if (state === 'double-quote') {
+      current += char;
+      if (char === '"' && next === '"') {
+        current += next;
+        i++;
+      } else if (char === '"') {
+        state = 'normal';
+      }
+      continue;
+    }
+
+    if (char === '-' && next === '-') {
+      state = 'line-comment';
+      i++;
+    } else if (char === '/' && next === '*') {
+      current += ' ';
+      state = 'block-comment';
+      blockCommentDepth = 1;
+      i++;
+    } else if (char === "'") {
+      const prefix = content[i - 1];
+      const beforePrefix = content[i - 2];
+      backslashEscapes = (prefix === 'E' || prefix === 'e')
+        && (beforePrefix === undefined || !/[A-Za-z0-9_$]/.test(beforePrefix));
+      current += char;
+      state = 'single-quote';
+    } else if (char === '"') {
+      current += char;
+      state = 'double-quote';
+    } else if (char === '$') {
+      const match = content.slice(i).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/);
+      const previous = content[i - 1];
+      if (match && (previous === undefined || !/[A-Za-z0-9_$]/.test(previous))) {
+        dollarDelimiter = match[0];
+        current += dollarDelimiter;
+        i += dollarDelimiter.length - 1;
+        state = 'dollar-quote';
+      } else {
+        current += char;
+      }
+    } else if (char === ';') {
+      const statement = current.trim();
+      if (statement) statements.push(statement);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  // Fail closed on an unterminated block comment. Otherwise the tail of the
+  // file (which may contain real SQL the author expected to run) is silently
+  // swallowed by the open comment and no statement is emitted for it — a
+  // corrupt migration would then be recorded as "applied" with missing DDL.
+  // Mirror this fail-closed posture for an unterminated dollar-quoted body,
+  // which has the same silent-corruption failure mode.
+  if (state === 'block-comment') {
+    throw new Error('Unterminated block comment in SQL migration (missing closing */)');
+  }
+  if (state === 'dollar-quote') {
+    throw new Error(`Unterminated dollar-quoted string in SQL migration (missing closing ${dollarDelimiter})`);
+  }
+
+  const statement = current.trim();
+  if (statement) statements.push(statement);
+  return statements;
+}
+
+/**
  * Run all pending migrations in order.
  * Tracks applied migrations in `schema_migrations` table.
  * Fails closed — throws on any migration error.
@@ -71,13 +202,9 @@ export async function runMigrations(pool) {
     // Run the migration
     console.log(`[migrate] Applying: ${file}`);
 
-    // Strip `--` line comments BEFORE splitting on ';'. The previous splitter
-    // split the raw file on ';' and only dropped chunks that *started* with
-    // '--', so a semicolon inside a comment would corrupt the statement stream.
-    // This is a robustness hardening, NOT the cause of the historical wedge.
-    // (Limitation: assumes '--' does not appear inside a string literal, which
-    //  these schema migrations do not contain. Dollar-quoted bodies ($$…$$)
-    //  are likewise not used by any current migration.)
+    // Split statements without treating quoted semicolons or comments as SQL
+    // boundaries. This is a robustness hardening, NOT the cause of the
+    // historical wedge.
     //
     // ROOT CAUSE of the wedge (verified 2026-06-13 against live DB):
     // 05-daily-ops.sql does `CREATE INDEX ... ON daily_task_completions(date)`
@@ -90,17 +217,7 @@ export async function runMigrations(pool) {
     // so migrations 06+ never auto-applied. Two fixes: (a) 05 now guards those
     // indexes on column existence; (b) the per-migration isolation below means
     // one drifted migration can never again halt the whole chain.
-    const sqlOnly = content
-      .split('\n')
-      .map(line => {
-        const idx = line.indexOf('--');
-        return idx >= 0 ? line.slice(0, idx) : line;
-      })
-      .join('\n');
-    const statements = sqlOnly
-      .split(';')
-      .map(s => s.trim())
-      .filter(s => s.length > 0);
+    const statements = splitSqlStatements(content);
 
     const client = await pool.connect();
     try {

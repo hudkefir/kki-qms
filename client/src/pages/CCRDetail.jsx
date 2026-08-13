@@ -131,6 +131,18 @@ export default function CCRDetail() {
                   <AlertTriangle className="w-3 h-3" /> Overdue
                 </span>
               )}
+              {/* Deep link to the same record in the ERP dashboard. Both apps
+                  share one Supabase DB and route by the row's primary key `id`,
+                  so this lands on the identical CCR. */}
+              <a
+                href={`https://kki.kefirkultures.com/quality/ccrs/${ccr.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-indigo-600"
+                title="Open this change control record in the ERP dashboard"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> Open in ERP
+              </a>
             </div>
             <p className="text-gray-700 font-medium">{ccr.title}</p>
             <p className="text-sm text-gray-500 mt-1">{ccr.recipient_company} — {ccr.recipient_contact}</p>

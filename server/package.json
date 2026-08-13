@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "KKI_DATA_DIR=/Users/kefirbot/KKI/Databases KKI_DOCS_DIR=/Users/kefirbot/KKI/QMS/SOPs node --watch src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test:migrate": "node --test test/migrate.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.93.0",
