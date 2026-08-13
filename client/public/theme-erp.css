@@ -1,0 +1,261 @@
+/* ============================================================================
+   theme-erp.css  —  ERP TOP-NAV skin for the KKI QMS  (staging preview)
+   ----------------------------------------------------------------------------
+   Purpose : Reskin the QMS to read as the KKI ERP by turning the dark navy
+             LEFT sidebar into a white MasterControl-style horizontal TOP-NAV,
+             WITHOUT touching any page logic, routing, component, or business
+             code. Pure additive, cosmetic-only overrides (background / color /
+             border / font / layout-chrome). NO data is hidden, NO nav item is
+             removed — every QMS module and every stat tile is preserved.
+
+   Target DOM (client/src/App.jsx):
+       nav.sidebar > div:nth-child(1)  = brand (shield + titles)
+       nav.sidebar > div:nth-child(2)  = date/time clock  (bg-navy-750)
+       nav.sidebar > div:nth-child(3)  = user info + logout
+       nav.sidebar > div:nth-child(4)  = nav groups list  (flex-1, scrollable)
+       nav.sidebar > div:nth-child(5)  = connection status + build version
+       main.main-content               = page canvas (was ml-64)
+
+   Tokens  : MasterControl palette + KKI green brand ramp (from the ERP source).
+               canvas  #f4f6f8   panel #ffffff   line #e3e8ee
+               ink     #1b2733   muted #5b6b7b
+               accent  #1f5fa6   accent-bg #eaf2fb
+               head    #16324f   brand #22c55e (KKI green box)   font Inter
+
+   REVERT  : Delete this file and remove its single <link> from index.html.
+             Nothing else changes. 100% reversible.
+   ============================================================================ */
+
+:root {
+  --erp-bg: #f4f6f8;
+  --erp-panel: #ffffff;
+  --erp-head: #16324f;
+  --erp-accent: #1f5fa6;
+  --erp-accent-hover: #184d8e;
+  --erp-accent-bg: #eaf2fb;
+  --erp-line: #e3e8ee;
+  --erp-ink: #1b2733;
+  --erp-muted: #5b6b7b;
+  --erp-brand: #22c55e;
+  --erp-navh: 56px;
+}
+
+/* ---- Typography: adopt the ERP's Inter stack ---------------------------- */
+body,
+.sidebar,
+.main-content {
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif !important;
+}
+
+/* ---- Canvas: flat MasterControl grey instead of the blue gradient ------- */
+body {
+  background: var(--erp-bg) !important;
+}
+
+/* ============================================================================
+   1. TURN THE LEFT RAIL INTO A HORIZONTAL WHITE TOP-NAV
+   Was: fixed left-0 top-0 bottom-0 w-64 flex-col bg-navy-800 (a vertical rail).
+   Now: fixed full-width bar pinned to the top, laid out as a row.
+   ============================================================================ */
+nav.sidebar {
+  left: 0 !important;
+  right: 0 !important;
+  top: 0 !important;
+  bottom: auto !important;
+  width: auto !important;
+  height: var(--erp-navh) !important;
+  flex-direction: row !important;
+  align-items: stretch !important;
+  background: var(--erp-panel) !important;
+  color: var(--erp-ink) !important;
+  border-bottom: 1px solid var(--erp-line) !important;
+  box-shadow: 0 1px 2px rgba(20, 40, 60, 0.05) !important;
+  overflow: visible !important;
+}
+
+/* Push the page canvas BELOW the bar instead of BESIDE it (undo ml-64). */
+main.main-content {
+  margin-left: 0 !important;
+  margin-top: var(--erp-navh) !important;
+}
+
+/* ---- Global navy-on-dark text → ink/muted on the new white bar ---------- */
+nav.sidebar .text-white { color: var(--erp-ink) !important; }
+nav.sidebar .text-navy-200 { color: var(--erp-ink) !important; }
+nav.sidebar .text-navy-300 { color: var(--erp-muted) !important; }
+nav.sidebar .text-navy-400 { color: #8595a5 !important; }
+nav.sidebar .text-navy-500 { color: #8595a5 !important; }
+
+/* ============================================================================
+   2. BRAND BLOCK (child 1) — green KKI shield tile + dark titles, left-aligned
+   ============================================================================ */
+nav.sidebar > div:nth-child(1) {
+  order: 0;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 16px !important;
+  border-bottom: none !important;
+  border-right: 1px solid var(--erp-line) !important;
+}
+nav.sidebar > div:nth-child(1) .bg-navy-600 {
+  background: var(--erp-brand) !important;
+}
+nav.sidebar > div:nth-child(1) h1 { color: var(--erp-ink) !important; }
+nav.sidebar > div:nth-child(1) .text-navy-300 { color: var(--erp-muted) !important; }
+
+/* ============================================================================
+   3. NAV GROUPS (child 4) — horizontal, scrollable row of module tabs.
+      flex-1 keeps it filling the middle; every item is preserved.
+   ============================================================================ */
+nav.sidebar > div:nth-child(4) {
+  order: 1;
+  flex: 1 1 auto;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 2px !important;
+  padding: 0 10px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+}
+/* Each group becomes an inline cluster (kills mt-3/pt-3/border-t stacking). */
+nav.sidebar > div:nth-child(4) > div {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 2px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-top: none !important;
+}
+/* Group labels (🏭 Production, 📋 Quality …) → small inline dividers. */
+nav.sidebar > div:nth-child(4) > div > p {
+  margin: 0 4px 0 8px !important;
+  padding: 0 !important;
+  color: var(--erp-muted) !important;
+  white-space: nowrap;
+}
+/* Nav links → horizontal pill tabs. */
+nav.sidebar > div:nth-child(4) a {
+  padding: 6px 10px !important;
+  color: var(--erp-muted) !important;
+  white-space: nowrap !important;
+}
+nav.sidebar > div:nth-child(4) a:hover {
+  background: var(--erp-accent-bg) !important;
+  color: var(--erp-accent) !important;
+}
+/* Active tab (NavLink adds .bg-navy-600.text-white) → ERP blue chip. */
+nav.sidebar > div:nth-child(4) a.bg-navy-600,
+nav.sidebar > div:nth-child(4) a.bg-navy-600.text-white {
+  background: var(--erp-accent-bg) !important;
+  color: var(--erp-accent) !important;
+}
+
+/* ============================================================================
+   4. USER INFO (child 3) — pushed to the right, green avatar chip
+   ============================================================================ */
+nav.sidebar > div:nth-child(3) {
+  order: 3;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 12px !important;
+  border-bottom: none !important;
+  border-left: 1px solid var(--erp-line) !important;
+}
+nav.sidebar > div:nth-child(3) .text-white { color: var(--erp-ink) !important; }
+nav.sidebar > div:nth-child(3) .bg-navy-600.rounded-full {
+  background: var(--erp-brand) !important;
+}
+nav.sidebar > div:nth-child(3) .text-navy-200 { color: #ffffff !important; }
+
+/* ============================================================================
+   5. DATE / TIME CLOCK (child 2) — right side, transparent (was bg-navy-750)
+   ============================================================================ */
+nav.sidebar > div:nth-child(2) {
+  order: 4;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 14px !important;
+  background: transparent !important;
+  border-bottom: none !important;
+  border-left: 1px solid var(--erp-line) !important;
+}
+nav.sidebar > div:nth-child(2),
+nav.sidebar > div:nth-child(2) * { color: var(--erp-ink) !important; }
+
+/* ============================================================================
+   6. FOOTER (child 5) — connection status + build, far right
+   ============================================================================ */
+nav.sidebar > div:nth-child(5) {
+  order: 5;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 14px !important;
+  border-top: none !important;
+  border-left: 1px solid var(--erp-line) !important;
+}
+nav.sidebar > div:nth-child(5) .text-navy-400 { color: var(--erp-muted) !important; }
+/* Kill the mt-3 that stacked the connection row under the (now absent) build. */
+nav.sidebar > div:nth-child(5) .mt-3 { margin-top: 0 !important; }
+
+/* ============================================================================
+   7. PAGE HEADERS — headings adopt the ERP navy head color
+   ============================================================================ */
+.main-content h1,
+.main-content h2 {
+  color: var(--erp-head) !important;
+  letter-spacing: -0.2px;
+}
+
+/* ============================================================================
+   8. CARDS / STAT TILES — MasterControl panel treatment
+      (#e3e8ee hairline, 10px radius, soft shadow). All 6 stat tiles kept.
+   ============================================================================ */
+.main-content .bg-white.rounded-lg,
+.main-content .bg-white.rounded-xl {
+  background: var(--erp-panel) !important;
+  border-color: var(--erp-line) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 1px 2px rgba(20, 40, 60, 0.04) !important;
+}
+.main-content .bg-white.border-blue-100,
+.main-content .bg-white.border-orange-100,
+.main-content .bg-white.border-green-100,
+.main-content .bg-white.border-red-100,
+.main-content .bg-white.border-purple-100,
+.main-content .bg-white.border-cyan-100 {
+  border-color: var(--erp-line) !important;
+}
+
+/* ============================================================================
+   9. BUTTONS — primary/action buttons adopt the ERP accent blue
+   ============================================================================ */
+.main-content button.bg-navy-600,
+.main-content .bg-navy-600.rounded-lg.text-white {
+  background: var(--erp-accent) !important;
+}
+.main-content button.bg-navy-600:hover {
+  background: var(--erp-accent-hover) !important;
+}
+
+/* ============================================================================
+   10. TABLE HEADERS — navy header band to match ERP data grids
+   ============================================================================ */
+.main-content table thead th,
+.main-content thead.bg-gray-50 th,
+.main-content thead .bg-gray-50 {
+  background: var(--erp-head) !important;
+  color: #ffffff !important;
+  border-color: var(--erp-head) !important;
+}
+
+/* ============================================================================
+   11. SCROLLBAR — thin ERP-tinted scrollbar (cosmetic parity)
+   ============================================================================ */
+::-webkit-scrollbar-thumb { background: #c7d2dd !important; }
+::-webkit-scrollbar-thumb:hover { background: #a9b8c7 !important; }
