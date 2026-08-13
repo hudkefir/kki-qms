@@ -24,3 +24,5 @@ server/documents/
 *.bak
 *.archive-bak
 *.mjs
+
+.graphify/

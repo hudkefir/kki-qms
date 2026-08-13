@@ -1,1 +1,0 @@
-{"nodes":[{"id":"migrations_32_drop_sops_increment_version_trigger","label":"32-drop-sops-increment-version-trigger.sql","file_type":"code","source_file":"server/src/migrations/32-drop-sops-increment-version-trigger.sql","source_location":"L1"}],"edges":[]}
