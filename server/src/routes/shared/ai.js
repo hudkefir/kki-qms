@@ -1713,7 +1713,7 @@ router.post('/ai/chat', async (req, res) => {
       if (aborted) break;
 
       const response = await client.messages.create({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-opus-4-6',
         max_tokens: 2048,
         system: systemPrompt,
         messages: conversationMessages,
