@@ -228,6 +228,9 @@ router.put('/change-requests/:id', requireWriteAccess, async (req, res) => {
     updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 1) return res.json(cr);
 
+    updates.push('updated_by = ?');
+    params.push(req.session?.user?.username || 'system');
+
     params.push(req.params.id);
     await db.run(`UPDATE change_requests SET ${updates.join(', ')} WHERE id = ?`, params);
 
@@ -249,8 +252,8 @@ router.post('/change-requests/:id/classify', requireWriteAccess, async (req, res
     const { classification, food_safety_impact } = req.body;
     if (!classification) return res.status(400).json({ error: 'classification is required' });
 
-    await db.run(`UPDATE change_requests SET classification = ?, food_safety_impact = ?, status = 'pending_review', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [classification, JSON.stringify(food_safety_impact || {}), req.params.id]);
+    await db.run(`UPDATE change_requests SET classification = ?, food_safety_impact = ?, status = 'pending_review', updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [classification, JSON.stringify(food_safety_impact || {}), req.session?.user?.username || 'system', req.params.id]);
 
     const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     logAudit(req, 'classify_change_request', 'change_requests', req.params.id, cr.request_id, { new_values: { classification } });
@@ -270,8 +273,8 @@ router.post('/change-requests/:id/approve', requireWriteAccess, async (req, res)
     const sessionUser = req.session?.user;
     const approvedBy = sessionUser?.display_name || sessionUser?.username || '';
 
-    await db.run(`UPDATE change_requests SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [approvedBy, req.params.id]);
+    await db.run(`UPDATE change_requests SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [approvedBy, sessionUser?.username || 'system', req.params.id]);
 
     const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     logAudit(req, 'approve_change_request', 'change_requests', req.params.id, cr.request_id, { new_values: { approved_by: approvedBy } });
@@ -291,8 +294,8 @@ router.post('/change-requests/:id/reject', requireWriteAccess, async (req, res) 
     const { rejection_reason } = req.body;
     if (!rejection_reason) return res.status(400).json({ error: 'rejection_reason is required' });
 
-    await db.run(`UPDATE change_requests SET status = 'rejected', rejection_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [rejection_reason, req.params.id]);
+    await db.run(`UPDATE change_requests SET status = 'rejected', rejection_reason = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [rejection_reason, req.session?.user?.username || 'system', req.params.id]);
 
     const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     logAudit(req, 'reject_change_request', 'change_requests', req.params.id, cr.request_id, { new_values: { rejection_reason } });
@@ -315,8 +318,8 @@ router.post('/change-requests/:id/effectiveness', requireWriteAccess, async (req
     const newStatus = effectiveness_result === 'effective' ? 'closed' : 'implementing';
     const closedAt = effectiveness_result === 'effective' ? "CURRENT_TIMESTAMP" : null;
 
-    await db.run(`UPDATE change_requests SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = CURRENT_TIMESTAMP, status = ?, closed_at = ${closedAt ? closedAt : 'closed_at'}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [effectiveness_result, effectiveness_notes || '', newStatus, req.params.id]);
+    await db.run(`UPDATE change_requests SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = CURRENT_TIMESTAMP, status = ?, closed_at = ${closedAt ? closedAt : 'closed_at'}, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [effectiveness_result, effectiveness_notes || '', newStatus, req.session?.user?.username || 'system', req.params.id]);
 
     const updated = await db.get('SELECT * FROM change_requests WHERE id = ?', [req.params.id]);
     logAudit(req, 'effectiveness_change_request', 'change_requests', req.params.id, cr.request_id, { new_values: { effectiveness_result } });
@@ -1171,6 +1174,10 @@ router.put('/capas/:id', requireContentAccess, async (req, res) => { console.log
     updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 1) return res.json(capa);
 
+    // Persist authenticated actor (server-side, not from body) — required by seal guard
+    updates.push('updated_by = ?');
+    params.push(req.session.user.username);
+
     params.push(req.params.id);
     await db.run(`UPDATE capas SET ${updates.join(', ')} WHERE id = ?`, params);
 
@@ -1378,8 +1385,8 @@ router.post('/capas/:id/effectiveness', requireWriteAccess, async (req, res) => 
 
     const newStatus = effectiveness_result === 'effective' ? 'closed' : 'in_progress';
 
-    await db.run(`UPDATE capas SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = CURRENT_TIMESTAMP, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [effectiveness_result, effectiveness_notes || '', newStatus, req.params.id]);
+    await db.run(`UPDATE capas SET effectiveness_result = ?, effectiveness_notes = ?, effectiveness_check_date = CURRENT_TIMESTAMP, status = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [effectiveness_result, effectiveness_notes || '', newStatus, req.session.user.username, req.params.id]);
 
     const updated = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     logAudit(req, 'effectiveness_capa', 'capas', req.params.id, capa.capa_id, { new_values: { effectiveness_result } });

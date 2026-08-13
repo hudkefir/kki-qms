@@ -630,10 +630,10 @@ router.put('/ccrs/:id', requireWriteAccess, async (req, res) => {
       params.push(JSON.stringify(req.body.preventive_measures));
     }
 
-    // User attribution
+    // User attribution — normalize to stable username so the seal-guard allowlist matches
     const sessionUser = req.session?.user;
     updates.push('updated_by = ?');
-    params.push(sessionUser?.display_name || sessionUser?.username || '');
+    params.push(sessionUser?.username || '');
 
     updates.push("updated_at = CURRENT_TIMESTAMP");
     if (updates.length === 2) return res.json(ccr); // only updated_by + updated_at = no real change
