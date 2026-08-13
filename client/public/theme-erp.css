@@ -265,3 +265,19 @@ nav.sidebar > div:nth-child(5) .mt-3 { margin-top: 0 !important; }
    ============================================================================ */
 ::-webkit-scrollbar-thumb { background: #c7d2dd !important; }
 ::-webkit-scrollbar-thumb:hover { background: #a9b8c7 !important; }
+
+/* ============================================================================
+   12. RETURN-TO-DASHBOARD BUTTON — link back to kki.kefirkultures.com.
+       Stock (unthemed) view: navy chip stacked under the brand titles.
+       Themed hybrid view: inline in the 56px top bar, ERP accent blue.
+   ============================================================================ */
+nav.sidebar > div:nth-child(1) .return-to-dashboard {
+  margin-top: 0 !important;
+  margin-left: 14px !important;
+  background: var(--erp-accent, #1f5fa6) !important;
+  color: #ffffff !important;
+  white-space: nowrap;
+}
+nav.sidebar > div:nth-child(1) .return-to-dashboard:hover {
+  background: var(--erp-accent-hover, #184d8e) !important;
+}

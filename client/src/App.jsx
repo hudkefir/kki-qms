@@ -188,6 +188,14 @@ export default function App() {
               <p className="text-xs text-navy-300 leading-tight">Document Control System</p>
             </div>
           </div>
+          <a
+            href="https://kki.kefirkultures.com"
+            className="return-to-dashboard mt-3 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-navy-600 hover:bg-navy-700 text-navy-100 text-xs font-semibold transition-colors"
+            title="Return to KKI Dashboard"
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            <span>Return to Dashboard</span>
+          </a>
         </div>
 
         {/* Date & Time */}
