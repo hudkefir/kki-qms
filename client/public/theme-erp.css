@@ -1,26 +1,37 @@
 /* ============================================================================
-   theme-erp.css  —  ERP TOP-NAV skin for the KKI QMS  (staging preview)
+   theme-erp.css  —  HYBRID ERP skin for the KKI QMS
    ----------------------------------------------------------------------------
-   Purpose : Reskin the QMS to read as the KKI ERP by turning the dark navy
-             LEFT sidebar into a white MasterControl-style horizontal TOP-NAV,
-             WITHOUT touching any page logic, routing, component, or business
-             code. Pure additive, cosmetic-only overrides (background / color /
-             border / font / layout-chrome). NO data is hidden, NO nav item is
-             removed — every QMS module and every stat tile is preserved.
+   Purpose : Give the QMS the KKI ERP look WITHOUT touching any page logic,
+             routing, component, or business code. Pure additive, cosmetic-only
+             overrides (background / color / border / font / layout-chrome).
 
-   Target DOM (client/src/App.jsx):
+   HYBRID layout (this build):
+       • A white MasterControl-style TOP BAR across the top holding the
+         chrome — green KKI brand tile, date/time clock, "● Live" status +
+         build, and the user chip.
+       • The FULL QMS module SIDEBAR retained on the LEFT (navy rail), below
+         the top bar — every nav group and every module link preserved.
+       • Page canvas sits below the top bar and to the right of the sidebar.
+
+   The QMS renders a single <nav class="sidebar"> with five children:
        nav.sidebar > div:nth-child(1)  = brand (shield + titles)
        nav.sidebar > div:nth-child(2)  = date/time clock  (bg-navy-750)
        nav.sidebar > div:nth-child(3)  = user info + logout
-       nav.sidebar > div:nth-child(4)  = nav groups list  (flex-1, scrollable)
+       nav.sidebar > div:nth-child(4)  = nav groups list  (flex-1, scrollable)  → LEFT RAIL
        nav.sidebar > div:nth-child(5)  = connection status + build version
        main.main-content               = page canvas (was ml-64)
 
-   Tokens  : MasterControl palette + KKI green brand ramp (from the ERP source).
-               canvas  #f4f6f8   panel #ffffff   line #e3e8ee
-               ink     #1b2733   muted #5b6b7b
-               accent  #1f5fa6   accent-bg #eaf2fb
-               head    #16324f   brand #22c55e (KKI green box)   font Inter
+   To build the hybrid with CSS only, the <nav> itself becomes the white top
+   bar (children 1,2,3,5), and child 4 (the module list) is re-pinned as a
+   fixed navy sidebar on the left. No DOM is added or removed; NO module,
+   stat tile, deadline, or SOP card is hidden.
+
+   Tokens  : MasterControl palette + KKI green brand + the QMS navy ramp.
+               canvas #f4f6f8  panel #ffffff  line #e3e8ee
+               ink    #1b2733  muted #5b6b7b
+               accent #1f5fa6  accent-bg #eaf2fb
+               head   #16324f  brand #22c55e (KKI green box)   font Inter
+               navy-800 #1a2847 (sidebar bg, matches tailwind config)
 
    REVERT  : Delete this file and remove its single <link> from index.html.
              Nothing else changes. 100% reversible.
@@ -37,7 +48,9 @@
   --erp-ink: #1b2733;
   --erp-muted: #5b6b7b;
   --erp-brand: #22c55e;
-  --erp-navh: 56px;
+  --erp-navy: #1a2847;   /* navy-800 — the retained QMS sidebar background */
+  --erp-navh: 56px;      /* top bar height */
+  --erp-railw: 16rem;    /* left sidebar width (= original w-64) */
 }
 
 /* ---- Typography: adopt the ERP's Inter stack ---------------------------- */
@@ -53,9 +66,9 @@ body {
 }
 
 /* ============================================================================
-   1. TURN THE LEFT RAIL INTO A HORIZONTAL WHITE TOP-NAV
+   1. THE <nav> BECOMES A WHITE HORIZONTAL TOP BAR
    Was: fixed left-0 top-0 bottom-0 w-64 flex-col bg-navy-800 (a vertical rail).
-   Now: fixed full-width bar pinned to the top, laid out as a row.
+   Now: fixed full-width white bar pinned to the top, laid out as a row.
    ============================================================================ */
 nav.sidebar {
   left: 0 !important;
@@ -73,21 +86,31 @@ nav.sidebar {
   overflow: visible !important;
 }
 
-/* Push the page canvas BELOW the bar instead of BESIDE it (undo ml-64). */
+/* Push the page canvas BELOW the bar AND to the RIGHT of the sidebar. */
 main.main-content {
-  margin-left: 0 !important;
+  margin-left: var(--erp-railw) !important;
   margin-top: var(--erp-navh) !important;
 }
 
-/* ---- Global navy-on-dark text → ink/muted on the new white bar ---------- */
-nav.sidebar .text-white { color: var(--erp-ink) !important; }
-nav.sidebar .text-navy-200 { color: var(--erp-ink) !important; }
-nav.sidebar .text-navy-300 { color: var(--erp-muted) !important; }
-nav.sidebar .text-navy-400 { color: #8595a5 !important; }
-nav.sidebar .text-navy-500 { color: #8595a5 !important; }
+/* ---- Top-bar chrome: navy-on-dark text → ink/muted on white -------------
+   Scoped to the top-bar children ONLY (1,2,3,5). Child 4 (the module rail)
+   is intentionally left with its original navy styling.                    */
+nav.sidebar > div:nth-child(1) .text-white,
+nav.sidebar > div:nth-child(2) .text-white,
+nav.sidebar > div:nth-child(3) .text-white,
+nav.sidebar > div:nth-child(5) .text-white { color: var(--erp-ink) !important; }
+nav.sidebar > div:nth-child(1) .text-navy-300,
+nav.sidebar > div:nth-child(2) .text-navy-300,
+nav.sidebar > div:nth-child(3) .text-navy-300,
+nav.sidebar > div:nth-child(5) .text-navy-300 { color: var(--erp-muted) !important; }
+nav.sidebar > div:nth-child(1) .text-navy-400,
+nav.sidebar > div:nth-child(2) .text-navy-400,
+nav.sidebar > div:nth-child(3) .text-navy-400,
+nav.sidebar > div:nth-child(5) .text-navy-400 { color: #8595a5 !important; }
+nav.sidebar > div:nth-child(5) .text-navy-500 { color: #8595a5 !important; }
 
 /* ============================================================================
-   2. BRAND BLOCK (child 1) — green KKI shield tile + dark titles, left-aligned
+   2. BRAND BLOCK (child 1) — green KKI shield tile + dark titles, top-left
    ============================================================================ */
 nav.sidebar > div:nth-child(1) {
   order: 0;
@@ -105,59 +128,41 @@ nav.sidebar > div:nth-child(1) h1 { color: var(--erp-ink) !important; }
 nav.sidebar > div:nth-child(1) .text-navy-300 { color: var(--erp-muted) !important; }
 
 /* ============================================================================
-   3. NAV GROUPS (child 4) — horizontal, scrollable row of module tabs.
-      flex-1 keeps it filling the middle; every item is preserved.
+   3. LEFT MODULE SIDEBAR (child 4) — the FULL QMS nav rail, retained.
+      Re-pinned as a fixed navy column below the top bar. Every group and
+      every module link is preserved with its original navy styling.
    ============================================================================ */
 nav.sidebar > div:nth-child(4) {
-  order: 1;
-  flex: 1 1 auto;
+  position: fixed !important;
+  left: 0 !important;
+  top: var(--erp-navh) !important;
+  bottom: 0 !important;
+  width: var(--erp-railw) !important;
+  background: var(--erp-navy) !important;
   display: flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  gap: 2px !important;
-  padding: 0 10px !important;
-  overflow-x: auto !important;
-  overflow-y: hidden !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+  padding: 16px 12px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  z-index: 39 !important;
+  border-right: 1px solid rgba(0, 0, 0, 0.15) !important;
 }
-/* Each group becomes an inline cluster (kills mt-3/pt-3/border-t stacking). */
+/* Groups stack vertically (restore original vertical spacing). */
 nav.sidebar > div:nth-child(4) > div {
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  gap: 2px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border-top: none !important;
+  display: block !important;
 }
-/* Group labels (🏭 Production, 📋 Quality …) → small inline dividers. */
-nav.sidebar > div:nth-child(4) > div > p {
-  margin: 0 4px 0 8px !important;
-  padding: 0 !important;
-  color: var(--erp-muted) !important;
-  white-space: nowrap;
-}
-/* Nav links → horizontal pill tabs. */
+/* Nav links: full-width rows (original QMS look, keep navy palette intact). */
 nav.sidebar > div:nth-child(4) a {
-  padding: 6px 10px !important;
-  color: var(--erp-muted) !important;
-  white-space: nowrap !important;
-}
-nav.sidebar > div:nth-child(4) a:hover {
-  background: var(--erp-accent-bg) !important;
-  color: var(--erp-accent) !important;
-}
-/* Active tab (NavLink adds .bg-navy-600.text-white) → ERP blue chip. */
-nav.sidebar > div:nth-child(4) a.bg-navy-600,
-nav.sidebar > div:nth-child(4) a.bg-navy-600.text-white {
-  background: var(--erp-accent-bg) !important;
-  color: var(--erp-accent) !important;
+  width: 100% !important;
 }
 
 /* ============================================================================
-   4. USER INFO (child 3) — pushed to the right, green avatar chip
+   4. USER INFO (child 3) — pushed to the far right of the top bar, green chip
    ============================================================================ */
 nav.sidebar > div:nth-child(3) {
-  order: 3;
+  order: 4;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -172,13 +177,14 @@ nav.sidebar > div:nth-child(3) .bg-navy-600.rounded-full {
 nav.sidebar > div:nth-child(3) .text-navy-200 { color: #ffffff !important; }
 
 /* ============================================================================
-   5. DATE / TIME CLOCK (child 2) — right side, transparent (was bg-navy-750)
+   5. DATE / TIME CLOCK (child 2) — right side of the bar, transparent
    ============================================================================ */
 nav.sidebar > div:nth-child(2) {
-  order: 4;
+  order: 2;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
+  margin-left: auto !important;   /* pushes clock + live + user to the right */
   padding: 0 14px !important;
   background: transparent !important;
   border-bottom: none !important;
@@ -188,10 +194,10 @@ nav.sidebar > div:nth-child(2),
 nav.sidebar > div:nth-child(2) * { color: var(--erp-ink) !important; }
 
 /* ============================================================================
-   6. FOOTER (child 5) — connection status + build, far right
+   6. FOOTER / STATUS (child 5) — "● Live" connection + build, right of bar
    ============================================================================ */
 nav.sidebar > div:nth-child(5) {
-  order: 5;
+  order: 3;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -200,7 +206,7 @@ nav.sidebar > div:nth-child(5) {
   border-left: 1px solid var(--erp-line) !important;
 }
 nav.sidebar > div:nth-child(5) .text-navy-400 { color: var(--erp-muted) !important; }
-/* Kill the mt-3 that stacked the connection row under the (now absent) build. */
+/* Kill the mt-3 that stacked the connection row under the build in the rail. */
 nav.sidebar > div:nth-child(5) .mt-3 { margin-top: 0 !important; }
 
 /* ============================================================================
@@ -214,7 +220,7 @@ nav.sidebar > div:nth-child(5) .mt-3 { margin-top: 0 !important; }
 
 /* ============================================================================
    8. CARDS / STAT TILES — MasterControl panel treatment
-      (#e3e8ee hairline, 10px radius, soft shadow). All 6 stat tiles kept.
+      (#e3e8ee hairline, 10px radius, soft shadow). All stat tiles kept.
    ============================================================================ */
 .main-content .bg-white.rounded-lg,
 .main-content .bg-white.rounded-xl {
