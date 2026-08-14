@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
-import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail, ListTodo, LayoutDashboard, HelpCircle, Factory, Droplets, FileSpreadsheet, Tags, ExternalLink } from 'lucide-react';
+import { Home, FileText, ClipboardCheck, Shield, AlertCircle, FileCheck, BarChart3, Users, ScrollText, LogOut, FolderOpen, FlaskConical, ClipboardList, GitPullRequest, AlertOctagon, ShieldCheck, Cog, Wrench, AlertTriangle, Package, Archive, CalendarDays, Beaker, BookOpen, Mail, ListTodo, LayoutDashboard, HelpCircle, Factory, Droplets, FileSpreadsheet, Tags, ExternalLink, Moon, Sun } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -86,6 +86,39 @@ function DateTimeClock() {
         {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
       </p>
     </div>
+  );
+}
+
+function ThemeToggle() {
+  const [isDark, setIsDark] = React.useState(() => document.documentElement.dataset.theme === 'dark');
+
+  const toggleTheme = () => {
+    const nextIsDark = !isDark;
+    setIsDark(nextIsDark);
+
+    if (nextIsDark) {
+      document.documentElement.dataset.theme = 'dark';
+    } else {
+      delete document.documentElement.dataset.theme;
+    }
+
+    try {
+      localStorage.setItem('qms-theme', nextIsDark ? 'dark' : 'light');
+    } catch (_) {}
+  };
+
+  const Icon = isDark ? Sun : Moon;
+  return (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      className="theme-toggle p-1.5 text-navy-400 hover:text-white hover:bg-navy-700 rounded-lg transition-colors"
+      title={isDark ? 'Use light theme' : 'Use dark theme'}
+      aria-label={isDark ? 'Use light theme' : 'Use dark theme'}
+      aria-pressed={isDark}
+    >
+      <Icon className="w-4 h-4" />
+    </button>
   );
 }
 
@@ -217,13 +250,16 @@ export default function App() {
                 </span>
               </div>
             </div>
-            <button
-              onClick={logout}
-              className="p-1.5 text-navy-400 hover:text-white hover:bg-navy-700 rounded-lg transition-colors"
-              title="Logout"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <ThemeToggle />
+              <button
+                onClick={logout}
+                className="p-1.5 text-navy-400 hover:text-white hover:bg-navy-700 rounded-lg transition-colors"
+                title="Logout"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
 
