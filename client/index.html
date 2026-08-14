@@ -5,8 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>KKI QMS - Document Control System</title>
   <link rel="icon" type="image/svg+xml" href="/kki-icon.svg" />
+  <script>
+    try {
+      if (localStorage.getItem('qms-theme') === 'dark') {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    } catch (_) {}
+  </script>
   <!-- Hybrid ERP nav skin (white top bar + retained QMS module sidebar) — pure cosmetic, reversible. Delete this line + client/public/theme-erp.css to revert. -->
   <link rel="stylesheet" href="/theme-erp.css" />
+  <link rel="stylesheet" href="/theme-dark.css" />
 </head>
 <body class="bg-gray-50 text-gray-900 antialiased">
   <div id="root"></div>
