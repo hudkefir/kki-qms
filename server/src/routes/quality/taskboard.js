@@ -375,10 +375,31 @@ router.patch('/v2/tasks/:date/:id', async (req, res) => {
 
     const newVersion = serverVersion + 1;
 
-    await db.run(
-      'UPDATE taskboard_tasks SET data = ?, task = ?, status = ?, version = ?, updated_at = datetime(\'now\') WHERE id = ?',
-      [updatedJson, updated.task || updated.name || '', updated.status || 'todo', newVersion, row.id]
+    // Atomic compare-and-swap: the version predicate makes the check and write
+    // one database operation. A concurrent winner advances version first, so
+    // every loser updates zero rows and receives the current server task.
+    const updateResult = await db.run(
+      'UPDATE taskboard_tasks SET data = ?, task = ?, status = ?, version = ?, updated_at = datetime(\'now\') WHERE id = ? AND version = ?',
+      [updatedJson, updated.task || updated.name || '', updated.status || 'todo', newVersion, row.id, serverVersion]
     );
+
+    if (updateResult.changes === 0) {
+      const current = await db.get(
+        'SELECT id, data, version FROM taskboard_tasks WHERE board_date = ? AND id = ?',
+        [date, row.id]
+      );
+      if (!current) return res.status(404).json({ error: 'Task not found' });
+
+      const currentVersion = current.version || 1;
+      const serverTask = { ...JSON.parse(current.data), _rowId: current.id, _version: currentVersion };
+      console.warn(`[TASKBOARD] CONFLICT on task ${id}: client v${clientVersion} vs server v${currentVersion}`);
+      return res.status(409).json({
+        error: 'Version conflict — task was updated by another device',
+        serverTask,
+        serverVersion: currentVersion,
+        clientVersion
+      });
+    }
 
     res.json({ ...updated, _rowId: row.id, _version: newVersion });
   } catch (err) {
