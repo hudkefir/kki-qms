@@ -8,6 +8,37 @@ import { useFetch, apiPost, apiPut, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Modal from '../components/Modal';
+import { code128BSvg } from '../utils/code128';
+
+// ── Cremco lab defaults + panel analyte lists (pre-filled requisition) ───────
+// Contact grounded from KKI vendor records: nahid.rahimifard@cremco.ca is the
+// live address (the cremcolabs.com address bounces). KK-SOP-00602 §6.2.
+const CREMCO_LAB = {
+  name: 'CREM Co Labs',
+  address: '3-1580 Britannia Rd E, Mississauga, ON L4W 1J2',
+  contact: 'Nahid Rahimifard, Ph.D.',
+  email: 'nahid.rahimifard@cremco.ca',
+  phone: '(437) 365-0151',
+  labLine: '905-510-0111',
+};
+
+// Analyte checklists per profile — mirrors the server-side TEST_PROFILES so the
+// printed requisition lists exactly what the lab is asked to run.
+const PANEL_ANALYTES = {
+  routine: ['pH Level', 'Brix / Sugar Content'],
+  cfia_micro: [
+    'Total Plate Count (TPC)', 'Coliform', 'E. coli', 'Salmonella (/25g)',
+    'Listeria monocytogenes (/25g)', 'Staphylococcus aureus', 'Yeast', 'Mold',
+  ],
+  fda: [
+    'Standard Plate Count (SPC)', 'Coliform / E. coli',
+    'Pathogen Screening (Salmonella, Listeria)',
+  ],
+  full_panel: [
+    'Total Plate Count (TPC)', 'Yeast', 'Mold', 'Coliform', 'E. coli',
+    'Staphylococcus aureus', 'Salmonella (/25g)', 'Listeria monocytogenes (/25g)',
+  ],
+};
 
 const STATUS_COLORS = {
   pass: 'bg-green-100 text-green-700',
@@ -275,6 +306,163 @@ function CertificateOfAnalysis({ batch, results, onClose }) {
   );
 }
 
+// ── Cremco Sample Requisition (Printable + Code128 SR# barcode) ─────────────
+// KK-SOP-00602 §6.4. Pre-fills the lab block, panel, cold-chain handling and
+// SR# barcode so submitting a sample is "pick lot → print → ship".
+
+function SampleRequisition({ batch, onClose }) {
+  const printRef = useRef();
+  const barcodeValue = batch.sr_number || batch.batch_number || '';
+  const barcodeSvg = barcodeValue
+    ? code128BSvg(barcodeValue, { moduleWidth: 2, height: 64, fontSize: 15 })
+    : '';
+
+  const profile = batch.test_profile || 'cfia_micro';
+  const analytes = PANEL_ANALYTES[profile] || PANEL_ANALYTES.cfia_micro;
+
+  let pooled = [];
+  if (batch.is_composite) {
+    try {
+      pooled = typeof batch.composite_batches === 'string'
+        ? JSON.parse(batch.composite_batches)
+        : (batch.composite_batches || []);
+    } catch (e) { pooled = []; }
+    if (!Array.isArray(pooled)) pooled = [];
+  }
+
+  const handlePrint = () => {
+    const content = printRef.current;
+    const win = window.open('', '_blank');
+    win.document.write(`<!DOCTYPE html><html><head><title>Sample Requisition - ${barcodeValue}</title>
+    <style>
+      body { font-family: Arial, sans-serif; font-size: 12px; color: #111; margin: 24px; }
+      h1 { font-size: 20px; margin-bottom: 2px; }
+      h2 { font-size: 13px; color: #444; margin: 14px 0 6px; border-bottom: 1px solid #ddd; padding-bottom: 3px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+      th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; font-size: 11px; }
+      th { background: #f5f5f5; font-weight: 600; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; margin-bottom: 12px; font-size: 12px; }
+      .grid2 dt { font-weight: 600; color: #555; }
+      .box { border: 1px solid #ccc; border-radius: 4px; padding: 10px 12px; }
+      .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
+      .chk { display: inline-block; width: 12px; height: 12px; border: 1px solid #333; margin-right: 6px; vertical-align: middle; }
+      .cold { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 4px; padding: 8px 12px; font-size: 11px; margin: 10px 0; }
+      .barcode { text-align: center; margin: 10px 0; }
+      .sig-line { margin-top: 40px; display: flex; gap: 48px; }
+      .sig-block { flex: 1; }
+      .sig-block .line { border-top: 1px solid #333; margin-top: 32px; padding-top: 4px; font-size: 11px; color: #555; }
+      @media print { body { margin: 12px; } }
+    </style></head><body>`);
+    win.document.write(content.innerHTML);
+    win.document.write('</body></html>');
+    win.document.close();
+    win.print();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b px-6 py-3 flex items-center justify-between z-10">
+          <h3 className="font-semibold text-lg flex items-center gap-2"><FileText className="w-5 h-5" /> Sample Submission Requisition</h3>
+          <div className="flex items-center gap-2">
+            <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+              <Printer className="w-4 h-4" /> Print / PDF
+            </button>
+            <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 rounded"><X className="w-5 h-5" /></button>
+          </div>
+        </div>
+        <div ref={printRef} className="p-6">
+          <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '2px' }}>External Laboratory Sample Requisition</h1>
+          <p style={{ fontSize: '11px', color: '#666', marginBottom: '12px' }}>Kefir Kultures Inc. — QMS · KK-SOP-00602</p>
+
+          {barcodeSvg && (
+            <div className="barcode" style={{ textAlign: 'center', margin: '10px 0' }}
+              dangerouslySetInnerHTML={{ __html: barcodeSvg }} />
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '12px' }}>
+            <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '10px 12px' }}>
+              <div style={{ fontWeight: 600, marginBottom: '4px' }}>Submit To (Laboratory)</div>
+              <div>{CREMCO_LAB.name}</div>
+              <div style={{ color: '#555' }}>{CREMCO_LAB.address}</div>
+              <div style={{ color: '#555' }}>{CREMCO_LAB.contact}</div>
+              <div style={{ color: '#555' }}>{CREMCO_LAB.email} · {CREMCO_LAB.phone}</div>
+              <div style={{ color: '#555' }}>Lab: {CREMCO_LAB.labLine}</div>
+            </div>
+            <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '10px 12px' }}>
+              <div style={{ fontWeight: 600, marginBottom: '4px' }}>Submitted By</div>
+              <div>Kefir Kultures Inc.</div>
+              <div style={{ color: '#555' }}>2-1580 Britannia Rd E, Mississauga, ON</div>
+              <div style={{ color: '#555' }}>hudson.liao@kefirkultures.com</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 24px', marginBottom: '12px', fontSize: '12px' }}>
+            <dt style={{ fontWeight: 600, color: '#555' }}>SR # (Sample Reference):</dt><dd style={{ margin: 0, fontFamily: 'monospace' }}>{batch.sr_number || '— (assigned on save)'}</dd>
+            <dt style={{ fontWeight: 600, color: '#555' }}>Submission Date:</dt><dd style={{ margin: 0 }}>{batch.sample_date || new Date().toISOString().slice(0, 10)}</dd>
+            <dt style={{ fontWeight: 600, color: '#555' }}>Product:</dt><dd style={{ margin: 0 }}>{batch.product_name || '-'} {batch.product_sku ? `(${batch.product_sku})` : ''}</dd>
+            <dt style={{ fontWeight: 600, color: '#555' }}>Test Profile:</dt><dd style={{ margin: 0 }}>{PROFILE_LABELS[profile] || profile}</dd>
+            <dt style={{ fontWeight: 600, color: '#555' }}>Submission Type:</dt><dd style={{ margin: 0 }}>{batch.is_composite ? `Composite / pooled (${pooled.length || 'multiple'} batches)` : 'Single batch'}</dd>
+          </div>
+
+          <h2 style={{ fontSize: '13px', color: '#444', margin: '14px 0 6px', borderBottom: '1px solid #ddd', paddingBottom: '3px' }}>Sample(s)</h2>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px' }}>
+            <thead>
+              <tr>
+                <th style={{ border: '1px solid #ccc', padding: '4px 8px', background: '#f5f5f5', fontSize: '11px' }}>#</th>
+                <th style={{ border: '1px solid #ccc', padding: '4px 8px', background: '#f5f5f5', fontSize: '11px' }}>Lot / Batch #</th>
+                <th style={{ border: '1px solid #ccc', padding: '4px 8px', background: '#f5f5f5', fontSize: '11px' }}>Product</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(batch.is_composite && pooled.length ? pooled : [batch.batch_number]).map((lot, i) => (
+                <tr key={i}>
+                  <td style={{ border: '1px solid #ccc', padding: '4px 8px', fontSize: '11px' }}>{i + 1}</td>
+                  <td style={{ border: '1px solid #ccc', padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{lot || '-'}</td>
+                  <td style={{ border: '1px solid #ccc', padding: '4px 8px', fontSize: '11px' }}>{batch.product_name || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h2 style={{ fontSize: '13px', color: '#444', margin: '14px 0 6px', borderBottom: '1px solid #ddd', paddingBottom: '3px' }}>Tests Requested — {PROFILE_LABELS[profile] || profile}</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginBottom: '10px', fontSize: '12px' }}>
+            {analytes.map((a, i) => (
+              <div key={i}>
+                <span style={{ display: 'inline-block', width: '12px', height: '12px', border: '1px solid #333', marginRight: '6px', verticalAlign: 'middle', background: '#111' }} />
+                {a}
+              </div>
+            ))}
+          </div>
+
+          {batch.is_composite && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '4px', padding: '8px 12px', fontSize: '11px', margin: '10px 0', color: '#92400e' }}>
+              <strong>Composite note (KK-SOP-00602 §6.7):</strong> indicator organisms (TPC/YM/coliform) may be pooled; pathogens (Salmonella/Listeria) should be run per-batch or at reduced frequency. Please confirm the method's detection limit holds across the pool.
+            </div>
+          )}
+
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '4px', padding: '8px 12px', fontSize: '11px', margin: '10px 0' }}>
+            <strong>Sample handling:</strong> Store & transport at 1–4 °C (cold chain). Deliver within 24 h of collection. Low-pH (&lt;4.6) fermented coconut kefir — Category 2B RTE.
+          </div>
+
+          <div style={{ marginTop: '40px', display: 'flex', gap: '48px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ borderTop: '1px solid #333', marginTop: '32px', paddingTop: '4px', fontSize: '11px', color: '#555' }}>Submitted By / Date</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ borderTop: '1px solid #333', marginTop: '32px', paddingTop: '4px', fontSize: '11px', color: '#555' }}>Lab Received By / Date</div>
+            </div>
+          </div>
+
+          <p style={{ marginTop: '20px', fontSize: '10px', color: '#999', textAlign: 'center' }}>
+            Generated {new Date().toISOString().slice(0, 16).replace('T', ' ')} — KKI QMS · KK-SOP-00602
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export default function BatchTesting() {
@@ -301,6 +489,7 @@ export default function BatchTesting() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [coaBatch, setCoaBatch] = useState(null);
   const [coaResults, setCoaResults] = useState(null);
+  const [reqBatch, setReqBatch] = useState(null);
 
   const [createForm, setCreateForm] = useState({
     batch_number: '',
@@ -677,6 +866,14 @@ export default function BatchTesting() {
                       <h3 className="font-semibold text-gray-700 text-sm uppercase tracking-wide">Test Results</h3>
                       <div className="flex items-center gap-2">
                         <button
+                          onClick={() => setReqBatch(expandedBatch || test)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50"
+                          title="Print Cremco sample requisition with SR# barcode"
+                        >
+                          <FileText className="w-4 h-4" />
+                          Requisition
+                        </button>
+                        <button
                           onClick={() => handleOpenCoA(expandedBatch || test)}
                           className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50"
                         >
@@ -1008,6 +1205,13 @@ export default function BatchTesting() {
       </Modal>
 
       {/* Certificate of Analysis Modal */}
+      {reqBatch && (
+        <SampleRequisition
+          batch={reqBatch}
+          onClose={() => setReqBatch(null)}
+        />
+      )}
+
       {coaBatch && coaResults && (
         <CertificateOfAnalysis
           batch={coaBatch}
