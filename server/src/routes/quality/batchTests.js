@@ -137,6 +137,12 @@ function parseCOAPdf(text) {
     }
   }
 
+  // Extract our SR# (Sample Reference) if the lab echoed it back on the CoA —
+  // this is the reliable match key (KK-SOP-00602). Tolerates OCR spacing.
+  let srNumber = null;
+  const srMatch = text.match(/SR[-\s]?(\d{4})[-\s]?(\d{2,4})/i);
+  if (srMatch) srNumber = `SR-${srMatch[1]}-${srMatch[2].padStart(3, '0')}`;
+
   // Also extract lot number and sample name from CREM Co format
   if (!sampleId) {
     const lotMatch = text.match(/Lot:\s*0*(\d+)/i);
@@ -149,7 +155,7 @@ function parseCOAPdf(text) {
 
   // If CREM Co patterns found results, skip the generic parser
   if (parsedResults.length > 0) {
-    return { sampleId, productName, results: parsedResults, rawText: text };
+    return { sampleId, srNumber, productName, results: parsedResults, rawText: text };
   }
 
   for (const line of lines) {
@@ -196,6 +202,7 @@ function parseCOAPdf(text) {
 
   return {
     sampleId,
+    srNumber,
     productName,
     results: parsedResults,
     rawText: text,
@@ -571,8 +578,15 @@ router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coa
       // Parse test results from OCR text
       const parsed = parseCOAPdf(group.ocrText);
 
-      // Find matching batch test in DB
-      const batchTest = await db.get('SELECT * FROM batch_tests WHERE batch_number = ?', [lotNum]);
+      // Find matching batch test in DB — prefer our SR# (the reliable match key
+      // per KK-SOP-00602) if the lab echoed it back, else fall back to lot #.
+      let batchTest = null;
+      if (parsed.srNumber) {
+        batchTest = await db.get('SELECT * FROM batch_tests WHERE sr_number = ?', [parsed.srNumber]);
+      }
+      if (!batchTest) {
+        batchTest = await db.get('SELECT * FROM batch_tests WHERE batch_number = ?', [lotNum]);
+      }
 
       let matched = [];
       let attachment = null;
