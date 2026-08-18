@@ -9,6 +9,23 @@ import { requireAuth, requireWriteAccess, requireRole } from '../../authMiddlewa
 import { logAudit } from '../../auditMiddleware.js';
 import { uploadFile, downloadFile, deleteFile } from '../../supabase.js';
 
+// ── SR# (Sample Reference) sequence helper ──────────────────────────────────
+// Gap-free per-year numbering via qms_sequence, same pattern as CC/DEV/CAPA.
+// Produces SR-YYYY-NNN for external-lab sample submissions (KK-SOP-00602).
+async function nextSrNumber() {
+  const year = new Date().getFullYear();
+  const row = await db.get('SELECT next_number FROM qms_sequence WHERE type = ? AND year = ?', ['lab_submission', year]);
+  let num;
+  if (row) {
+    num = row.next_number;
+    await db.run('UPDATE qms_sequence SET next_number = ? WHERE type = ? AND year = ?', [num + 1, 'lab_submission', year]);
+  } else {
+    num = 1;
+    await db.run('INSERT INTO qms_sequence (type, year, next_number) VALUES (?, ?, ?)', ['lab_submission', year, 2]);
+  }
+  return `SR-${year}-${String(num).padStart(3, '0')}`;
+}
+
 // ── Multer setup for COA PDF uploads ────────────────────────────────────────
 const coaUpload = multer({
   storage: multer.memoryStorage(),
@@ -683,7 +700,7 @@ router.get('/batch-tests/:id/coa', requireAuth, async (req, res) => {
 // POST /api/batch-tests - create batch test with results
 router.post('/batch-tests', requireAuth, requireWriteAccess, async (req, res) => {
   try {
-    const { batch_number, product_sku, product_name, test_date, tested_by, notes, results, test_profile, lab_name, lab_report_number, sample_date, report_date } = req.body;
+    const { batch_number, product_sku, product_name, test_date, tested_by, notes, results, test_profile, lab_name, lab_report_number, sample_date, report_date, is_composite, composite_batches, sr_number } = req.body;
     if (!batch_number || !test_date) {
       return res.status(400).json({ error: 'Batch number and test date are required' });
     }
@@ -692,13 +709,28 @@ router.post('/batch-tests', requireAuth, requireWriteAccess, async (req, res) =>
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
+    // Composite (pooled) submission handling — normalize the batch list to a JSON string.
+    const composite = is_composite === true || is_composite === 'true';
+    let compositeBatchesJson = '[]';
+    if (composite) {
+      const arr = Array.isArray(composite_batches)
+        ? composite_batches
+        : (typeof composite_batches === 'string' && composite_batches.trim()
+            ? composite_batches.split(',').map(s => s.trim()).filter(Boolean)
+            : []);
+      compositeBatchesJson = JSON.stringify(arr);
+    }
+    // SR# — honor a caller-supplied value, otherwise auto-generate one for every submission.
+    const srNumber = (sr_number && String(sr_number).trim()) ? String(sr_number).trim() : await nextSrNumber();
+
     const info = await db.run(`
-      INSERT INTO batch_tests (batch_number, product_sku, product_name, test_date, tested_by, status, notes, test_profile, lab_name, lab_report_number, sample_date, report_date, created_by, updated_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO batch_tests (batch_number, product_sku, product_name, test_date, tested_by, status, notes, test_profile, lab_name, lab_report_number, sample_date, report_date, sr_number, is_composite, composite_batches, created_by, updated_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       batch_number, product_sku || '', product_name || '', test_date,
       tested_by || username, notes || '', profile, lab_name || '',
       lab_report_number || '', sample_date || '', report_date || '',
+      srNumber, composite, compositeBatchesJson,
       username, username, now, now
     ]);
     const batchId = info.lastInsertRowid;
@@ -719,7 +751,7 @@ router.post('/batch-tests', requireAuth, requireWriteAccess, async (req, res) =>
     const created = await db.get('SELECT * FROM batch_tests WHERE id = ?', [batchId]);
     const createdResults = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ?', [batchId]);
 
-    logAudit(req, 'create', 'batch_test', batchId, batch_number, { new_values: { batch_number, product_sku, test_date, test_profile: profile } });
+    logAudit(req, 'create', 'batch_test', batchId, batch_number, { new_values: { batch_number, product_sku, test_date, test_profile: profile, sr_number: srNumber, is_composite: composite } });
 
     res.json({ ...created, results: createdResults });
   } catch (err) {
@@ -734,13 +766,33 @@ router.put('/batch-tests/:id', requireAuth, requireWriteAccess, async (req, res)
     const existing = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Batch test not found' });
 
-    const { batch_number, product_sku, product_name, test_date, tested_by, status, notes, comments, lab_name, lab_report_number, sample_date, report_date } = req.body;
+    const { batch_number, product_sku, product_name, test_date, tested_by, status, notes, comments, lab_name, lab_report_number, sample_date, report_date, is_composite, composite_batches, sr_number } = req.body;
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const username = req.session.user.username;
 
+    // Composite fields — only recompute when the caller sends them; otherwise preserve existing.
+    let compositeVal = existing.is_composite;
+    let compositeBatchesVal = existing.composite_batches;
+    if (is_composite !== undefined) {
+      compositeVal = is_composite === true || is_composite === 'true';
+      const arr = Array.isArray(composite_batches)
+        ? composite_batches
+        : (typeof composite_batches === 'string' && composite_batches.trim()
+            ? composite_batches.split(',').map(s => s.trim()).filter(Boolean)
+            : []);
+      compositeBatchesVal = compositeVal ? JSON.stringify(arr) : '[]';
+    } else if (composite_batches !== undefined) {
+      const arr = Array.isArray(composite_batches)
+        ? composite_batches
+        : (typeof composite_batches === 'string' && composite_batches.trim()
+            ? composite_batches.split(',').map(s => s.trim()).filter(Boolean)
+            : []);
+      compositeBatchesVal = JSON.stringify(arr);
+    }
+
     await db.run(`
       UPDATE batch_tests SET batch_number = ?, product_sku = ?, product_name = ?, test_date = ?, tested_by = ?, status = ?, notes = ?, comments = ?,
-        lab_name = ?, lab_report_number = ?, sample_date = ?, report_date = ?, updated_by = ?, updated_at = ?
+        lab_name = ?, lab_report_number = ?, sample_date = ?, report_date = ?, sr_number = ?, is_composite = ?, composite_batches = ?, updated_by = ?, updated_at = ?
       WHERE id = ?
     `, [
       batch_number || existing.batch_number, product_sku ?? existing.product_sku, product_name ?? existing.product_name,
@@ -748,6 +800,7 @@ router.put('/batch-tests/:id', requireAuth, requireWriteAccess, async (req, res)
       comments ?? existing.comments,
       lab_name ?? existing.lab_name, lab_report_number ?? existing.lab_report_number,
       sample_date ?? existing.sample_date, report_date ?? existing.report_date,
+      sr_number ?? existing.sr_number, compositeVal, compositeBatchesVal,
       username, now, req.params.id
     ]);
 

@@ -314,6 +314,8 @@ export default function BatchTesting() {
     lab_report_number: '',
     sample_date: '',
     report_date: '',
+    is_composite: false,
+    composite_batches: '',
   });
 
   useEffect(() => {
@@ -363,6 +365,7 @@ export default function BatchTesting() {
         test_date: new Date().toISOString().slice(0, 10),
         tested_by: user?.display_name || user?.username || '', notes: '',
         test_profile: 'routine', lab_name: '', lab_report_number: '', sample_date: '', report_date: '',
+        is_composite: false, composite_batches: '',
       });
       refetch();
     } catch (err) {
@@ -617,6 +620,16 @@ export default function BatchTesting() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3">
                       <span className="font-semibold text-gray-900">{test.batch_number}</span>
+                      {test.sr_number && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 font-mono">
+                          {test.sr_number}
+                        </span>
+                      )}
+                      {test.is_composite && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700" title="Composite / pooled submission">
+                          Composite
+                        </span>
+                      )}
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[test.status]}`}>
                         {test.status.toUpperCase()}
                       </span>
@@ -684,12 +697,18 @@ export default function BatchTesting() {
                     </div>
 
                     {/* Lab info banner */}
-                    {(expandedBatch?.lab_name || expandedBatch?.lab_report_number) && (
+                    {(expandedBatch?.lab_name || expandedBatch?.lab_report_number || expandedBatch?.sr_number || expandedBatch?.is_composite) && (
                       <div className="mb-4 p-3 bg-indigo-50 rounded-lg text-sm text-indigo-800 flex flex-wrap gap-4">
+                        {expandedBatch.sr_number && <span><strong>SR#:</strong> <span className="font-mono">{expandedBatch.sr_number}</span></span>}
                         {expandedBatch.lab_name && <span><strong>Lab:</strong> {expandedBatch.lab_name}</span>}
                         {expandedBatch.lab_report_number && <span><strong>Report #:</strong> {expandedBatch.lab_report_number}</span>}
                         {expandedBatch.sample_date && <span><strong>Sampled:</strong> {expandedBatch.sample_date}</span>}
                         {expandedBatch.report_date && <span><strong>Report Date:</strong> {expandedBatch.report_date}</span>}
+                        {expandedBatch.is_composite && (() => {
+                          let pooled = [];
+                          try { pooled = JSON.parse(expandedBatch.composite_batches || '[]'); } catch { pooled = []; }
+                          return <span className="w-full text-amber-700"><strong>Composite pool ({pooled.length}):</strong> {pooled.join(', ') || '—'}</span>;
+                        })()}
                       </div>
                     )}
 
@@ -828,6 +847,37 @@ export default function BatchTesting() {
                   placeholder="e.g. 003400"
                 />
               </div>
+
+              {/* Composite / Pooled Submission (KK-SOP-00602 §6.7) */}
+              <div className="border border-indigo-100 bg-indigo-50/50 rounded-lg p-3">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={createForm.is_composite}
+                    onChange={(e) => setCreateForm(prev => ({ ...prev, is_composite: e.target.checked }))}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  Composite / pooled submission (one panel covering several batches)
+                </label>
+                {createForm.is_composite && (
+                  <div className="mt-3">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Pooled batch numbers (comma-separated)
+                    </label>
+                    <textarea
+                      value={createForm.composite_batches}
+                      onChange={(e) => setCreateForm(prev => ({ ...prev, composite_batches: e.target.value }))}
+                      rows={2}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="e.g. SC-260817-1, SC-260818-1, SC-260819-1"
+                    />
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      Indicator panel (TPC/YM/coliform) may be pooled; pathogens should stay per-batch or reduced-frequency. Cremco must confirm the detection limit holds across the pool.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Product SKU</label>

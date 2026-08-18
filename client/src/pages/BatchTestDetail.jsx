@@ -221,6 +221,8 @@ function CertificateOfAnalysis({ batch, results, onClose }) {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 24px', marginBottom: '16px', fontSize: '12px' }}>
             <dt style={{ fontWeight: 600, color: '#555' }}>Batch Number:</dt><dd>{batch.batch_number}</dd>
+            {batch.sr_number && <><dt style={{ fontWeight: 600, color: '#555' }}>SR#:</dt><dd>{batch.sr_number}</dd></>}
+            {batch.is_composite && <><dt style={{ fontWeight: 600, color: '#555' }}>Composite Pool:</dt><dd>{(() => { try { return JSON.parse(batch.composite_batches || '[]').join(', '); } catch { return '-'; } })() || '-'}</dd></>}
             <dt style={{ fontWeight: 600, color: '#555' }}>Product:</dt><dd>{batch.product_name || '-'} {batch.product_sku ? `(SKU: ${batch.product_sku})` : ''}</dd>
             <dt style={{ fontWeight: 600, color: '#555' }}>Test Profile:</dt><dd>{PROFILE_LABELS[batch.test_profile] || batch.test_profile || 'Routine'}</dd>
             <dt style={{ fontWeight: 600, color: '#555' }}>Test Date:</dt><dd>{batch.test_date}</dd>
@@ -529,6 +531,16 @@ export default function BatchTestDetail() {
             <div>
               <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
                 {batch.batch_number}
+                {batch.sr_number && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 font-mono">
+                    {batch.sr_number}
+                  </span>
+                )}
+                {batch.is_composite && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700" title="Composite / pooled submission">
+                    Composite
+                  </span>
+                )}
                 <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_COLORS[batch.status]}`}>
                   {StatusIcon && <StatusIcon className="w-3.5 h-3.5" />}
                   {batch.status?.toUpperCase()}
