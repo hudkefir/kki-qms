@@ -8,6 +8,7 @@ import db from '../../database-pg.js';
 import { requireAuth, requireWriteAccess, requireRole } from '../../authMiddleware.js';
 import { logAudit } from '../../auditMiddleware.js';
 import { uploadFile, downloadFile, deleteFile } from '../../supabase.js';
+import { fetchCremcoCoaAttachments, isGmailConfigured } from '../../lib/gmailCoa.js';
 
 // ── SR# (Sample Reference) sequence helper ──────────────────────────────────
 // Gap-free per-year numbering via qms_sequence, same pattern as CC/DEV/CAPA.
@@ -143,6 +144,10 @@ function parseCOAPdf(text) {
   const srMatch = text.match(/SR[-\s]?(\d{4})[-\s]?(\d{2,4})/i);
   if (srMatch) srNumber = `SR-${srMatch[1]}-${srMatch[2].padStart(3, '0')}`;
 
+  let labReportNumber = null;
+  const reportMatch = text.match(/(?:Lab\s*)?(?:Report|Certificate|COA)\s*(?:No\.?|Number|#)\s*[:=]?\s*([A-Z0-9][A-Z0-9._/-]+)/i);
+  if (reportMatch) labReportNumber = reportMatch[1].trim();
+
   // Also extract lot number and sample name from CREM Co format
   if (!sampleId) {
     const lotMatch = text.match(/Lot:\s*0*(\d+)/i);
@@ -155,7 +160,7 @@ function parseCOAPdf(text) {
 
   // If CREM Co patterns found results, skip the generic parser
   if (parsedResults.length > 0) {
-    return { sampleId, srNumber, productName, results: parsedResults, rawText: text };
+    return { sampleId, srNumber, labReportNumber, productName, results: parsedResults, rawText: text };
   }
 
   for (const line of lines) {
@@ -203,6 +208,7 @@ function parseCOAPdf(text) {
   return {
     sampleId,
     srNumber,
+    labReportNumber,
     productName,
     results: parsedResults,
     rawText: text,
@@ -475,18 +481,29 @@ router.get('/batch-tests/by-lot/:lot', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/batch-tests/:id - get single batch test with results
-// POST /api/batch-tests/parse-coa-multi - Parse a multi-lot COA PDF
-// Splits by lot, extracts per-lot pages, auto-fills results, attaches per-lot PDFs
-router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coaUpload.single('coa'), async (req, res) => {
+function proposedPassFail(result, existingResult) {
+  const value = String(result.actual_value || '').trim();
+  if (/^(absent|not\s*detected|negative)$/i.test(value)) return 'pass';
+  if (/^(detected|positive|present)$/i.test(value)) return 'fail';
+  const numeric = Number(value.replace(/[^0-9.-]/g, ''));
+  const min = Number(existingResult.target_min);
+  const max = Number(existingResult.target_max);
+  if (Number.isFinite(numeric)) {
+    if (existingResult.target_min !== '' && Number.isFinite(min) && numeric < min) return 'fail';
+    if (existingResult.target_max !== '' && Number.isFinite(max) && numeric >= max) return 'fail';
+    if ((existingResult.target_min !== '' && Number.isFinite(min)) || (existingResult.target_max !== '' && Number.isFinite(max))) return 'pass';
+  }
+  return 'pending';
+}
+
+// Shared, side-effect-free multi-page CoA parse and database match pipeline.
+// Callers decide whether to persist attachments/results; email import remains preview-only.
+export async function parseAndMatchCoaBuffer(pdfBuffer) {
+  const tmpDir = join(tmpdir(), 'ocr-multi-' + Date.now() + '-' + Math.random().toString(36).slice(2));
   try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
-    const tmpDir = join(tmpdir(), 'ocr-multi-' + Date.now());
     mkdirSync(tmpDir, { recursive: true });
-
     const inputPdfPath = join(tmpDir, 'input.pdf');
-    writeFileSync(inputPdfPath, req.file.buffer);
+    writeFileSync(inputPdfPath, pdfBuffer);
 
     // Step 1: Split PDF into individual pages
     execSync(`pdfseparate "${inputPdfPath}" "${join(tmpDir, 'page-%d.pdf')}"`, { timeout: 60000 });
@@ -548,53 +565,39 @@ router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coa
       }
     }
 
-    // Step 4: For each lot, merge pages into a per-lot PDF, parse results, match to DB
+    // Step 4: For each lot, merge pages, parse results, and match to DB.
     const results = [];
-
     for (const [lotNum, group] of Object.entries(lotGroups)) {
-      // Merge pages into per-lot PDF
       const lotPdfName = `COA-Lot-${lotNum}_${Date.now()}.pdf`;
       const lotPdfPath = join(tmpDir, lotPdfName);
-
       if (group.pages.length === 1) {
         const { copyFileSync } = await import('fs');
         copyFileSync(group.pages[0], lotPdfPath);
       } else {
         execSync(`pdfunite ${group.pages.map(p => '"' + p + '"').join(' ')} "${lotPdfPath}"`, { timeout: 30000 });
       }
-
-      // Upload per-lot PDF to Supabase
-      await uploadFile('batch-testing/' + lotPdfName, readFileSync(lotPdfPath), 'application/pdf');
-
-      // Also create a PNG screenshot of the first page for quick preview
       const pngName = `COA-Lot-${lotNum}_${Date.now()}.png`;
       execSync(`pdftoppm -png -r 200 -f 1 -l 1 "${lotPdfPath}" "${join(tmpDir, 'preview-' + lotNum)}"`, { timeout: 15000 });
       const previewImg = readdirSync(tmpDir).find(f => f.startsWith('preview-' + lotNum) && f.endsWith('.png'));
-      if (previewImg) {
-        const previewPath = join(tmpDir, previewImg);
-        await uploadFile('batch-testing/' + pngName, readFileSync(previewPath), 'image/png');
-      }
 
-      // Parse test results from OCR text
       const parsed = parseCOAPdf(group.ocrText);
-
-      // Find matching batch test in DB — prefer our SR# (the reliable match key
-      // per KK-SOP-00602) if the lab echoed it back, else fall back to lot #.
       let batchTest = null;
+      let confidence = null;
       if (parsed.srNumber) {
         batchTest = await db.get('SELECT * FROM batch_tests WHERE sr_number = ?', [parsed.srNumber]);
+        if (batchTest) confidence = 'high';
+      }
+      if (!batchTest && parsed.labReportNumber) {
+        batchTest = await db.get('SELECT * FROM batch_tests WHERE lab_report_number = ?', [parsed.labReportNumber]);
+        if (batchTest) confidence = 'medium';
       }
       if (!batchTest) {
         batchTest = await db.get('SELECT * FROM batch_tests WHERE batch_number = ?', [lotNum]);
+        if (batchTest) confidence = 'low';
       }
-
-      let matched = [];
-      let attachment = null;
-
+      const matched = [];
       if (batchTest) {
-        // Match parsed results to existing test results
         const existingResults = await db.all('SELECT * FROM batch_test_results WHERE batch_test_id = ? ORDER BY id', [batchTest.id]);
-
         for (const pr of parsed.results) {
           for (const er of existingResults) {
             const nameMatch = pr.test_names.some(tn =>
@@ -607,33 +610,15 @@ router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coa
                 test_name: er.test_name,
                 parsed_value: pr.actual_value,
                 parsed_unit: pr.unit || er.unit,
+                pass_fail: proposedPassFail(pr, er),
               });
             }
           }
         }
-
-        // Attach per-lot PDF to batch test
-        attachment = {
-          name: `COA - Lot ${lotNum} (extracted from ${req.file.originalname})`,
-          path: 'batch-testing/' + lotPdfName,
-          size: readFileSync(lotPdfPath).length,
-          uploaded_at: new Date().toISOString(),
-          preview: previewImg ? 'batch-testing/' + pngName : null,
-        };
-
-        let existingAttachments = [];
-        try { existingAttachments = JSON.parse(batchTest.attachments || '[]'); } catch(e) {}
-        existingAttachments.push(attachment);
-
-        const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-        await db.run('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?',
-          [JSON.stringify(existingAttachments), req.session.user.username, now, batchTest.id]);
-
-        logAudit(req, 'parse', 'batch_test_coa_multi', batchTest.id, lotNum, {
-          new_values: { filename: lotPdfName, matches: matched.length, source: req.file.originalname }
-        });
       }
-
+      const proposedStatus = matched.some(m => m.pass_fail === 'fail')
+        ? 'fail'
+        : (matched.length > 0 && matched.every(m => m.pass_fail === 'pass') ? 'pass' : 'pending');
       results.push({
         lotNumber: lotNum,
         productName: group.productName,
@@ -642,22 +627,118 @@ router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coa
         batchTestFound: !!batchTest,
         totalParsed: parsed.results.length,
         matched,
-        attachment,
+        srNumber: parsed.srNumber || batchTest?.sr_number || null,
+        labReportNumber: parsed.labReportNumber || batchTest?.lab_report_number || null,
+        confidence,
+        proposedStatus,
+        lotPdfName,
+        lotPdfBuffer: readFileSync(lotPdfPath),
+        previewName: previewImg ? pngName : null,
+        previewBuffer: previewImg ? readFileSync(join(tmpDir, previewImg)) : null,
       });
     }
-
-    // Cleanup temp files
-    rmSync(tmpDir, { recursive: true, force: true });
-
-    res.json({
-      sourceFile: req.file.originalname,
+    return {
       totalPages: pageFiles.length,
       lotsFound: Object.keys(lotGroups).length,
       results,
+    };
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+// GET /api/batch-tests/:id - get single batch test with results
+// POST /api/batch-tests/parse-coa-multi - Parse a multi-lot COA PDF
+// Splits by lot, extracts per-lot pages, auto-fills results, attaches per-lot PDFs
+router.post('/batch-tests/parse-coa-multi', requireAuth, requireWriteAccess, coaUpload.single('coa'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const parsed = await parseAndMatchCoaBuffer(req.file.buffer);
+    for (const result of parsed.results) {
+      if (!result.batchTestFound) continue;
+      await uploadFile('batch-testing/' + result.lotPdfName, result.lotPdfBuffer, 'application/pdf');
+      if (result.previewBuffer) {
+        await uploadFile('batch-testing/' + result.previewName, result.previewBuffer, 'image/png');
+      }
+      const batchTest = await db.get('SELECT * FROM batch_tests WHERE id = ?', [result.batchTestId]);
+      const attachment = {
+        name: `COA - Lot ${result.lotNumber} (extracted from ${req.file.originalname})`,
+        path: 'batch-testing/' + result.lotPdfName,
+        size: result.lotPdfBuffer.length,
+        uploaded_at: new Date().toISOString(),
+        preview: result.previewName ? 'batch-testing/' + result.previewName : null,
+      };
+      let attachments = [];
+      try { attachments = JSON.parse(batchTest.attachments || '[]'); } catch(e) {}
+      attachments.push(attachment);
+      const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      await db.run('UPDATE batch_tests SET attachments = ?, updated_by = ?, updated_at = ? WHERE id = ?',
+        [JSON.stringify(attachments), req.session.user.username, now, result.batchTestId]);
+      result.attachment = attachment;
+      logAudit(req, 'parse', 'batch_test_coa_multi', result.batchTestId, result.lotNumber, {
+        new_values: { filename: result.lotPdfName, matches: result.matched.length, source: req.file.originalname }
+      });
+    }
+    res.json({
+      sourceFile: req.file.originalname,
+      totalPages: parsed.totalPages,
+      lotsFound: parsed.lotsFound,
+      results: parsed.results.map(({ lotPdfBuffer, lotPdfName, previewBuffer, previewName, ...result }) => result),
     });
   } catch (err) {
     console.error('Multi-lot COA parse error:', err);
     res.status(500).json({ error: 'Failed to process multi-lot COA: ' + err.message });
+  }
+});
+
+router.post('/batch-tests/import-coas-from-email', requireAuth, requireWriteAccess, async (req, res) => {
+  if (!isGmailConfigured()) {
+    return res.status(501).json({
+      error: 'Gmail import not configured',
+      hint: 'Set GMAIL_CLIENT_ID/SECRET/REFRESH_TOKEN in the QMS backend env',
+    });
+  }
+  try {
+    const attachments = await fetchCremcoCoaAttachments({ sinceQuery: req.body?.sinceQuery || '' });
+    const imports = [];
+    for (const attachment of attachments) {
+      const parsed = await parseAndMatchCoaBuffer(attachment.buffer);
+      const matches = [];
+      const unmatched = [];
+      for (const result of parsed.results) {
+        if (!result.batchTestFound) {
+          unmatched.push({ lotNumber: result.lotNumber, productName: result.productName, parsedResults: result.totalParsed });
+          continue;
+        }
+        matches.push({
+          batchTestId: result.batchTestId,
+          srNumber: result.srNumber,
+          lotNumber: result.lotNumber,
+          labReportNumber: result.labReportNumber,
+          confidence: result.confidence,
+          proposedResults: result.matched.map(m => ({
+            id: m.result_id,
+            testName: m.test_name,
+            actualValue: m.parsed_value,
+            unit: m.parsed_unit,
+            passFail: m.pass_fail,
+          })),
+          proposedStatus: result.proposedStatus,
+        });
+      }
+      imports.push({
+        messageId: attachment.messageId,
+        filename: attachment.filename,
+        from: attachment.from,
+        date: attachment.date,
+        matches,
+        unmatched,
+      });
+    }
+    res.json({ imports });
+  } catch (err) {
+    console.error('Email CoA import error:', err);
+    res.status(500).json({ error: 'Failed to import CoAs from email: ' + err.message });
   }
 });
 
@@ -875,7 +956,18 @@ router.post('/batch-tests/:id/results', requireAuth, requireWriteAccess, async (
     const test = await db.get('SELECT * FROM batch_tests WHERE id = ?', [req.params.id]);
     if (!test) return res.status(404).json({ error: 'Batch test not found' });
 
-    const { test_type, test_name, target_value, actual_value, unit, pass_fail, notes, test_category } = req.body;
+    const { id, test_type, test_name, target_value, actual_value, unit, pass_fail, notes, test_category } = req.body;
+    if (id) {
+      const existingResult = await db.get('SELECT * FROM batch_test_results WHERE id = ? AND batch_test_id = ?', [id, req.params.id]);
+      if (!existingResult) return res.status(404).json({ error: 'Test result not found' });
+      await db.run(`
+        UPDATE batch_test_results SET actual_value = ?, unit = ?, pass_fail = ?, notes = ?
+        WHERE id = ? AND batch_test_id = ?
+      `, [actual_value ?? existingResult.actual_value, unit ?? existingResult.unit, pass_fail ?? existingResult.pass_fail, notes ?? existingResult.notes, id, req.params.id]);
+      const updated = await db.get('SELECT * FROM batch_test_results WHERE id = ?', [id]);
+      logAudit(req, 'update', 'batch_test_result', req.params.id, test.batch_number, { new_values: { result_id: id, source: 'coa_email_import' } });
+      return res.json(updated);
+    }
     if (!test_name) return res.status(400).json({ error: 'Test name is required' });
 
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);

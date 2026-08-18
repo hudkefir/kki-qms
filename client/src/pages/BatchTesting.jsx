@@ -2,9 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FlaskConical, Plus, Search, Filter, CheckCircle, XCircle, Clock,
-  ChevronDown, ChevronUp, Save, X, Trash2, Printer, FileText, Paperclip, ExternalLink, Cog, FileUp, Truck
+  ChevronDown, ChevronUp, Save, X, Trash2, Printer, FileText, Paperclip, ExternalLink, Cog, FileUp, Truck, Mail
 } from 'lucide-react';
-import { useFetch, apiPost, apiPut, apiDelete } from '../hooks/useApi';
+import { useFetch, apiPost, apiPut, apiPatch, apiDelete } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Modal from '../components/Modal';
@@ -479,6 +479,10 @@ export default function BatchTesting() {
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkResults, setBulkResults] = useState(null);
+  const [emailImporting, setEmailImporting] = useState(false);
+  const [emailImports, setEmailImports] = useState(null);
+  const [emailImportNotice, setEmailImportNotice] = useState('');
+  const [releasingMatch, setReleasingMatch] = useState(null);
   const bulkFileRef = useRef();
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -535,6 +539,48 @@ export default function BatchTesting() {
       refetch();
     } catch (err) { alert('Bulk upload failed: ' + err.message); }
     finally { setBulkUploading(false); if (bulkFileRef.current) bulkFileRef.current.value = ''; }
+  };
+
+  const handleEmailImport = async () => {
+    setEmailImporting(true);
+    setEmailImportNotice('');
+    try {
+      const data = await apiPost('/api/batch-tests/import-coas-from-email', {});
+      setEmailImports(data.imports || []);
+    } catch (err) {
+      if (err.status === 501) {
+        setEmailImportNotice('Email import not configured yet — ask Hudson to wire Gmail creds.');
+      } else {
+        alert('Email import failed: ' + err.message);
+      }
+    } finally {
+      setEmailImporting(false);
+    }
+  };
+
+  const handleConfirmAndRelease = async (match) => {
+    setReleasingMatch(match.batchTestId);
+    try {
+      for (const result of match.proposedResults) {
+        await apiPost(`/api/batch-tests/${match.batchTestId}/results`, {
+          id: result.id,
+          actual_value: result.actualValue,
+          unit: result.unit,
+          pass_fail: result.passFail,
+          notes: 'Imported from Cremco CoA email',
+        });
+      }
+      await apiPatch(`/api/batch-tests/${match.batchTestId}/status`, { status: match.proposedStatus });
+      setEmailImports(prev => prev.map(item => ({
+        ...item,
+        matches: item.matches.map(candidate => candidate === match ? { ...candidate, released: true } : candidate),
+      })));
+      refetch();
+    } catch (err) {
+      alert('Confirm & Release failed: ' + err.message);
+    } finally {
+      setReleasingMatch(null);
+    }
   };
 
   const queryParams = new URLSearchParams();
@@ -723,8 +769,85 @@ export default function BatchTesting() {
               </button>
             </div>
           )}
+          {canWrite && (
+            <button onClick={handleEmailImport} disabled={emailImporting}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+              <Mail className="w-4 h-4" />{emailImporting ? 'Checking Email...' : 'Import CoAs from Email'}
+            </button>
+          )}
         </div>
+        {emailImportNotice && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {emailImportNotice}
+          </div>
+        )}
       </div>
+
+      {/* Email CoA Review Modal */}
+      {emailImports && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setEmailImports(null)}>
+          <div className="bg-white rounded-xl max-w-4xl w-full max-h-[85vh] overflow-y-auto shadow-2xl p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Review CoAs from Email</h2>
+                <p className="text-sm text-gray-500">Preview only — results are not saved until Confirm & Release.</p>
+              </div>
+              <button onClick={() => setEmailImports(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            {emailImports.length === 0 ? (
+              <div className="py-10 text-center text-gray-500">No matching Cremco PDF attachments found.</div>
+            ) : (
+              <div className="space-y-5">
+                {emailImports.map((item, emailIndex) => (
+                  <div key={`${item.messageId}-${item.filename}-${emailIndex}`} className="border border-gray-200 rounded-xl p-4">
+                    <div className="font-semibold text-gray-900">{item.filename}</div>
+                    <div className="text-xs text-gray-500 mt-1">From {item.from || 'unknown'} · {item.date || 'date unavailable'}</div>
+                    <div className="mt-3 space-y-3">
+                      {(item.matches || []).map((match, matchIndex) => (
+                        <div key={`${match.batchTestId}-${matchIndex}`} className="rounded-lg border border-green-200 bg-green-50 p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="font-medium text-gray-900">SR#: {match.srNumber || '—'} · Lot: {match.lotNumber || '—'} · Report #: {match.labReportNumber || '—'}</div>
+                              <div className="text-xs text-gray-600 mt-1">Match confidence: {match.confidence || 'unknown'} · Proposed status: <strong>{match.proposedStatus}</strong></div>
+                            </div>
+                            <button onClick={() => handleConfirmAndRelease(match)}
+                              disabled={match.released || releasingMatch === match.batchTestId || match.proposedResults.length === 0}
+                              className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+                              {match.released ? 'Released' : releasingMatch === match.batchTestId ? 'Releasing...' : 'Confirm & Release'}
+                            </button>
+                          </div>
+                          <div className="mt-3 overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead><tr className="text-left text-xs text-gray-500"><th className="py-1 pr-3">Analyte</th><th className="py-1 pr-3">Value</th><th className="py-1">Pass/Fail</th></tr></thead>
+                              <tbody>
+                                {match.proposedResults.map(result => (
+                                  <tr key={result.id} className="border-t border-green-100">
+                                    <td className="py-1.5 pr-3">{result.testName}</td>
+                                    <td className="py-1.5 pr-3">{result.actualValue} {result.unit}</td>
+                                    <td className="py-1.5 font-medium">{result.passFail}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+                      {(item.unmatched || []).map((unmatched, unmatchedIndex) => (
+                        <div key={unmatchedIndex} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                          No batch test match for lot {unmatched.lotNumber || 'unknown'} ({unmatched.parsedResults} result(s) parsed).
+                        </div>
+                      ))}
+                      {(item.matches || []).length === 0 && (item.unmatched || []).length === 0 && (
+                        <div className="text-sm text-gray-500">No lots could be parsed from this attachment.</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Bulk Results Modal */}
       {bulkResults && (
