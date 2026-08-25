@@ -82,7 +82,7 @@ function escHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function capaHtml(c, { actionItems = [], updates = [], linkedComplaints = [], linkedTests = [], attachments = [] } = {}) {
+function capaHtml(c, { actionItems = [], updates = [], linkedComplaints = [], linkedTests = [], attachments = [], linkedChangeRequest = null } = {}) {
   const heading = c.title || c.corrective_action.split(':')[0];
   let html = `
 <div class="section">
@@ -106,6 +106,8 @@ function capaHtml(c, { actionItems = [], updates = [], linkedComplaints = [], li
     <tr><td class="field-label">Target Date</td><td>${escHtml(c.target_date)}</td><td class="field-label">Completion Date</td><td>${escHtml(c.actual_completion_date || 'Pending')}</td></tr>
     <tr><td class="field-label">Effectiveness Check</td><td>${escHtml(c.effectiveness_check_date || 'Not scheduled')}</td><td class="field-label">Effectiveness Result</td><td>${statusBadge(c.effectiveness_result || 'pending')}</td></tr>
     <tr><td class="field-label">Verification Method</td><td colspan="3">${escHtml(c.verification_method || 'N/A')}</td></tr>
+    <tr><td class="field-label">Created</td><td>${escHtml((c.created_at || '').replace('T', ' ').slice(0, 16) || 'N/A')}</td><td class="field-label">Last Updated</td><td>${escHtml((c.updated_at || '').replace('T', ' ').slice(0, 16) || 'N/A')}</td></tr>
+    ${linkedChangeRequest ? `<tr><td class="field-label">Linked Change Request</td><td colspan="3">${escHtml(linkedChangeRequest.request_id)} — ${escHtml(linkedChangeRequest.title)} ${statusBadge(linkedChangeRequest.status)}</td></tr>` : ''}
   </table>`;
 
   // ── Containment ──
@@ -238,9 +240,16 @@ function capaHtml(c, { actionItems = [], updates = [], linkedComplaints = [], li
   // ── Action Items ──
   if (actionItems.length > 0) {
     html += `<h3>Action Items (${actionItems.length})</h3>
-    <table><tr><th>Title</th><th>Assigned To</th><th>Due Date</th><th>Status</th><th>Completed</th></tr>`;
+    <table><tr><th>Title</th><th>Description</th><th>Assigned To</th><th>Due Date</th><th>Status</th><th>Completed</th></tr>`;
     for (const ai of actionItems) {
-      html += `<tr><td>${escHtml(ai.title)}</td><td>${escHtml(ai.assigned_to)}</td><td>${escHtml(ai.due_date || '—')}</td><td>${statusBadge(ai.status)}</td><td>${escHtml(ai.completed_at || '—')}</td></tr>`;
+      html += `<tr><td>${escHtml(ai.title)}</td><td>${escHtml(ai.description || '—')}</td><td>${escHtml(ai.assigned_to)}</td><td>${escHtml(ai.due_date || '—')}</td><td>${statusBadge(ai.status)}</td><td>${escHtml(ai.completed_at || '—')}</td></tr>`;
+      if (ai.notes && ai.notes.length > 0) {
+        html += `<tr><td></td><td colspan="5" style="background:#f9fafb;"><strong style="font-size:9px;color:#666;text-transform:uppercase;">Notes</strong>`;
+        for (const n of ai.notes) {
+          html += `<div style="font-size:9px;margin:2px 0;">• ${escHtml((n.created_at || '').split('T')[0])} — ${escHtml(n.author)}: ${escHtml(n.note)}</div>`;
+        }
+        html += `</td></tr>`;
+      }
     }
     html += '</table>';
   }
@@ -286,16 +295,43 @@ function capaHtml(c, { actionItems = [], updates = [], linkedComplaints = [], li
     html += '</table>';
   }
 
+  // ── Sign-Off ──
+  html += `<h3>Sign-Off</h3>
+  <table><tr>
+    <td style="width:33%;"><strong>Prepared By:</strong><br><br>________________________<br><span style="font-size:9px;color:#999;">Name / Date</span></td>
+    <td style="width:33%;"><strong>Reviewed By:</strong><br><br>________________________<br><span style="font-size:9px;color:#999;">Name / Date</span></td>
+    <td style="width:34%;"><strong>Approved By:</strong><br><br>________________________<br><span style="font-size:9px;color:#999;">Name / Date</span></td>
+  </tr></table>`;
+
   html += '</div>';
   return html;
 }
 
 // Helper: fetch all related data for a CAPA record
 async function fetchCapaRelatedData(capa) {
-  const related = { actionItems: [], updates: [], linkedComplaints: [], linkedTests: [], attachments: [] };
+  const related = { actionItems: [], updates: [], linkedComplaints: [], linkedTests: [], attachments: [], linkedChangeRequest: null };
 
   // Action items
   try { related.actionItems = await db.all('SELECT * FROM capa_action_items WHERE capa_id = ? ORDER BY created_at ASC', [capa.id]); } catch(e) {}
+
+  // Action item threaded notes — grouped onto each action item as ai.notes
+  try {
+    if (related.actionItems.length > 0) {
+      const aiIds = related.actionItems.map(a => a.id);
+      const placeholders = aiIds.map(() => '?').join(',');
+      const notes = await db.all(`SELECT * FROM capa_action_item_notes WHERE action_item_id IN (${placeholders}) ORDER BY created_at ASC`, aiIds);
+      const byItem = {};
+      for (const n of notes) { (byItem[n.action_item_id] = byItem[n.action_item_id] || []).push(n); }
+      for (const ai of related.actionItems) { ai.notes = byItem[ai.id] || []; }
+    }
+  } catch(e) {}
+
+  // Linked change request (cross-reference)
+  try {
+    if (capa.linked_change_request_id) {
+      related.linkedChangeRequest = await db.get('SELECT id, request_id, title, status FROM change_requests WHERE id = ?', [capa.linked_change_request_id]);
+    }
+  } catch(e) {}
 
   // Activity log / updates
   try { related.updates = await db.all('SELECT * FROM capa_updates WHERE capa_id = ? ORDER BY created_at DESC', [capa.id]); } catch(e) {}
@@ -535,7 +571,7 @@ router.get('/print/audit-package', requireAuth, async (req, res) => {
 
 
 // Helper: create styled CAPA Word document
-function createCAPADoc(capa, { actionItems = [], updates = [], linkedComplaints = [], linkedTests = [], attachments = [] } = {}) {
+function createCAPADoc(capa, { actionItems = [], updates = [], linkedComplaints = [], linkedTests = [], attachments = [], linkedChangeRequest = null } = {}) {
   const now = new Date().toISOString().split('T')[0];
 
   const borderStyle = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' };
@@ -575,19 +611,20 @@ function createCAPADoc(capa, { actionItems = [], updates = [], linkedComplaints 
   }
 
   // Info table — expanded with all fields
-  sections.push(
-    new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [
-      new TableRow({ children: [labelCell('CAPA Number'), valueCell(capa.capa_id), labelCell('Status'), valueCell((capa.status || '').toUpperCase())] }),
-      new TableRow({ children: [labelCell('Classification'), valueCell((capa.classification || 'N/A').toUpperCase()), labelCell('Priority'), valueCell((capa.priority || 'N/A').toUpperCase())] }),
-      new TableRow({ children: [labelCell('Risk Assessment'), valueCell(capa.risk_assessment || 'N/A'), labelCell('Category'), valueCell(capa.category || 'N/A')] }),
-      new TableRow({ children: [labelCell('Department'), valueCell(capa.department || 'N/A'), labelCell('Initiated By'), valueCell(capa.initiated_by || 'N/A')] }),
-      new TableRow({ children: [labelCell('Source'), valueCell(capa.source_type + (capa.source_id ? ' #' + capa.source_id : '')), labelCell('Responsible Person'), valueCell(capa.responsible_person)] }),
-      new TableRow({ children: [labelCell('Target Date'), valueCell(capa.target_date), labelCell('Completion Date'), valueCell(capa.actual_completion_date || 'Pending')] }),
-      new TableRow({ children: [labelCell('Effectiveness Check'), valueCell(capa.effectiveness_check_date || 'Not Scheduled'), labelCell('Effectiveness Result'), valueCell((capa.effectiveness_result || 'Pending').toUpperCase())] }),
-      new TableRow({ children: [labelCell('Verification Method'), valueCell(capa.verification_method || 'N/A', 3)] }),
-      new TableRow({ children: [labelCell('Generated'), valueCell(now), labelCell('Generated By'), valueCell('QMS System')] }),
-    ]})
-  );
+  const infoRows = [
+    new TableRow({ children: [labelCell('CAPA Number'), valueCell(capa.capa_id), labelCell('Status'), valueCell((capa.status || '').toUpperCase())] }),
+    new TableRow({ children: [labelCell('Classification'), valueCell((capa.classification || 'N/A').toUpperCase()), labelCell('Priority'), valueCell((capa.priority || 'N/A').toUpperCase())] }),
+    new TableRow({ children: [labelCell('Risk Assessment'), valueCell(capa.risk_assessment || 'N/A'), labelCell('Category'), valueCell(capa.category || 'N/A')] }),
+    new TableRow({ children: [labelCell('Department'), valueCell(capa.department || 'N/A'), labelCell('Initiated By'), valueCell(capa.initiated_by || 'N/A')] }),
+    new TableRow({ children: [labelCell('Source'), valueCell(capa.source_type + (capa.source_id ? ' #' + capa.source_id : '')), labelCell('Responsible Person'), valueCell(capa.responsible_person)] }),
+    new TableRow({ children: [labelCell('Target Date'), valueCell(capa.target_date), labelCell('Completion Date'), valueCell(capa.actual_completion_date || 'Pending')] }),
+    new TableRow({ children: [labelCell('Effectiveness Check'), valueCell(capa.effectiveness_check_date || 'Not Scheduled'), labelCell('Effectiveness Result'), valueCell((capa.effectiveness_result || 'Pending').toUpperCase())] }),
+    new TableRow({ children: [labelCell('Verification Method'), valueCell(capa.verification_method || 'N/A', 3)] }),
+    new TableRow({ children: [labelCell('Created'), valueCell(capa.created_at || 'N/A'), labelCell('Last Updated'), valueCell(capa.updated_at || 'N/A')] }),
+    linkedChangeRequest ? new TableRow({ children: [labelCell('Linked Change Request'), valueCell(linkedChangeRequest.request_id + ' — ' + (linkedChangeRequest.title || '') + ' (' + (linkedChangeRequest.status || '').toUpperCase() + ')', 3)] }) : null,
+    new TableRow({ children: [labelCell('Generated'), valueCell(now), labelCell('Generated By'), valueCell('QMS System')] }),
+  ].filter(Boolean);
+  sections.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: infoRows }));
 
   // Containment
   if (capa.containment_action) {
@@ -693,6 +730,7 @@ function createCAPADoc(capa, { actionItems = [], updates = [], linkedComplaints 
     const aiRows = [
       new TableRow({ children: [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Title', bold: true, size: 18, font: 'Arial' })] })], borders, shading: { fill: 'F0F4F8' } }),
+        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Description', bold: true, size: 18, font: 'Arial' })] })], borders, shading: { fill: 'F0F4F8' } }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Assigned To', bold: true, size: 18, font: 'Arial' })] })], borders, shading: { fill: 'F0F4F8' } }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Due Date', bold: true, size: 18, font: 'Arial' })] })], borders, shading: { fill: 'F0F4F8' } }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Status', bold: true, size: 18, font: 'Arial' })] })], borders, shading: { fill: 'F0F4F8' } }),
@@ -700,10 +738,19 @@ function createCAPADoc(capa, { actionItems = [], updates = [], linkedComplaints 
     ];
     for (const ai of actionItems) {
       aiRows.push(new TableRow({ children: [
-        valueCell(ai.title), valueCell(ai.assigned_to), valueCell(ai.due_date || '—'), valueCell((ai.status || '').toUpperCase()),
+        valueCell(ai.title), valueCell(ai.description || '—'), valueCell(ai.assigned_to), valueCell(ai.due_date || '—'), valueCell((ai.status || '').toUpperCase()),
       ]}));
     }
     sections.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: aiRows }));
+    // Threaded notes per action item
+    for (const ai of actionItems) {
+      if (ai.notes && ai.notes.length > 0) {
+        sections.push(new Paragraph({ spacing: { before: 120 }, children: [new TextRun({ text: 'Notes — ' + ai.title, bold: true, size: 18, font: 'Arial', color: '666666' })] }));
+        for (const n of ai.notes) {
+          sections.push(new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: '• ' + (n.created_at || '').split('T')[0] + ' — ' + (n.author || '') + ': ' + (n.note || ''), size: 18, font: 'Arial' })] }));
+        }
+      }
+    }
   }
 
   // Linked Batch Tests
@@ -818,4 +865,5 @@ router.get('/print/capa/:id/docx', requireAuth, async (req, res) => {
   }
 });
 
+export { capaHtml, createCAPADoc, fetchCapaRelatedData };
 export default router;
