@@ -1159,10 +1159,33 @@ router.put('/capas/:id', requireContentAccess, async (req, res) => { console.log
       }
     }
 
+    // GMP close gate: a CAPA cannot reach 'closed' with blank required fields.
+    // Mirrors the client STAGE_GATES (CAPADetail.jsx) so server and UI agree.
+    // Effective value = incoming edit if present, else the persisted value.
+    if (sanitized.status === 'closed') {
+      const requiredForClose = [
+        'root_cause_analysis', 'corrective_action', 'preventive_action',
+        'verification_method', 'effectiveness_result'
+      ];
+      const effective = (f) => (sanitized[f] !== undefined ? sanitized[f] : capa[f]);
+      const missing = requiredForClose.filter((f) => {
+        const v = effective(f);
+        return v === null || v === undefined || String(v).trim() === '';
+      });
+      if (missing.length) {
+        return res.status(400).json({
+          error: 'Cannot close CAPA: required fields are incomplete',
+          missing_fields: missing
+        });
+      }
+    }
+
     const updates = [];
     const params = [];
+    const oldValues = {};
     for (const field of fields) {
       if (sanitized[field] !== undefined) {
+        oldValues[field] = capa[field];
         updates.push(`${field} = ?`);
         // JSONB fields must be stringified for pg parameterized queries
         params.push(field === 'root_cause_structured' && typeof sanitized[field] === 'object'
@@ -1182,7 +1205,7 @@ router.put('/capas/:id', requireContentAccess, async (req, res) => { console.log
     await db.run(`UPDATE capas SET ${updates.join(', ')} WHERE id = ?`, params);
 
     const updated = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
-    logAudit(req, 'update_capa', 'capas', req.params.id, capa.capa_id, { old_values: {}, new_values: sanitized });
+    logAudit(req, 'update_capa', 'capas', req.params.id, capa.capa_id, { old_values: oldValues, new_values: sanitized });
     broadcast('capa_updated', updated);
     res.json(updated);
   } catch (err) {
