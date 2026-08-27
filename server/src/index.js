@@ -159,6 +159,10 @@ app.get('/api/health', async (req, res) => {
 import { deployVerifyHandler } from './routes/shared/diagnostics.js';
 app.post('/api/deploy-verify', deployVerifyHandler);
 
+// SOS token rotation (API key auth — called by Cloud Scheduler daily, no session auth)
+import { sosRefreshTokenHandler } from './routes/inventory/sos.js';
+app.post('/api/sos/refresh-token', sosRefreshTokenHandler);
+
 // Version endpoint (public — for frontend footer)
 app.get('/api/version', (req, res) => {
   res.json(versionInfo);

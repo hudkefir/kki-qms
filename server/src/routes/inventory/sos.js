@@ -141,6 +141,35 @@ export async function sosApiFetch(path, { retried = false } = {}) {
   return res.json();
 }
 
+// POST /api/sos/refresh-token — machine endpoint for scheduled token rotation.
+// Protected by QMS_DEPLOY_KEY (same machine-auth pattern as /api/deploy-verify),
+// NOT session auth, so Cloud Scheduler can call it daily. Mounted standalone in
+// index.js (outside the requireAuth mount) via this exported handler. Calls
+// getAccessToken(), which rotates the SOS token when it's within REFRESH_BUFFER_MS
+// (24h) of expiry and persists the rotated refresh_token. Idempotent + safe to poll.
+export async function sosRefreshTokenHandler(req, res) {
+  const apiKey = req.headers['x-deploy-key'] || req.query.key;
+  if (!process.env.QMS_DEPLOY_KEY || apiKey !== process.env.QMS_DEPLOY_KEY) {
+    return res.status(401).json({ error: 'Invalid or missing deploy key' });
+  }
+  try {
+    const before = await db.get(`SELECT updated_at FROM sos_oauth WHERE provider = 'sos'`);
+    const token = await getAccessToken();
+    const after = await db.get(`SELECT expires_at, updated_at FROM sos_oauth WHERE provider = 'sos'`);
+    const rotated = String(before?.updated_at) !== String(after?.updated_at);
+    res.json({
+      ok: !!token,
+      rotated,
+      expires_at: after?.expires_at ?? null,
+      updated_at: after?.updated_at ?? null,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('SOS token refresh endpoint error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+}
+
 // GET /api/sos/lot/:lot — lookup lot info from SOS Inventory
 router.get('/sos/lot/:lot', requireAuth, async (req, res) => {
   try {
