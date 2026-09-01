@@ -787,6 +787,91 @@ router.put('/v2/daily-message/:date', async (req, res) => {
   }
 });
 
+// ──── SCHEDULE MAGNETS (iObeya-style planning blocks) ────
+// Planning intent: operator lane × time-of-day block, colored by process type.
+// Backed by tb_schedule_blocks + schedule_process_types (migration 37).
+
+const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+
+router.get('/v2/process-types', async (_req, res) => {
+  try {
+    res.json(await db.all('SELECT key, label, color, sort_order, is_ooo FROM schedule_process_types WHERE active = TRUE ORDER BY sort_order ASC'));
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/v2/schedule-blocks/:date', async (req, res) => {
+  try {
+    const rows = await db.all(
+      'SELECT id, operational_date, operator_id, process_type, label, ' +
+      "to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at, " +
+      'note, version FROM tb_schedule_blocks WHERE operational_date = ? ORDER BY operator_id, starts_at',
+      [req.params.date]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/v2/schedule-blocks/:date', async (req, res) => {
+  try {
+    const { operator_id, process_type, label, starts_at, ends_at, note } = req.body || {};
+    if (!operator_id || !process_type) return res.status(400).json({ error: 'operator_id and process_type required' });
+    if (!TIME_RE.test(starts_at || '') || !TIME_RE.test(ends_at || '')) return res.status(400).json({ error: 'starts_at/ends_at must be HH:MM' });
+    if (starts_at >= ends_at) return res.status(400).json({ error: 'starts_at must be before ends_at' });
+    const row = await db.get(
+      'INSERT INTO tb_schedule_blocks (operational_date, operator_id, process_type, label, starts_at, ends_at, note, created_by, updated_by) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+      [req.params.date, operator_id, process_type, label || '', starts_at, ends_at, note || '', req.body.by || 'board', req.body.by || 'board']
+    );
+    res.json({ ok: true, id: row.id });
+  } catch (err) {
+    if (err.code === '23503') return res.status(400).json({ error: 'unknown operator_id or process_type' });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.patch('/v2/schedule-blocks/:date/:id', async (req, res) => {
+  try {
+    const fields = [];
+    const vals = [];
+    const b = req.body || {};
+    if (b.operator_id !== undefined) { fields.push('operator_id = ?'); vals.push(b.operator_id); }
+    if (b.process_type !== undefined) { fields.push('process_type = ?'); vals.push(b.process_type); }
+    if (b.label !== undefined) { fields.push('label = ?'); vals.push(b.label); }
+    if (b.note !== undefined) { fields.push('note = ?'); vals.push(b.note); }
+    if (b.starts_at !== undefined) {
+      if (!TIME_RE.test(b.starts_at)) return res.status(400).json({ error: 'starts_at must be HH:MM' });
+      fields.push('starts_at = ?'); vals.push(b.starts_at);
+    }
+    if (b.ends_at !== undefined) {
+      if (!TIME_RE.test(b.ends_at)) return res.status(400).json({ error: 'ends_at must be HH:MM' });
+      fields.push('ends_at = ?'); vals.push(b.ends_at);
+    }
+    if (fields.length === 0) return res.status(400).json({ error: 'no fields to update' });
+    fields.push('updated_at = NOW()', 'version = version + 1', "updated_by = ?");
+    vals.push(b.by || 'board');
+    vals.push(req.params.id);
+    await db.run('UPDATE tb_schedule_blocks SET ' + fields.join(', ') + ' WHERE id = ?', vals);
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.code === '23503') return res.status(400).json({ error: 'unknown operator_id or process_type' });
+    if (err.code === '23514') return res.status(400).json({ error: 'starts_at must be before ends_at' });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.delete('/v2/schedule-blocks/:date/:id', async (req, res) => {
+  try {
+    await db.run('DELETE FROM tb_schedule_blocks WHERE id = ?', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ── AUTO-BACKUP: snapshot before destructive ops ──
 // NOTE: Uses tb_operators/tb_sections (the live tables).
 // Old references to taskboard_operators/taskboard_sections were dead code
