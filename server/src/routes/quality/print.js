@@ -334,7 +334,7 @@ async function fetchCapaRelatedData(capa) {
   } catch(e) {}
 
   // Activity log / updates
-  try { related.updates = await db.all('SELECT * FROM capa_updates WHERE capa_id = ? ORDER BY created_at DESC', [capa.id]); } catch(e) {}
+  try { related.updates = await db.all('SELECT *, description AS content, update_type AS type FROM capa_updates WHERE capa_id = ? ORDER BY created_at DESC', [capa.id]); } catch(e) {}
 
   // Attachments
   try { related.attachments = await db.all('SELECT * FROM capa_attachments WHERE capa_id = ? ORDER BY created_at DESC', [capa.id]); } catch(e) {}

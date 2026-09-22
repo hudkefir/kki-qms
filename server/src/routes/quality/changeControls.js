@@ -1011,8 +1011,8 @@ router.get('/capas/:id', async (req, res) => {
     const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
 
-    // Get activity log
-    capa.updates = await db.all('SELECT * FROM capa_updates WHERE capa_id = ? ORDER BY created_at DESC', [capa.id]);
+    // Get activity log (alias live columns to what the frontend expects: description->content, update_type->type)
+    capa.updates = await db.all('SELECT *, description AS content, update_type AS type FROM capa_updates WHERE capa_id = ? ORDER BY created_at DESC', [capa.id]);
 
     // Get linked batch tests
     let linkedTests = [];
@@ -1219,11 +1219,12 @@ router.post('/capas/:id/updates', requireContentAccess, async (req, res) => {
   try {
     const capa = await db.get('SELECT * FROM capas WHERE id = ?', [req.params.id]);
     if (!capa) return res.status(404).json({ error: 'CAPA not found' });
-    const { content, update_type } = req.body;
+    // Frontend sends { type, content }; accept both `update_type` and `type`. Live column is `description`.
+    const { content, update_type, type } = req.body;
     if (!content) return res.status(400).json({ error: 'Content is required' });
-    const result = await db.run('INSERT INTO capa_updates (capa_id, update_type, content, created_by) VALUES (?, ?, ?, ?)',
-      [capa.id, update_type || 'note', content, req.session.user.username]);
-    const update = await db.get('SELECT * FROM capa_updates WHERE id = ?', [result.lastInsertRowid]);
+    const result = await db.run('INSERT INTO capa_updates (capa_id, update_type, description, created_by) VALUES (?, ?, ?, ?)',
+      [capa.id, update_type || type || 'note', content, req.session.user.username]);
+    const update = await db.get('SELECT *, description AS content, update_type AS type FROM capa_updates WHERE id = ?', [result.lastInsertRowid]);
     await db.run("UPDATE capas SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", [capa.id]);
     res.json(update);
   } catch (err) { res.status(500).json({ error: err.message }); }
