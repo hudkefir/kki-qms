@@ -1495,6 +1495,19 @@ router.post('/capas/:id/attachments', requireContentAccess, capaUpload.single('f
   } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
 
+// GET /capas/:id/attachments/:attachmentId/download - Stream a CAPA attachment
+router.get('/capas/:id/attachments/:attachmentId/download', async (req, res) => {
+  try {
+    const attachment = await db.get('SELECT * FROM capa_attachments WHERE id = ? AND capa_id = ?', [req.params.attachmentId, req.params.id]);
+    if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
+
+    const buffer = await downloadFile(attachment.filename);
+    res.setHeader('Content-Type', attachment.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${attachment.original_name}"`);
+    res.send(buffer);
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
+});
+
 // DELETE /capas/:id/attachments/:attachmentId - Delete an attachment (admin only)
 router.delete('/capas/:id/attachments/:attachmentId', requireRole('admin'), async (req, res) => {
   try {
