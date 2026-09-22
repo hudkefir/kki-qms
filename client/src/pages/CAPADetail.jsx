@@ -3114,7 +3114,7 @@ export default function CAPADetail() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <a href={`/uploads/capa-docs/${att.filename}`} target="_blank" rel="noopener noreferrer"
+                    <a href={`/api/capas/${id}/attachments/${att.id}/download`} target="_blank" rel="noopener noreferrer"
                       className="p-1.5 text-gray-400 hover:text-indigo-600 transition-colors" title="Download">
                       <Download className="w-4 h-4" />
                     </a>
