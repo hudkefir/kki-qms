@@ -7,7 +7,7 @@ const router = Router();
 const SERVER_START_TIME = Date.now();
 
 // All diagnostics routes require admin role
-router.use(requireRole('admin'));
+router.use(['/admin', '/deploy-verify'], requireRole('admin'));
 
 // ─── GET /api/admin/diagnostics ─────────────────────────────────────────────
 // Returns system health info: DB status, uptime, memory, env, recent errors.

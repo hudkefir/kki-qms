@@ -8,7 +8,7 @@ import { sanitizeBody } from '../../sanitize.js';
 const router = Router();
 
 // All admin routes require admin role
-router.use(requireRole('admin'));
+router.use('/admin', requireRole('admin'));
 
 // Helper: capture old values, perform action, log audit with old/new
 async function auditedUpdate(req, table, id, allowedFields, identifierField) {
