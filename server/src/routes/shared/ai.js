@@ -773,7 +773,7 @@ async function executeToolCall(toolName, toolInput, ctx = {}) {
       const consultPrompt = `${persona}\n\nA QMS operator's assistant (Jarvis QMS) is asking you for advice. Answer concisely (3-6 sentences), with a clear recommendation. This is advisory only — the QMS assistant will relay your input to the operator.`;
       const userMsg = `Question: ${question}${context_summary ? `\n\nContext:\n${context_summary}` : ''}`;
       const resp = await client.messages.create({
-        model: 'claude-sonnet-4-6',
+        model: process.env.QMS_AI_MODEL || 'claude-sonnet-4-6',
         max_tokens: 1024,
         system: consultPrompt,
         messages: [{ role: 'user', content: userMsg }],
@@ -1713,7 +1713,7 @@ router.post('/ai/chat', async (req, res) => {
       if (aborted) break;
 
       const response = await client.messages.create({
-        model: 'claude-opus-4-6',
+        model: process.env.QMS_AI_MODEL || 'claude-opus-4-6',
         max_tokens: 2048,
         system: systemPrompt,
         messages: conversationMessages,
@@ -1905,7 +1905,7 @@ Task: ${fieldPrompt}`;
 
     const client = new Anthropic({ apiKey });
     const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: process.env.QMS_AI_MODEL || 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],

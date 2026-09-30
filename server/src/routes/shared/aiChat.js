@@ -74,7 +74,7 @@ router.post('/ai/chat', async (req, res) => {
 
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
-      model: 'claude-opus-4-6',
+      model: process.env.QMS_AI_MODEL || 'claude-opus-4-6',
       max_tokens: 2048,
       system: systemPrompt,
       messages: formattedMessages,
