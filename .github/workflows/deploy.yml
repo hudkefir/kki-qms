@@ -55,7 +55,7 @@ jobs:
             --project ${{ env.PROJECT_ID }} \
             --port 8080 \
             --allow-unauthenticated \
-            --update-env-vars "ANTHROPIC_API_KEY=${{ secrets.QMS_AI_KEY }},ANTHROPIC_BASE_URL=https://erp-ai.kefirkultures.com,QMS_AI_MODEL=claude-haiku-4-5" \
+            --update-env-vars "ANTHROPIC_API_KEY=${{ secrets.QMS_AI_KEY }},ANTHROPIC_BASE_URL=https://erp-ai.kefirkultures.com,QMS_AI_MODEL=claude-sonnet-5-5,QMS_AI_FALLBACK_MODEL=claude-haiku-4-5" \
             --quiet
 
       - name: Get deployment URL

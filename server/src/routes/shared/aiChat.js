@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
+import { createMessage } from '../../lib/aiModel.js';
 
 const router = Router();
 
@@ -73,12 +74,11 @@ router.post('/ai/chat', async (req, res) => {
     }));
 
     const client = new Anthropic({ apiKey });
-    const response = await client.messages.create({
-      model: process.env.QMS_AI_MODEL || 'claude-opus-4-6',
+    const response = await createMessage(client, {
       max_tokens: 2048,
       system: systemPrompt,
       messages: formattedMessages,
-    });
+    }, 'claude-opus-4-6');
 
     const reply = response.content[0]?.text || '';
     res.json({ reply });
