@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
+import { createMessage } from '../../lib/aiModel.js';
 import crypto from 'crypto';
 import db from '../../database-pg.js';
 import { logAudit } from '../../auditMiddleware.js';
@@ -772,12 +773,11 @@ async function executeToolCall(toolName, toolInput, ctx = {}) {
       const client = new Anthropic({ apiKey });
       const consultPrompt = `${persona}\n\nA QMS operator's assistant (Jarvis QMS) is asking you for advice. Answer concisely (3-6 sentences), with a clear recommendation. This is advisory only — the QMS assistant will relay your input to the operator.`;
       const userMsg = `Question: ${question}${context_summary ? `\n\nContext:\n${context_summary}` : ''}`;
-      const resp = await client.messages.create({
-        model: 'claude-sonnet-4-6',
+      const resp = await createMessage(client, {
         max_tokens: 1024,
         system: consultPrompt,
         messages: [{ role: 'user', content: userMsg }],
-      });
+      }, 'claude-sonnet-4-6');
       const advice = resp.content?.[0]?.text || '';
 
       await logAudit(req, 'ai_consult_specialist', 'ai_consult', specialist, specialist, {
@@ -1712,13 +1712,12 @@ router.post('/ai/chat', async (req, res) => {
     for (let round = 0; round < maxToolRounds; round++) {
       if (aborted) break;
 
-      const response = await client.messages.create({
-        model: 'claude-opus-4-6',
+      const response = await createMessage(client, {
         max_tokens: 2048,
         system: systemPrompt,
         messages: conversationMessages,
         ...toolsConfig,
-      });
+      }, 'claude-opus-4-6');
 
       // Process content blocks
       let hasToolUse = false;
@@ -1904,12 +1903,11 @@ ${Object.entries(context)
 Task: ${fieldPrompt}`;
 
     const client = new Anthropic({ apiKey });
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+    const message = await createMessage(client, {
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
-    });
+    }, 'claude-sonnet-4-6');
 
     const suggestion = message.content[0]?.text || '';
     res.json({ suggestion });
