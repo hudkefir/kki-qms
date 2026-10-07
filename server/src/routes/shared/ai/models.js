@@ -16,7 +16,7 @@ export async function allowedModelsFor(db, user) {
   if (!user?.id) return [];
   const live = await db.get('SELECT role, active FROM users WHERE id=$1', [user.id]);
   if (live?.active !== true && live?.active !== 1) return [];
-  const access = await db.get('SELECT allowed_models FROM ai_model_access WHERE user_id=$1', [user.id]);
+  const access = await db.get('SELECT allowed_models FROM qms_ai_model_access WHERE user_id=$1', [user.id]);
   const liveModels = effectiveModels(live.role, access?.allowed_models);
   return effectiveModels(user.role, access?.allowed_models).filter(id => liveModels.includes(id));
 }

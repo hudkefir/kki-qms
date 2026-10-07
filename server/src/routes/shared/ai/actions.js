@@ -44,7 +44,7 @@ export async function proposeAction(db, { user, sessionId, tool, input }) {
   }
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw failure(400, 'Invalid action input');
   const summary = summarize(tool, input);
-  const row = await db.get(`INSERT INTO ai_pending_actions
+  const row = await db.get(`INSERT INTO qms_ai_pending_actions
     (session_id, user_id, tool_name, tool_input, input_hash, summary, expires_at)
     VALUES ($1, $2, $3, $4::jsonb, $5, $6, NOW() + INTERVAL '30 minutes') RETURNING id, expires_at`,
   [sessionId, user.id, tool, JSON.stringify(input), inputHash(input), summary]);
@@ -55,12 +55,12 @@ export async function confirmAction(db, { id, req, execute, audit }) {
   const userId = req.session?.user?.id;
   const live = userId && await db.get('SELECT role, active FROM users WHERE id=$1', [userId]);
   if (!live || (live.active !== true && live.active !== 1)) throw failure(403, 'Account is inactive');
-  const row = await db.get(`UPDATE ai_pending_actions SET status='running', decided_by=$2, decided_at=NOW()
+  const row = await db.get(`UPDATE qms_ai_pending_actions SET status='running', decided_by=$2, decided_at=NOW()
     WHERE id=$1 AND user_id=$2 AND status='pending' AND expires_at > NOW() RETURNING *`, [id, userId]);
   if (!row) {
-    const current = await db.get('SELECT * FROM ai_pending_actions WHERE id=$1 AND user_id=$2', [id, userId]);
+    const current = await db.get('SELECT * FROM qms_ai_pending_actions WHERE id=$1 AND user_id=$2', [id, userId]);
     if (current && (current.status === 'expired' || (current.status === 'pending' && new Date(current.expires_at) <= new Date()))) {
-      await db.run("UPDATE ai_pending_actions SET status='expired' WHERE id=$1 AND user_id=$2 AND status='pending' AND expires_at <= NOW()", [id, userId]);
+      await db.run("UPDATE qms_ai_pending_actions SET status='expired' WHERE id=$1 AND user_id=$2 AND status='pending' AND expires_at <= NOW()", [id, userId]);
       throw failure(410, 'This action has expired', 'expired');
     }
     throw failure(409, 'This action is unavailable or already used', current?.status);
@@ -74,23 +74,23 @@ export async function confirmAction(db, { id, req, execute, audit }) {
     // executing so an audit outage cannot permit an unaudited mutation.
     await db.run(`INSERT INTO audit_logs
       (user_id, username, action, resource_type, resource_id, resource_name, details, ip_address, user_agent, session_id)
-      VALUES ($1, $2, 'ai_action_claimed', 'ai_pending_actions', $3, $4, $5, $6, $7, $8)`,
+      VALUES ($1, $2, 'ai_action_claimed', 'qms_ai_pending_actions', $3, $4, $5, $6, $7, $8)`,
     [userId, req.session.user.username, id, row.tool_name, JSON.stringify({ tool_input: row.tool_input }),
       req.ip || '', req.get?.('user-agent') || '', req.sessionID || '']);
     const result = await execute(row.tool_name, row.tool_input, { userId, role: live.role, req });
-    await audit(req, 'ai_action_approved', 'ai_pending_actions', id, row.tool_name, { tool_input: row.tool_input, result });
+    await audit(req, 'ai_action_approved', 'qms_ai_pending_actions', id, row.tool_name, { tool_input: row.tool_input, result });
     const status = result?.success === false ? 'failed' : 'done';
-    await db.run('UPDATE ai_pending_actions SET status=$2, result=$3::jsonb WHERE id=$1', [id, status, JSON.stringify(result)]);
+    await db.run('UPDATE qms_ai_pending_actions SET status=$2, result=$3::jsonb WHERE id=$1', [id, status, JSON.stringify(result)]);
     return { id, status, result };
   } catch (err) {
-    await db.run("UPDATE ai_pending_actions SET status='failed', result=$2::jsonb WHERE id=$1", [id, JSON.stringify({ error: err.message })]);
+    await db.run("UPDATE qms_ai_pending_actions SET status='failed', result=$2::jsonb WHERE id=$1", [id, JSON.stringify({ error: err.message })]);
     err.actionStatus = 'failed';
     throw err;
   }
 }
 
 export async function cancelAction(db, { id, userId }) {
-  const row = await db.get(`UPDATE ai_pending_actions SET status=CASE WHEN expires_at <= NOW() THEN 'expired' ELSE 'cancelled' END,
+  const row = await db.get(`UPDATE qms_ai_pending_actions SET status=CASE WHEN expires_at <= NOW() THEN 'expired' ELSE 'cancelled' END,
     decided_by=$2, decided_at=NOW() WHERE id=$1 AND user_id=$2 AND status='pending' RETURNING status`, [id, userId]);
   if (!row) throw failure(409, 'This action is unavailable or already used');
   return { id, status: row.status };
