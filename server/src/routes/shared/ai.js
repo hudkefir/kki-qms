@@ -1667,7 +1667,7 @@ router.post('/ai/chat', async (req, res) => {
     systemPrompt += `\n\nThe current user is: ${userName} (role: ${req.session?.user?.role || 'unknown'})`;
 
     // Surface the current user's open CAPA action items so Jarvis can reference/update them
-    if (context) try {
+    try {
       const myTasks = await db.all(
         `SELECT ai.id, ai.title, ai.due_date, ai.status, ai.capa_id, c.capa_id AS capa_ref
          FROM capa_action_items ai JOIN capas c ON ai.capa_id = c.id
@@ -1676,7 +1676,7 @@ router.post('/ai/chat', async (req, res) => {
         [userName]
       );
       if (myTasks?.length) {
-        systemPrompt += contextBlock({ openTasks: myTasks });
+        systemPrompt += `\n\n## ${userName}'s Open Tasks (assigned CAPA action items)\nThese are the current user's open tasks. You can update their status with update_action_item_status or add notes with add_action_item_note (reference them by action_item_id):\n${JSON.stringify(myTasks, null, 2)}`;
       }
     } catch (e) { /* non-fatal */ }
 

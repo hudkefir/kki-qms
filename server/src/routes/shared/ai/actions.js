@@ -27,10 +27,13 @@ function canonical(value) {
 export const inputHash = input => createHash('sha256').update(JSON.stringify(canonical(input))).digest('hex');
 
 export function summarize(tool, input) {
-  const target = input.record_id || input.capa_id || input.deviation_id || input.deviation_identifier || input.action_item_id;
-  const detail = tool === 'link_records'
-    ? `${input.source_type} #${input.source_id} → ${input.target_type} #${input.target_id}`
-    : [target && `#${target}`, input.field, input.status, input.title].filter(Boolean).join(' — ');
+  // Include every supplied value so approval describes the actual mutation.
+  // Cap each value separately: long prose must not hide later fields.
+  const detail = Object.entries(input).map(([key, value]) => {
+    const text = JSON.stringify(value) ?? 'undefined';
+    const preview = text.length > 240 ? text.slice(0, 240) + '… [truncated]' : text;
+    return `${key.replace(/_/g, ' ')}: ${preview}`;
+  }).join(' — ');
   return `${tool.replace(/_/g, ' ')}${detail ? ': ' + detail : ''}`;
 }
 

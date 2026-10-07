@@ -40,7 +40,7 @@ The catalog uses Sonnet 5.5 by default and the gateway alias `opus-5-5` for admi
 
 ## Page sharing and history
 
-Sharing defaults off and resets off on pathname changes. Only route/title and optional allowlisted record type/ID are sent when checked. Form scraping is removed. The server rejects unknown fields (including legacy `page` and `formData`), wrong types, invalid IDs/types, over-length fields, and payloads over 2 KB. Saved records and related records remain available when shared, with ERP redaction and an escaped untrusted-data boundary. Without sharing, no page/record data is added to the prompt; existing conversation text remains in history.
+Sharing defaults off and resets off on pathname changes. Only route/title and optional allowlisted record type/ID are sent when checked. Form scraping is removed. The server rejects unknown fields (including legacy `page` and `formData`), wrong types, invalid IDs/types, over-length fields, and payloads over 2 KB. Saved records and related records remain available when shared, with ERP redaction and an escaped untrusted-data boundary. Without sharing, no page-derived data is added to the prompt; existing conversation text remains in history. Independently of page sharing, the logged-in user's assigned open CAPA tasks and the original status-update/note instructions are included as before.
 
 SSE cards support Approve/Cancel and terminal statuses; current status is restored from owned pending-action rows. Assistant message context retains proposals even when a later model round fails. In-memory history is keyed by user plus chat session to match database ownership.
 
@@ -60,9 +60,20 @@ SSE cards support Approve/Cancel and terminal statuses; current status is restor
 - `cd server && npm test`: **34 tests, 34 passed, 0 failed**, including existing migration-parser tests, all ten staged writes, immediate reads, ownership/role/inactive checks, concurrent and repeated confirmation, audit attribution/failure, expiry/cancel, hash normalization/tampering, model access/fallback, client opt-in payloads, and actual router SSE/history tests. All database and gateway dependencies in router tests are intercepted before import; no network or database is used.
 - Router raw-import check intentionally replaced with the plan's `node --check` fallback: `database-pg.js` runs migrations at import time. **Seven changed/new JS files passed syntax checking.** The router also imports successfully under the DB-less test hooks.
 - `cd client && npm run build`: **2,616 modules transformed; build passed.** Existing Browserslist age and >500 KB chunk warnings remain. Generated `client/dist` output was preserved outside the repository and restored out of the change set.
-- Client has no existing standalone test script; its payload tests run in the parity suite. Additional headless Chrome checks use the real sidebar, bundled with esbuild, and intercepted API responses; no application server/database/gateway is started. `node /tmp/qms-chat-parity-browser/check.mjs` passed all four groups: admin picker/opt-out/SSE cards/approve once; opt-in metadata/cancel/navigation reset; restored terminal history; single-model picker hidden/no browser errors. The temporary harness and Playwright install stay outside the repo.
+- Client has no existing standalone test script; its payload tests run in the parity suite. Prior headless Chrome checks used a temporary harness outside the repository and are **unverified**, not reproducible verification evidence.
 - Final build after the last edits: `cd client && npm run build -- --outDir /tmp/qms-chat-parity-final-build` passed (2,616 modules). Output stays outside the worktree.
 - Final script audit caught and corrected an over-broad replacement in `test:migrate`; its original command is preserved. `npm run test:migrate --workspace server` passed all 7 tests, and the full `npm test --workspace server` rerun passed all 34 tests.
 - `git diff --check`: passed.
 
 Live PostgreSQL/gateway behavior and migration application were intentionally not exercised. npm reported dependency audit findings (server: 15; client: 18); dependencies were not changed in this scoped task.
+
+## Reviewer retry 2
+
+- Restored the unconditional assigned CAPA task query and its original prompt wording. The router fake now explicitly allows that user-scoped query; regression assertions prove tasks and update/note instructions reach the model while page sharing is off.
+- Approval summaries now display every supplied field and concrete value for all ten write tools, including field values, notes, descriptions, root causes, priorities, owners, dates, and link reasons. Each serialized value is capped at 240 characters with an explicit truncation marker; later fields remain visible. Empty strings, false, and zero are preserved. Eleven added tests cover summaries and truncation; the same summary is persisted for history cards.
+- Documented the harmless primary default-model argument change from `claude-opus-4-6` to `claude-sonnet-5-5` in the chat route. The authorized `chosen` model is supplied explicitly; Haiku fallback behavior is unchanged.
+- Dependency installs rerun successfully using `/tmp/qms-chat-parity-npm-cache`: server 181 packages, client 284 packages; no dependency or lockfile changes.
+- `npm test --workspace server`: **45 tests, 45 passed, 0 failed** (includes client payload tests and migration tests). Simulated gateway outage and Haiku fallback log lines are expected test fixtures.
+- Syntax checks use the plan's `node --check` fallback to avoid the database/migration side effects of a raw router import. The actual router imports through DB-less test hooks.
+- `cd client && npm run build -- --outDir /tmp/qms-chat-parity-retry2-build`: passed; output remains outside the worktree. Existing Browserslist age and chunk-size warnings remain.
+- Migration remains **not run**. No gateway calls, deployment, push, or ERP edits.

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { WRITE_TOOLS, canRun, proposeAction, confirmAction, cancelAction, handleToolUse } from '../src/routes/shared/ai/actions.js';
+import { WRITE_TOOLS, summarize, canRun, proposeAction, confirmAction, cancelAction, handleToolUse } from '../src/routes/shared/ai/actions.js';
 import { AI_MODELS, allowedModelsFor, effectiveModels, catalogFor, selectModel } from '../src/routes/shared/ai/models.js';
 import { parsePageContext, contextBlock, redact } from '../src/routes/shared/ai/context.js';
 import { createMessage } from '../src/lib/aiModel.js';
@@ -230,7 +230,15 @@ test('chat routes: SSE proposals, model/context rejection, saved cards and live 
     }
     return originalRun(sql, args);
   };
-  f.db.all = async sql => {
+  const openTasks = [{ id: 42, title: 'Verify sanitation', status: 'pending', capa_id: 12, capa_ref: 'CAPA-2026-012' }];
+  let taskQueries = 0;
+  f.db.all = async (sql, args) => {
+    if (sql.includes('FROM capa_action_items')) {
+      assert.deepEqual(args, ['approver']);
+      assert.match(sql, /ai.assigned_to = \$1/);
+      taskQueries++;
+      return openTasks;
+    }
     if (sql.includes('FROM chat_messages')) return persisted;
     if (sql.includes('FROM ai_pending_actions')) return [...f.state.rows.values()].map(row => ({ id: row.id, status: row.status, summary: row.summary, expiresAt: row.expires_at }));
     assert.fail(`Page/record data queried without opt-in: ${sql}`);
@@ -292,6 +300,10 @@ test('chat routes: SSE proposals, model/context rejection, saved cards and live 
     assert.equal(result.events.filter(e => e.type === 'action_proposed').length, 2);
     assert.equal(persisted.find(m => m.role === 'assistant').context.actions.length, 2);
     assert.equal(modelCalls[0].system.includes('<page_context'), false);
+    assert.equal(taskQueries, 1);
+    assert.ok(modelCalls[0].system.includes(JSON.stringify(openTasks, null, 2)));
+    assert.match(modelCalls[0].system, /approver's Open Tasks/);
+    assert.match(modelCalls[0].system, /You can update their status with update_action_item_status or add notes with add_action_item_note/);
     assert.equal(modelCalls[0].model, 'claude-sonnet-5-5');
     assert.equal(modelCalls[1].messages.at(-2).content.length, 2);
     assert.equal(modelCalls[1].messages.at(-1).content.length, 2);
@@ -320,4 +332,35 @@ test('chat routes: SSE proposals, model/context rejection, saved cards and live 
     delete globalThis.__qmsParityTest;
     if (oldKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = oldKey;
   }
+});
+
+const summaryInputs = {
+  update_record_field: { record_type: 'capas', record_id: '12', field: 'status', value: 'closed' },
+  update_action_item_status: { action_item_id: 42, status: 'completed', notes: 'QA verified' },
+  create_action_item: { capa_id: '12', title: 'Verify', description: 'Inspect seals', assigned_to: 'QA', due_date: '2026-11-01' },
+  add_action_item_note: { action_item_id: 42, note: 'Seal inspection passed' },
+  create_capa_from_deviation: { deviation_id: '5', corrective_action: 'Repair seal', preventive_action: 'Train operators', responsible_person: 'QA', target_date: '2026-11-01' },
+  create_capa: { title: 'Seal failure', description: 'Leaking lid', root_cause_analysis: 'Worn seal', priority: 'high', classification: 'major', risk_assessment: 'high', responsible_person: 'QA', target_date: '2026-11-01' },
+  delete_capa: { capa_id: '12', confirm: true },
+  link_records: { source_type: 'capa', source_id: 12, target_type: 'deviation', target_id: 5, link_reason: 'Same batch' },
+  create_deviation: { title: 'Leak', description: 'Leaking lid', category: 'equipment', product_on_hold: false },
+  update_deviation: { deviation_id: 5, root_cause: 'Worn seal', priority: 'high', classification: 'major', product_disposition: 'hold' },
+};
+for (const [tool, input] of Object.entries(summaryInputs)) {
+  test(`${tool}: approval summary includes supplied field values`, async () => {
+    const f = fixture('admin');
+    const action = await f.propose(tool, input);
+    for (const [key, value] of Object.entries(input)) {
+      assert.ok(action.summary.includes(`${key.replace(/_/g, ' ')}: ${JSON.stringify(value)}`));
+    }
+    assert.equal(f.state.rows.get(action.id).summary, action.summary);
+  });
+}
+test('approval summaries truncate individual values without hiding subsequent fields or empty values', () => {
+  const summary = summarize('update_record_field', { value: 'x'.repeat(1000), priority: 'critical', note: '', count: 0 });
+  assert.ok(summary.includes('… [truncated]'));
+  assert.ok(!summary.includes('x'.repeat(241)));
+  assert.ok(summary.includes('priority: "critical"'));
+  assert.ok(summary.includes('note: ""'));
+  assert.ok(summary.includes('count: 0'));
 });
