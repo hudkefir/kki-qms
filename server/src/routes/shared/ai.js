@@ -1795,7 +1795,7 @@ router.get('/ai/chat/history', async (req, res) => {
 
     const actions = await db.all(`SELECT id, tool_name AS tool, summary, expires_at AS "expiresAt",
       CASE WHEN status='pending' AND expires_at <= NOW() THEN 'expired' ELSE status END AS status, result
-      FROM ai_pending_actions WHERE user_id=$1 AND session_id=$2`, [userId, latest.session_id]);
+      FROM qms_ai_pending_actions WHERE user_id=$1 AND session_id=$2`, [userId, latest.session_id]);
     const byId = new Map(actions.map(action => [action.id, action]));
     res.json({
       messages: rows.map(r => ({ role: r.role, content: r.content, created_at: r.created_at,

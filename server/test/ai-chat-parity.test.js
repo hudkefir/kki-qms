@@ -17,7 +17,7 @@ function fixture(role = 'manager', active = true) {
       state.queries.push({ sql, args });
       if (sql.startsWith('SELECT role, active FROM users')) return state.live;
       if (sql.startsWith('SELECT allowed_models')) return state.override === null ? null : { allowed_models: state.override };
-      if (sql.startsWith('INSERT INTO ai_pending_actions')) {
+      if (sql.startsWith('INSERT INTO qms_ai_pending_actions')) {
         const [session_id, user_id, tool_name, input, input_hash, summary] = args;
         // Mimic jsonb reordering, including nested input properties.
         const tool_input = JSON.parse(input, (_k, v) => v && typeof v === 'object' && !Array.isArray(v)
@@ -28,14 +28,14 @@ function fixture(role = 'manager', active = true) {
         return { ...row };
       }
       const row = state.rows.get(args[0]);
-      if (sql.startsWith("UPDATE ai_pending_actions SET status='running'")) {
+      if (sql.startsWith("UPDATE qms_ai_pending_actions SET status='running'")) {
         assert.match(sql, /user_id=\$2 AND status='pending' AND expires_at > NOW\(\)/);
         if (!row || row.user_id !== args[1] || row.status !== 'pending' || row.expires_at <= new Date()) return null;
         row.status = 'running'; row.decided_by = args[1];
         return { ...row };
       }
-      if (sql.startsWith('SELECT * FROM ai_pending_actions')) return row?.user_id === args[1] ? { ...row } : null;
-      if (sql.startsWith('UPDATE ai_pending_actions SET status=CASE')) {
+      if (sql.startsWith('SELECT * FROM qms_ai_pending_actions')) return row?.user_id === args[1] ? { ...row } : null;
+      if (sql.startsWith('UPDATE qms_ai_pending_actions SET status=CASE')) {
         if (!row || row.user_id !== args[1] || row.status !== 'pending') return null;
         row.status = row.expires_at <= new Date() ? 'expired' : 'cancelled';
         return { status: row.status };
@@ -49,9 +49,9 @@ function fixture(role = 'manager', active = true) {
         state.audits.push(args); return { changes: 1 };
       }
       const row = state.rows.get(args[0]);
-      if (sql.startsWith("UPDATE ai_pending_actions SET status='expired'")) row.status = 'expired';
-      else if (sql.startsWith("UPDATE ai_pending_actions SET status='failed'")) { row.status = 'failed'; row.result = JSON.parse(args[1]); }
-      else if (sql.startsWith('UPDATE ai_pending_actions SET status=$2')) { row.status = args[1]; row.result = JSON.parse(args[2]); }
+      if (sql.startsWith("UPDATE qms_ai_pending_actions SET status='expired'")) row.status = 'expired';
+      else if (sql.startsWith("UPDATE qms_ai_pending_actions SET status='failed'")) { row.status = 'failed'; row.result = JSON.parse(args[1]); }
+      else if (sql.startsWith('UPDATE qms_ai_pending_actions SET status=$2')) { row.status = args[1]; row.result = JSON.parse(args[2]); }
       else throw new Error(`Unexpected SQL: ${sql}`);
       return { changes: 1 };
     },
@@ -70,7 +70,7 @@ for (const tool of Object.keys(WRITE_TOOLS)) {
     assert.equal(events[0].type, 'action_proposed');
     assert.equal(outcome.result.status, 'pending_user_approval');
     assert.equal(f.state.rows.size, 1);
-    assert.ok(f.state.queries.every(({ sql }) => sql.startsWith('SELECT ') || sql.startsWith('INSERT INTO ai_pending_actions')));
+    assert.ok(f.state.queries.every(({ sql }) => sql.startsWith('SELECT ') || sql.startsWith('INSERT INTO qms_ai_pending_actions')));
   });
 }
 
@@ -240,7 +240,7 @@ test('chat routes: SSE proposals, model/context rejection, saved cards and live 
       return openTasks;
     }
     if (sql.includes('FROM chat_messages')) return persisted;
-    if (sql.includes('FROM ai_pending_actions')) return [...f.state.rows.values()].map(row => ({ id: row.id, status: row.status, summary: row.summary, expiresAt: row.expires_at }));
+    if (sql.includes('FROM qms_ai_pending_actions')) return [...f.state.rows.values()].map(row => ({ id: row.id, status: row.status, summary: row.summary, expiresAt: row.expires_at }));
     assert.fail(`Page/record data queried without opt-in: ${sql}`);
   };
   const fakeAnthropic = class {
@@ -307,7 +307,7 @@ test('chat routes: SSE proposals, model/context rejection, saved cards and live 
     assert.equal(modelCalls[0].model, 'claude-sonnet-5-5');
     assert.equal(modelCalls[1].messages.at(-2).content.length, 2);
     assert.equal(modelCalls[1].messages.at(-1).content.length, 2);
-    assert.equal(f.state.queries.some(({ sql }) => /^(UPDATE|DELETE)|^INSERT INTO (?!ai_pending_actions)/.test(sql)), false);
+    assert.equal(f.state.queries.some(({ sql }) => /^(UPDATE|DELETE)|^INSERT INTO (?!qms_ai_pending_actions)/.test(sql)), false);
 
     const action = persisted.at(-1).context.actions[0]; f.state.rows.get(action.id).status = 'done';
     result = await invoke('get', '/ai/chat/history');

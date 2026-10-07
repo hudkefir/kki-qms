@@ -1,5 +1,5 @@
 -- Additive chat parity storage. Apply through the normal migration process.
-CREATE TABLE IF NOT EXISTS ai_pending_actions (
+CREATE TABLE IF NOT EXISTS qms_ai_pending_actions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id TEXT,
   user_id INTEGER NOT NULL,
@@ -15,9 +15,9 @@ CREATE TABLE IF NOT EXISTS ai_pending_actions (
   expires_at TIMESTAMPTZ NOT NULL,
   decided_at TIMESTAMPTZ
 );
-CREATE INDEX IF NOT EXISTS idx_ai_pending_actions_session_created ON ai_pending_actions(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_qms_ai_pending_actions_session_created ON qms_ai_pending_actions(session_id, created_at);
 
-CREATE TABLE IF NOT EXISTS ai_model_access (
+CREATE TABLE IF NOT EXISTS qms_ai_model_access (
   user_id INTEGER PRIMARY KEY,
   allowed_models TEXT[] NOT NULL,
   updated_by INTEGER,
