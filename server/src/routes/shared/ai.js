@@ -2,6 +2,9 @@ import { Router } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { createMessage } from '../../lib/aiModel.js';
 import crypto from 'crypto';
+import { catalogFor, selectModel } from './ai/models.js';
+import { WRITE_TOOLS, canRun, confirmAction, cancelAction, handleToolUse } from './ai/actions.js';
+import { tableMap, parsePageContext, contextBlock } from './ai/context.js';
 import db from '../../database-pg.js';
 import { logAudit } from '../../auditMiddleware.js';
 import { broadcast } from '../../websocket.js';
@@ -342,6 +345,9 @@ const AI_TOOLS = [
 // ctx: { userId, role, req } — req is used for proper GMP audit logging via logAudit().
 async function executeToolCall(toolName, toolInput, ctx = {}) {
   const { userId, role, req } = ctx;
+  if (Object.hasOwn(WRITE_TOOLS, toolName) && !canRun(role, toolName)) {
+    return { success: false, error: 'Your role does not permit this change' };
+  }
   if (toolName === 'update_record_field') {
     const { record_type, record_id, field, value } = toolInput;
 
@@ -1407,6 +1413,28 @@ This tool does NOT create the CAPA — it returns a draft with empty fields for 
 - Use markdown formatting (headers, bold, lists) in your responses — the chat renders it properly
 - Keep responses focused — 2-5 sentences for simple questions, more for complex topics`;
 
+router.get('/ai/models', async (req, res) => {
+  try { res.json(await catalogFor(db, req.session?.user)); }
+  catch (err) { res.status(500).json({ error: 'Unable to load model access' }); }
+});
+
+for (const decision of ['confirm', 'cancel']) {
+  router.post(`/ai/actions/:id/${decision}`, async (req, res) => {
+    const { id } = req.params;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return res.status(400).json({ error: 'Invalid action ID' });
+    }
+    try {
+      const result = decision === 'confirm'
+        ? await confirmAction(db, { id, req, execute: executeToolCall, audit: logAudit })
+        : await cancelAction(db, { id, userId: req.session?.user?.id });
+      res.json(result);
+    } catch (err) {
+      res.status(err.status || 500).json({ id, status: err.actionStatus, error: err.message });
+    }
+  });
+}
+
 router.post('/ai/chat', async (req, res) => {
   try {
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -1414,7 +1442,14 @@ router.post('/ai/chat', async (req, res) => {
       return res.status(503).json({ error: 'AI assistant not configured. ANTHROPIC_API_KEY is required.' });
     }
 
-    const { messages, context, chatSessionId } = req.body;
+    const { messages, chatSessionId, model, pageContext } = req.body;
+    let chosen, context;
+    try {
+      chosen = await selectModel(db, req.session?.user, model);
+      context = parsePageContext(pageContext);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'messages array is required' });
     }
@@ -1424,10 +1459,11 @@ router.post('/ai/chat', async (req, res) => {
     const sessionKey = chatSessionId || `${userId || 'anon'}-${crypto.randomUUID()}`;
 
     // Get or create conversation history
-    let session = chatSessions.get(sessionKey);
+    const memoryKey = `${userId}:${sessionKey}`;
+    let session = chatSessions.get(memoryKey);
     if (!session) {
       session = { messages: [], lastAccess: Date.now() };
-      chatSessions.set(sessionKey, session);
+      chatSessions.set(memoryKey, session);
     }
     session.lastAccess = Date.now();
 
@@ -1453,37 +1489,18 @@ router.post('/ai/chat', async (req, res) => {
     }
 
     // Build context-aware system prompt
-    let systemPrompt = JARVIS_SYSTEM_PROMPT;
+    let systemPrompt = JARVIS_SYSTEM_PROMPT + '\n\nAll write tools only propose changes. Nothing is saved until the user clicks Approve on the action card. Never describe a pending proposal as completed.';
     if (context) {
-      systemPrompt += `\n\n## Current Context\nThe user is currently on: ${context.page || 'unknown page'}`;
-      if (context.recordType) systemPrompt += `\nRecord type: ${context.recordType}`;
-      if (context.recordId) systemPrompt += `\nRecord ID: ${context.recordId}`;
+      systemPrompt += contextBlock(context);
 
       // Fetch actual record data from the database so Jarvis can see what the user is looking at
       if (context.recordType && context.recordId) {
-        const tableMap = {
-          'complaints': 'complaints',
-          'deviations': 'deviation_reports',
-          'capas': 'capas',
-          'batch-tests': 'batch_tests',
-          'suppliers': 'suppliers',
-          'environmental': 'environmental_samples',
-          'ccrs': 'ccrs',
-          'change-control': 'change_requests',
-          'equipment': 'equipment',
-          'recalls': 'recalls',
-          'sops': 'sops',
-          'work-orders': 'work_orders',
-          'daily-tasks': 'daily_tasks',
-          'pick-lists': 'pick_lists',
-          'inventory-counts': 'inventory_counts',
-        };
         const tableName = tableMap[context.recordType];
         if (tableName) {
           try {
             const record = await db.get(`SELECT * FROM ${tableName} WHERE id = $1`, [context.recordId]);
             if (record) {
-              systemPrompt += `\n\nThe user is currently viewing this record:\n${JSON.stringify(record, null, 2)}`;
+              systemPrompt += contextBlock({ record });
 
               // Fetch related records
               try {
@@ -1608,7 +1625,7 @@ router.post('/ai/chat', async (req, res) => {
                 } catch (e) { /* non-fatal */ }
 
                 if (Object.keys(relatedRecords).length > 0) {
-                  systemPrompt += `\n\n## Related Records\n${JSON.stringify(relatedRecords, null, 2)}`;
+                  systemPrompt += contextBlock({ relatedRecords });
                 }
               } catch (relErr) {
                 console.error('Failed to fetch related records for AI context:', relErr.message);
@@ -1618,62 +1635,39 @@ router.post('/ai/chat', async (req, res) => {
             console.error('Failed to fetch record data for AI context:', dbErr.message);
             // Non-fatal — continue without record data
           }
-        } else if (context.recordType && !context.recordId) {
-          // User is on a list page (e.g. /deviations) — fetch recent records summary
-          const listTableMap = {
-            'complaints': 'complaints',
-            'deviations': 'deviation_reports',
-            'capas': 'capas',
-            'batch-tests': 'batch_tests',
-            'suppliers': 'suppliers',
-            'environmental': 'environmental_samples',
-            'ccrs': 'ccrs',
-            'change-control': 'change_requests',
-            'equipment': 'equipment',
-            'recalls': 'recalls',
-            'sops': 'sops',
-            'work-orders': 'work_orders',
-            'daily-tasks': 'daily_tasks',
-            'pick-lists': 'pick_lists',
-            'inventory-counts': 'inventory_counts',
+        }
+      } else if (context.recordType && !context.recordId) {
+        const listTable = tableMap[context.recordType];
+        if (listTable) {
+          const titleColumnMap = {
+            'complaints': 'complaint_number',
+            'ccrs': 'ccr_number',
+            'equipment': 'name',
+            'suppliers': 'name',
+            'sops': 'title',
+            'batch-tests': 'batch_id',
+            'environmental': 'location',
+            'daily-tasks': 'task_name',
+            'pick-lists': 'order_number',
+            'inventory-counts': 'location',
           };
-          const listTable = listTableMap[context.recordType];
-          if (listTable) {
-            const titleColumnMap = {
-              'complaints': 'complaint_number',
-              'ccrs': 'ccr_number',
-              'equipment': 'name',
-              'suppliers': 'name',
-              'sops': 'title',
-              'batch-tests': 'batch_id',
-              'environmental': 'location',
-              'daily-tasks': 'task_name',
-              'pick-lists': 'order_number',
-              'inventory-counts': 'location',
-            };
-            const titleCol = titleColumnMap[context.recordType] || 'title';
-            try {
-              const records = await db.all(`SELECT id, ${titleCol} as title, status, created_at FROM ${listTable} ORDER BY created_at DESC LIMIT 15`);
-              if (records?.length) {
-                systemPrompt += `\n\nThe user is viewing the ${context.recordType} list. Recent records:\n${JSON.stringify(records, null, 2)}`;
-              }
-            } catch (dbErr) {
-              console.error('Failed to fetch list records for AI context:', dbErr.message);
+          const titleCol = titleColumnMap[context.recordType] || 'title';
+          try {
+            const records = await db.all(`SELECT id, ${titleCol} as title, status, created_at FROM ${listTable} ORDER BY created_at DESC LIMIT 15`);
+            if (records?.length) {
+              systemPrompt += contextBlock({ recordType: context.recordType, records });
             }
+          } catch (dbErr) {
+            console.error('Failed to fetch list records for AI context:', dbErr.message);
           }
         }
-      }
-
-      // Append form data if the client sent current form state
-      if (context && context.formData && Object.keys(context.formData).length > 0) {
-        systemPrompt += `\n\n## Current Form State (includes unsaved edits)\n${JSON.stringify(context.formData, null, 2)}`;
       }
     }
     const userName = req.session?.user?.display_name || req.session?.user?.username || 'Operator';
     systemPrompt += `\n\nThe current user is: ${userName} (role: ${req.session?.user?.role || 'unknown'})`;
 
     // Surface the current user's open CAPA action items so Jarvis can reference/update them
-    try {
+    if (context) try {
       const myTasks = await db.all(
         `SELECT ai.id, ai.title, ai.due_date, ai.status, ai.capa_id, c.capa_id AS capa_ref
          FROM capa_action_items ai JOIN capas c ON ai.capa_id = c.id
@@ -1682,7 +1676,7 @@ router.post('/ai/chat', async (req, res) => {
         [userName]
       );
       if (myTasks?.length) {
-        systemPrompt += `\n\n## ${userName}'s Open Tasks (assigned CAPA action items)\nThese are the current user's open tasks. You can update their status with update_action_item_status or add notes with add_action_item_note (reference them by action_item_id):\n${JSON.stringify(myTasks, null, 2)}`;
+        systemPrompt += contextBlock({ openTasks: myTasks });
       }
     } catch (e) { /* non-fatal */ }
 
@@ -1704,94 +1698,64 @@ router.post('/ai/chat', async (req, res) => {
     let conversationMessages = [...session.messages];
     let fullResponse = '';
     let toolsUsed = [];
+    const actions = [];
     let maxToolRounds = 3; // prevent infinite loops
     let aborted = false;
 
-    req.on('close', () => { aborted = true; });
+    res.on('close', () => { aborted = true; });
 
-    for (let round = 0; round < maxToolRounds; round++) {
-      if (aborted) break;
+    try {
+      for (let round = 0; round < maxToolRounds; round++) {
+        if (aborted) break;
+        await selectModel(db, req.session.user, chosen);
 
-      const response = await createMessage(client, {
-        max_tokens: 2048,
-        system: systemPrompt,
-        messages: conversationMessages,
-        ...toolsConfig,
-      }, 'claude-opus-4-6');
+        const response = await createMessage(client, {
+          max_tokens: 2048,
+          system: systemPrompt,
+          messages: conversationMessages,
+          ...toolsConfig,
+        }, 'claude-sonnet-5-5', { model: chosen });
 
-      // Process content blocks
-      let hasToolUse = false;
-      const assistantContent = [];
-
-      for (const block of response.content) {
-        if (block.type === 'text') {
-          fullResponse += block.text;
-          assistantContent.push(block);
-          res.write(`data: ${JSON.stringify({ type: 'text', text: block.text })}\n\n`, 'utf-8');
-        } else if (block.type === 'tool_use') {
-          hasToolUse = true;
-          assistantContent.push(block);
-
-          // Notify frontend that a tool is being executed
-          res.write(`data: ${JSON.stringify({ type: 'tool_start', tool: block.name, field: block.input?.field })}\n\n`, 'utf-8');
-
-          // Execute the tool
-          try {
-            const result = await executeToolCall(block.name, block.input, {
-              userId,
-              role: req.session?.user?.role,
-              req,
+        const toolResults = [];
+        for (const block of response.content) {
+          if (block.type === 'text') {
+            fullResponse += block.text;
+            res.write(`data: ${JSON.stringify({ type: 'text', text: block.text })}\n\n`, 'utf-8');
+          } else if (block.type === 'tool_use') {
+            const outcome = await handleToolUse(block, {
+              db, user: req.session.user, sessionId: sessionKey, req, execute: executeToolCall,
+              emit: event => res.write(`data: ${JSON.stringify(event)}\n\n`, 'utf-8'),
             });
-            toolsUsed.push({ tool: block.name, input: block.input, result });
-
-            // Send tool result notification to frontend
-            res.write(`data: ${JSON.stringify({ type: 'tool_result', tool: block.name, result })}\n\n`, 'utf-8');
-
-            // Add assistant message with tool use + tool result to conversation
-            conversationMessages.push({ role: 'assistant', content: assistantContent });
-            conversationMessages.push({
-              role: 'user',
-              content: [{
-                type: 'tool_result',
-                tool_use_id: block.id,
-                content: JSON.stringify(result),
-              }],
-            });
-          } catch (toolErr) {
-            console.error('Tool execution error:', toolErr.message);
-            const errorResult = { success: false, error: toolErr.message };
-            res.write(`data: ${JSON.stringify({ type: 'tool_result', tool: block.name, result: errorResult })}\n\n`, 'utf-8');
-
-            conversationMessages.push({ role: 'assistant', content: assistantContent });
-            conversationMessages.push({
-              role: 'user',
-              content: [{
-                type: 'tool_result',
-                tool_use_id: block.id,
-                content: JSON.stringify(errorResult),
-                is_error: true,
-              }],
-            });
+            if (outcome.action) actions.push(outcome.action);
+            toolsUsed.push({ tool: block.name, input: block.input, result: outcome.result });
+            toolResults.push({ type: 'tool_result', tool_use_id: block.id,
+              content: JSON.stringify(outcome.result), ...(outcome.isError ? { is_error: true } : {}) });
           }
         }
-      }
+        const hasToolUse = toolResults.length > 0;
+        if (hasToolUse) {
+          // One assistant turn and one result turn, including ALL parallel tool calls.
+          conversationMessages.push({ role: 'assistant', content: response.content });
+          conversationMessages.push({ role: 'user', content: toolResults });
+        }
 
-      // If no tool use, we're done
-      if (!hasToolUse) {
-        break;
+        // If no tool use, we're done
+        if (!hasToolUse) {
+          break;
+        }
       }
-    }
-
-    // Save assistant response to in-memory history (text only)
-    if (fullResponse) {
-      session.messages.push({ role: 'assistant', content: fullResponse });
-    }
-    // Persist assistant message to DB
-    if (userId && fullResponse) {
-      db.run(
-        'INSERT INTO chat_messages (user_id, session_id, role, content, context) VALUES (?, ?, ?, ?, ?)',
-        [userId, sessionKey, 'assistant', fullResponse, JSON.stringify(context || {})]
-      ).catch(dbErr => console.error('Failed to persist assistant chat message:', dbErr.message));
+    } finally {
+      // Save assistant response to in-memory history (text only)
+      if (fullResponse) {
+        session.messages.push({ role: 'assistant', content: fullResponse });
+      }
+      // Persist assistant message to DB
+      if (userId && (fullResponse || actions.length)) {
+        await db.run(
+          'INSERT INTO chat_messages (user_id, session_id, role, content, context) VALUES (?, ?, ?, ?, ?)',
+          [userId, sessionKey, 'assistant', fullResponse, JSON.stringify({ actions })]
+        ).catch(dbErr => console.error('Failed to persist assistant chat message:', dbErr.message));
+      }
     }
     res.write(`data: ${JSON.stringify({ type: 'done', chatSessionId: sessionKey, toolsUsed: toolsUsed.length > 0 ? toolsUsed : undefined })}\n\n`, 'utf-8');
     res.end();
@@ -1821,16 +1785,21 @@ router.get('/ai/chat/history', async (req, res) => {
 
     // Load all messages from that session (max 100)
     const rows = await db.all(
-      'SELECT role, content, created_at FROM chat_messages WHERE user_id = ? AND session_id = ? ORDER BY created_at ASC LIMIT 100',
+      'SELECT role, content, context, created_at FROM chat_messages WHERE user_id = ? AND session_id = ? ORDER BY created_at ASC LIMIT 100',
       [userId, latest.session_id]
     );
 
     // Re-hydrate the in-memory session so streaming continues to work
     const sessionMessages = rows.map(r => ({ role: r.role, content: r.content }));
-    chatSessions.set(latest.session_id, { messages: sessionMessages, lastAccess: Date.now() });
+    chatSessions.set(`${userId}:${latest.session_id}`, { messages: sessionMessages, lastAccess: Date.now() });
 
+    const actions = await db.all(`SELECT id, tool_name AS tool, summary, expires_at AS "expiresAt",
+      CASE WHEN status='pending' AND expires_at <= NOW() THEN 'expired' ELSE status END AS status, result
+      FROM ai_pending_actions WHERE user_id=$1 AND session_id=$2`, [userId, latest.session_id]);
+    const byId = new Map(actions.map(action => [action.id, action]));
     res.json({
-      messages: rows.map(r => ({ role: r.role, content: r.content, created_at: r.created_at })),
+      messages: rows.map(r => ({ role: r.role, content: r.content, created_at: r.created_at,
+        actions: (r.context?.actions || []).map(action => byId.get(action.id)).filter(Boolean) })),
       chatSessionId: latest.session_id,
     });
   } catch (err) {
@@ -1843,7 +1812,7 @@ router.get('/ai/chat/history', async (req, res) => {
 router.delete('/ai/chat', async (req, res) => {
   const { chatSessionId } = req.body || {};
   if (chatSessionId) {
-    chatSessions.delete(chatSessionId);
+    chatSessions.delete(`${req.session?.user?.id}:${chatSessionId}`);
     // Clear from DB too
     const userId = req.session?.user?.id;
     if (userId) {

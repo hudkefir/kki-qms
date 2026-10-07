@@ -4,8 +4,8 @@
 // QMS_AI_FALLBACK_MODEL (Haiku) so the QMS AI keeps working.
 const FALLBACK_STATUSES = new Set([429, 503, 529]);
 
-export async function createMessage(client, params, defaultModel) {
-  const primary = process.env.QMS_AI_MODEL || defaultModel;
+export async function createMessage(client, params, defaultModel, { model } = {}) {
+  const primary = model || process.env.QMS_AI_MODEL || defaultModel;
   const fallback = process.env.QMS_AI_FALLBACK_MODEL;
   try {
     return await client.messages.create({ ...params, model: primary }, fallback ? { maxRetries: 0 } : undefined);
