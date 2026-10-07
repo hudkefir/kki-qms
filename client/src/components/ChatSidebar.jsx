@@ -1,9 +1,10 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Trash2, Bot, User } from 'lucide-react';
-import { useLocation, useParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { API_BASE_URL } from '../config';
+import { chatPayload } from './pageContext.js';
 
 export default function ChatSidebar() {
   const [isOpen, setIsOpen] = useState(false);
@@ -14,7 +15,21 @@ export default function ChatSidebar() {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const location = useLocation();
-  const params = useParams();
+  const [sharePage, setSharePage] = useState(false);
+  const [models, setModels] = useState([]);
+  const [model, setModel] = useState('');
+  const [modelError, setModelError] = useState('');
+  const actionRequests = useRef(new Set());
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/ai/models`, { credentials: 'include' })
+      .then(async res => {
+        if (!res.ok) throw new Error('Unable to load model access');
+        const data = await res.json();
+        setModels(data.models || []);
+        setModel(data.default || '');
+      }).catch(err => setModelError(err.message));
+  }, []);
 
   // Load chat history on mount
   useEffect(() => {
@@ -24,7 +39,7 @@ export default function ChatSidebar() {
         if (res.ok) {
           const data = await res.json();
           if (data.messages?.length) {
-            setMessages(data.messages.map(m => ({ role: m.role, content: m.content })));
+            setMessages(data.messages.map(m => ({ role: m.role, content: m.content, actions: m.actions || [] })));
             setChatSessionId(data.chatSessionId);
           }
         }
@@ -51,6 +66,7 @@ export default function ChatSidebar() {
   const prevPathRef = useRef(location.pathname);
 
   useEffect(() => {
+    setSharePage(false);
     if (prevPathRef.current !== location.pathname && messages.length > 0) {
       setContextChanged(true);
       const timer = setTimeout(() => setContextChanged(false), 5000);
@@ -60,43 +76,27 @@ export default function ChatSidebar() {
     prevPathRef.current = location.pathname;
   }, [location.pathname]);
 
-  // Build context from current page
-  const getContext = useCallback(() => {
-    const path = location.pathname;
-    const segments = path.split('/').filter(Boolean);
-    const context = { page: path };
-
-    if (segments.length >= 2) {
-      context.recordType = segments[0];
-      context.recordId = segments[1];
-    } else if (segments.length === 1) {
-      context.recordType = segments[0];
+  const decideAction = async (action, decision) => {
+    if (actionRequests.current.has(action.id)) return;
+    actionRequests.current.add(action.id);
+    const update = patch => setMessages(prev => prev.map(message => ({ ...message,
+      actions: message.actions?.map(a => a.id === action.id ? { ...a, ...patch } : a),
+    })));
+    update({ busy: true, error: null });
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/ai/actions/${action.id}/${decision}`, {
+        method: 'POST', credentials: 'include',
+      });
+      const data = await response.json();
+      update({ status: data.status || (response.ok ? 'done' : 'failed'), result: data.result,
+        error: data.error, busy: false });
+    } catch {
+      // A lost response may follow a committed write. Never automatically retry.
+      update({ status: 'unknown', error: 'Unable to verify the outcome. Reload chat and check the record.', busy: false });
+    } finally {
+      actionRequests.current.delete(action.id);
     }
-
-    // Scrape current form data (captures unsaved edits)
-    const formData = {};
-    document.querySelectorAll('input[name], textarea[name], select[name]').forEach(el => {
-      const name = el.name;
-      if (el.type === 'checkbox') {
-        formData[name] = el.checked;
-      } else if (el.type === 'radio') {
-        if (el.checked) formData[name] = el.value;
-      } else if (el.value) {
-        formData[name] = el.value;
-      }
-    });
-    document.querySelectorAll('[data-field]').forEach(el => {
-      const name = el.getAttribute('data-field');
-      const val = el.textContent || el.innerText || el.value || '';
-      if (val.trim()) formData[name] = val.trim();
-    });
-
-    if (Object.keys(formData).length > 0) {
-      context.formData = formData;
-    }
-
-    return context;
-  }, [location.pathname]);
+  };
 
   const sendMessage = async (e) => {
     e.preventDefault();
@@ -109,7 +109,6 @@ export default function ChatSidebar() {
     setIsLoading(true);
 
     // Add a placeholder for the assistant response
-    const assistantIdx = messages.length + 1;
     setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
     try {
@@ -118,11 +117,10 @@ export default function ChatSidebar() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({
-          messages: allMessages,
-          context: getContext(),
-          chatSessionId,
-        }),
+        body: JSON.stringify(chatPayload({
+          messages: allMessages, chatSessionId, model, sharePage,
+          pathname: location.pathname, title: document.title,
+        })),
       });
 
       if (!response.ok) {
@@ -147,82 +145,35 @@ export default function ChatSidebar() {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           const jsonStr = line.slice(6);
-          try {
-            const event = JSON.parse(jsonStr);
-            if (event.type === 'text') {
-              fullText += event.text;
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { role: 'assistant', content: fullText };
-                return updated;
-              });
-            } else if (event.type === 'tool_start') {
-              // Show inline notification based on tool type
-              if (event.tool === 'create_action_item') {
-                fullText += `\n\n> 📋 *Creating action item...*\n\n`;
-              } else if (event.tool === 'update_action_item_status') {
-                fullText += `\n\n> 🔄 *Updating task status...*\n\n`;
-              } else {
-                const fieldLabel = (event.field || '').replace(/_/g, ' ');
-                fullText += `\n\n> ✏️ *Updating ${fieldLabel}...*\n\n`;
-              }
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { role: 'assistant', content: fullText };
-                return updated;
-              });
-            } else if (event.type === 'tool_result') {
-              if (event.tool === 'create_action_item') {
-                if (event.result?.success) {
-                  fullText = fullText.replace(
-                    /> 📋 \*Creating action item\.\.\.\*\n\n$/,
-                    `> ✅ **Task created:** "${event.result.title}" → ${event.result.assigned_to}${event.result.due_date && event.result.due_date !== 'not set' ? ` (due ${event.result.due_date})` : ''}\n\n`
-                  );
-                } else {
-                  fullText = fullText.replace(
-                    /> 📋 \*Creating action item\.\.\.\*\n\n$/,
-                    `> ❌ **Task creation failed:** ${event.result?.error || 'Unknown error'}\n\n`
-                  );
-                }
-              } else if (event.tool === 'update_action_item_status') {
-                if (event.result?.success) {
-                  const statusEmoji = event.result.new_status === 'completed' ? '✅' : event.result.new_status === 'in_progress' ? '🔵' : '🟡';
-                  fullText = fullText.replace(
-                    /> 🔄 \*Updating task status\.\.\.\*\n\n$/,
-                    `> ${statusEmoji} **"${event.result.title}"** → ${event.result.new_status.replace('_', ' ')} — refresh to see changes.\n\n`
-                  );
-                } else {
-                  fullText = fullText.replace(
-                    /> 🔄 \*Updating task status\.\.\.\*\n\n$/,
-                    `> ❌ **Task update failed:** ${event.result?.error || 'Unknown error'}\n\n`
-                  );
-                }
-              } else if (event.result?.success) {
-                const fieldLabel = (event.result.field || '').replace(/_/g, ' ');
-                fullText = fullText.replace(
-                  /> ✏️ \*Updating.*?\.\.\.\*\n\n$/,
-                  `> ✅ **Updated ${fieldLabel}** — refresh the page to see changes.\n\n`
-                );
-              } else {
-                fullText = fullText.replace(
-                  /> ✏️ \*Updating.*?\.\.\.\*\n\n$/,
-                  `> ❌ **Edit failed:** ${event.result?.error || 'Unknown error'}\n\n`
-                );
-              }
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { role: 'assistant', content: fullText };
-                return updated;
-              });
-            } else if (event.type === 'done') {
-              if (event.chatSessionId) {
-                setChatSessionId(event.chatSessionId);
-              }
-            } else if (event.type === 'error') {
-              throw new Error(event.error);
+          let event;
+          try { event = JSON.parse(jsonStr); } catch { continue; }
+          if (event.type === 'text') {
+            fullText += event.text;
+            setMessages(prev => {
+              const updated = [...prev];
+              updated[updated.length - 1] = { ...updated[updated.length - 1], role: 'assistant', content: fullText };
+              return updated;
+            });
+          } else if (event.type === 'action_proposed') {
+            setMessages(prev => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              updated[updated.length - 1] = { ...last, actions: [...(last.actions || []), event.action] };
+              return updated;
+            });
+          } else if (event.type === 'tool_result' && event.result?.success === false) {
+            fullText += `\n\nTool could not complete: ${event.result.error}\n`;
+            setMessages(prev => {
+              const updated = [...prev];
+              updated[updated.length - 1] = { ...updated[updated.length - 1], content: fullText };
+              return updated;
+            });
+          } else if (event.type === 'done') {
+            if (event.chatSessionId) {
+              setChatSessionId(event.chatSessionId);
             }
-          } catch (parseErr) {
-            // Skip malformed JSON chunks
+          } else if (event.type === 'error') {
+            throw new Error(event.error);
           }
         }
       }
@@ -236,6 +187,7 @@ export default function ChatSidebar() {
       setMessages(prev => {
         const updated = [...prev];
         updated[updated.length - 1] = {
+          ...updated[updated.length - 1],
           role: 'assistant',
           content: `Error: ${err.message}. Please try again.`,
           isError: true,
@@ -294,6 +246,7 @@ export default function ChatSidebar() {
           </div>
           <button
             onClick={clearChat}
+            disabled={isLoading}
             className="p-1 hover:bg-navy-600 rounded transition-colors"
             title="Clear conversation"
           >
@@ -301,25 +254,26 @@ export default function ChatSidebar() {
           </button>
         </div>
 
-        {/* Context indicator */}
-        {(() => {
-          const path = location.pathname;
-          const segments = path.split('/').filter(Boolean);
-          if (segments.length >= 2) {
-            return (
-              <div className="px-4 py-1.5 bg-blue-50 border-b border-blue-100 text-[11px] text-blue-600 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
-                Jarvis can see the {segments[0].replace(/-/g, ' ')} record you're viewing (live data)
-              </div>
-            );
-          }
-          return null;
-        })()}
+        <div className="px-4 py-2 border-b border-gray-200 text-xs space-y-2">
+          {models.length > 1 && (
+            <label className="flex items-center gap-2">Model
+              <select aria-label="AI model" value={model} onChange={e => setModel(e.target.value)} disabled={isLoading} className="border rounded p-1">
+                {models.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </select>
+            </label>
+          )}
+          {modelError && <p className="text-red-600">{modelError}</p>}
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={sharePage} onChange={e => setSharePage(e.target.checked)} />
+            Share this page
+          </label>
+          {sharePage && <p className="text-gray-500">Share saved record context with your next message.</p>}
+        </div>
 
         {/* Context changed banner */}
         {contextChanged && (
           <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-700 flex items-center justify-between">
-            <span>You navigated to a new page. Jarvis will use the updated context.</span>
+            <span>Page sharing is off after navigation. Tick Share this page to attach it.</span>
             <button onClick={() => setContextChanged(false)} className="text-amber-500 hover:text-amber-700">
               <X className="w-3.5 h-3.5" />
             </button>
@@ -391,6 +345,24 @@ export default function ChatSidebar() {
                     <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                   </span>
                 ) : '')}
+                {msg.actions?.map(action => {
+                  const status = action.status === 'pending' && new Date(action.expiresAt) <= new Date() ? 'expired' : action.status;
+                  return (
+                    <div key={action.id} className="mt-2 p-2 rounded border border-amber-300 bg-amber-50 text-gray-800">
+                      <p className="font-medium">{action.summary}</p>
+                      <p className="text-xs my-1">{status === 'pending' ? 'Awaiting your approval — nothing has been changed.' : status}</p>
+                      {action.error && <p className="text-xs text-red-700">{action.error}</p>}
+                      {action.result?.message && <p className="text-xs">{action.result.message}</p>}
+                      {action.result?.error && <p className="text-xs text-red-700">{action.result.error}</p>}
+                      <div className="flex gap-2 mt-1">
+                        <button type="button" disabled={status !== 'pending' || action.busy || isLoading}
+                          onClick={() => decideAction(action, 'confirm')} className="px-2 py-1 bg-navy-600 text-white rounded disabled:opacity-40">Approve</button>
+                        <button type="button" disabled={status !== 'pending' || action.busy || isLoading}
+                          onClick={() => decideAction(action, 'cancel')} className="px-2 py-1 border rounded disabled:opacity-40">Cancel</button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
               {msg.role === 'user' && (
                 <div className="w-6 h-6 rounded-full bg-navy-600 flex items-center justify-center flex-shrink-0 mt-0.5">
